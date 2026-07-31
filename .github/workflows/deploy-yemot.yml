@@ -1,0 +1,31 @@
+name: Deploy Yemot IVR
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type DEPLOY to upload the IVR configuration'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-yemot-ivr
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ inputs.confirmation == 'DEPLOY' }}
+    runs-on: ubuntu-latest
+    environment: yemot-production
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+
+      - name: Deploy configuration
+        env:
+          YEMOT_TOKEN: ${{ secrets.YEMOT_TOKEN }}
+        run: bash scripts/deploy-yemot.sh
