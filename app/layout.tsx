@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ראש בראש | מערכת סקרים",
-  description: "יצירה וניהול של סקרים באתר ראש בראש.",
+  title: "ראש בראש | מצעד 25 שנות מוזיקה",
+  description: "בוחרים את האלבומים, השירים והזמרים הגדולים של המוזיקה היהודית.",
   icons: {
     icon: "favicon.svg",
     shortcut: "favicon.svg",

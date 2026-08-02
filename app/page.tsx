@@ -2,218 +2,117 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type SurveyStatus = "published" | "draft";
-type SurveyType = "single" | "multiple" | "ranking";
+type Album = { id: string; title: string; artistName: string; coverUrl?: string | null };
+type Song = { id: string; albumId: string; title: string; audioUrl?: string | null };
+type Artist = { id: string; name: string; imageUrl?: string | null };
+type Catalog = { albums: Album[]; songs: Song[]; artists: Artist[]; rules: { albums: number; artistsMin: number; artistsMax: number } };
 
-type Survey = {
-  id: string;
-  title: string;
-  status: SurveyStatus;
-  votesCount: number;
-  question: string;
-  options: string[];
-  channels: string[];
-  type: SurveyType;
-  createdAt: string;
-};
-
-const STORAGE_KEY = "rosh-berosh-surveys-v1";
-
-function Icon({ children }: { children: React.ReactNode }) {
-  return <span className="nav-icon" aria-hidden="true">{children}</span>;
-}
-
-function createId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+const steps = ["אלבומים", "שירים", "זמרים", "אישור"];
 
 export default function Home() {
-  const [creatorOpen, setCreatorOpen] = useState(false);
-  const [surveys, setSurveys] = useState<Survey[]>([]);
-  const [storageReady, setStorageReady] = useState(false);
-  const [title, setTitle] = useState("");
-  const [question, setQuestion] = useState("");
-  const [options, setOptions] = useState(["", ""]);
-  const [surveyType, setSurveyType] = useState<SurveyType>("single");
-  const [publishNow, setPublishNow] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [step, setStep] = useState(0);
+  const [albums, setAlbums] = useState<string[]>([]);
+  const [songs, setSongs] = useState<Record<string, string>>({});
+  const [artists, setArtists] = useState<string[]>([]);
+  const [voterKey, setVoterKey] = useState("");
   const [error, setError] = useState("");
-
-  const totalVotes = useMemo(
-    () => surveys.reduce((sum, survey) => sum + Number(survey.votesCount || 0), 0),
-    [surveys],
-  );
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as unknown;
-        if (Array.isArray(parsed)) setSurveys(parsed as Survey[]);
-      }
-    } catch {
-      // Corrupted local data should not prevent the dashboard from loading.
-    } finally {
-      setStorageReady(true);
-    }
+    fetch("/api/catalog", { cache: "no-store" })
+      .then(async (response) => { if (!response.ok) throw new Error(); return response.json(); })
+      .then(setCatalog)
+      .catch(() => setError("לא הצלחנו לטעון את רשימת המצעד. נסו שוב מאוחר יותר."));
   }, []);
 
-  useEffect(() => {
-    if (!storageReady) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(surveys));
-  }, [storageReady, surveys]);
+  const selectedAlbums = useMemo(() => catalog?.albums.filter((album) => albums.includes(album.id)) ?? [], [catalog, albums]);
+  const selectedArtists = useMemo(() => catalog?.artists.filter((artist) => artists.includes(artist.id)) ?? [], [catalog, artists]);
+  const songsByAlbum = (albumId: string) => catalog?.songs.filter((song) => song.albumId === albumId) ?? [];
+  const songName = (albumId: string) => catalog?.songs.find((song) => song.id === songs[albumId])?.title ?? "לא נבחר";
 
-  const resetCreator = () => {
-    setTitle("");
-    setQuestion("");
-    setOptions(["", ""]);
-    setSurveyType("single");
-    setPublishNow(false);
+  const toggleAlbum = (id: string) => {
     setError("");
+    if (albums.includes(id)) { setAlbums(albums.filter((item) => item !== id)); setSongs((current) => { const next = { ...current }; delete next[id]; return next; }); return; }
+    if (albums.length >= 5) { setError("אפשר לבחור בדיוק חמישה אלבומים."); return; }
+    setAlbums([...albums, id]);
   };
 
-  const closeCreator = () => {
-    setCreatorOpen(false);
-    resetCreator();
-  };
-
-  const createSurvey = () => {
-    setBusy(true);
+  const toggleArtist = (id: string) => {
     setError("");
-
-    const cleanTitle = title.trim();
-    const cleanQuestion = question.trim();
-    const cleanOptions = options.map((option) => option.trim()).filter(Boolean);
-
-    if (!cleanTitle || !cleanQuestion || cleanOptions.length < 2) {
-      setError("יש למלא שם, שאלה ולפחות שתי תשובות.");
-      setBusy(false);
-      return;
-    }
-
-    const survey: Survey = {
-      id: createId(),
-      title: cleanTitle,
-      question: cleanQuestion,
-      options: cleanOptions,
-      type: surveyType,
-      status: publishNow ? "published" : "draft",
-      channels: ["site"],
-      votesCount: 0,
-      createdAt: new Date().toISOString(),
-    };
-
-    setSurveys((current) => [survey, ...current]);
-    setBusy(false);
-    setCreatorOpen(false);
-    resetCreator();
+    if (artists.includes(id)) { setArtists(artists.filter((item) => item !== id)); return; }
+    if (artists.length >= 3) { setError("אפשר לבחור עד שלושה זמרים."); return; }
+    setArtists([...artists, id]);
   };
+
+  const next = () => {
+    setError("");
+    if (step === 0 && albums.length !== 5) return setError("כדי להמשיך יש לבחור בדיוק חמישה אלבומים.");
+    if (step === 1 && albums.some((id) => !songs[id])) return setError("יש לבחור שיר אחד מכל אלבום.");
+    if (step === 2 && (artists.length < 1 || artists.length > 3)) return setError("יש לבחור בין זמר אחד לשלושה.");
+    setStep((current) => Math.min(3, current + 1));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const submit = async () => {
+    if (!voterKey.trim()) return setError("יש להזין מספר טלפון או כתובת אימייל לצורך מניעת הצבעה כפולה.");
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ voterKey, albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site" }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setDone(true);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "שמירת ההצבעה נכשלה."); }
+    finally { setBusy(false); }
+  };
+
+  if (done) return <main className="voting-shell"><section className="success-card"><span>✓</span><p className="kicker">ההצבעה נקלטה</p><h1>תודה שהשתתפתם!</h1><p>הבחירות שלכם נשמרו בהצלחה וישוקללו בתוצאות המצעד.</p></section></main>;
 
   return (
-    <main className="app-shell" dir="rtl">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark"><span>ר</span><i /></div>
-          <div><strong>ראש בראש</strong><small>מערכת סקרים</small></div>
-        </div>
+    <main className="voting-shell" dir="rtl">
+      <header className="vote-header">
+        <div className="logo-mark">ר</div><div><strong>ראש בראש</strong><small>מצעד 25 שנות מוזיקה</small></div>
+      </header>
 
-        <nav aria-label="ניווט ראשי">
-          <a className="active" href="#dashboard"><Icon>⌂</Icon><span>לוח בקרה</span></a>
-          <a href="#surveys"><Icon>◫</Icon><span>הסקרים שלי</span><b>{surveys.length}</b></a>
-          <a href="#results"><Icon>⌁</Icon><span>תוצאות ונתונים</span></a>
-          <a href="#channels"><Icon>◉</Icon><span>ערוצי פרסום</span></a>
-          <a href="#settings"><Icon>⚙</Icon><span>הגדרות</span></a>
-        </nav>
-
-        <div className="sidebar-status">
-          <span className="pulse-dot" />
-          <div><strong>GitHub Pages</strong><small>פרסום ציבורי פעיל</small></div>
-          <span className="chevron">‹</span>
-        </div>
-        <div className="profile"><div className="avatar">ש״ל</div><div><strong>שמואל ליווי</strong><small>מנהל ראשי</small></div><button aria-label="אפשרויות משתמש">⋮</button></div>
-      </aside>
-
-      <section className="workspace" id="dashboard">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow"><span /> מרכז השליטה</p>
-            <h1>שלום, שמואל</h1>
-            <p>כל הסקרים והתוצאות — במקום אחד.</p>
-          </div>
-          <div className="top-actions">
-            <button className="icon-button" aria-label="התראות">♢<span /></button>
-            <button className="create-button" onClick={() => setCreatorOpen(true)}><b>＋</b> סקר חדש</button>
-          </div>
-        </header>
-
-        <section className="metrics" aria-label="נתוני המערכת">
-          <article><div className="metric-icon purple">◫</div><div><span>סקרים פעילים</span><strong>{surveys.filter((item) => item.status === "published").length}</strong><small className="good">מתעדכן מיד</small></div></article>
-          <article><div className="metric-icon cyan">◉</div><div><span>סה״כ הצבעות</span><strong>{totalVotes.toLocaleString("he-IL")}</strong><small className="good">נתוני האתר</small></div></article>
-          <article><div className="metric-icon pink">⌁</div><div><span>כל הסקרים</span><strong>{surveys.length}</strong><small>כולל טיוטות</small></div></article>
-          <article><div className="metric-icon gold">◈</div><div><span>שמירה מקומית</span><strong>פעילה</strong><small>נשמר בדפדפן הזה</small></div></article>
-        </section>
-
-        <section className="surveys-panel" id="surveys">
-          <div className="panel-head">
-            <div><h2>הסקרים האחרונים</h2><p>ניהול ועריכה מתוך הדפדפן</p></div>
-            <button type="button">הצג הכל <span>←</span></button>
-          </div>
-          <div className="survey-list">
-            {surveys.length === 0 && <div className="empty-state"><b>עדיין אין סקרים</b><span>לחץ על „סקר חדש” והסקר הראשון יופיע כאן.</span></div>}
-            {surveys.map((survey, index) => (
-              <article className="survey-row" key={survey.id} style={{ "--delay": `${index * 70}ms` } as React.CSSProperties}>
-                <div className={`survey-symbol ${["violet", "cyan", "pink"][index % 3]}`}>♫</div>
-                <div className="survey-title"><strong>{survey.title}</strong><span>שאלה אחת · {survey.question}</span></div>
-                <div className="channel-badges"><span>אתר</span></div>
-                <div className="votes"><strong>{Number(survey.votesCount || 0).toLocaleString("he-IL")}</strong><span>הצבעות</span></div>
-                <span className={`status ${survey.status === "published" ? "live" : "draft"}`}>{survey.status === "published" ? "פעיל" : "טיוטה"}</span>
-                <button className="more" aria-label={`פעולות עבור ${survey.title}`}>•••</button>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="quick-strip">
-          <div><span className="live-dot" /><strong>האתר פועל</strong><small>כל שינוי נשמר אוטומטית במכשיר הזה</small></div>
-          <div className="wave"><i /><i /><i /><i /><i /><i /><i /><i /><i /></div>
-          <button onClick={() => setCreatorOpen(true)}>יצירת סקר מהיר</button>
-        </section>
+      <section className="hero">
+        <p className="kicker">הקול שלכם קובע</p>
+        <h1>בוחרים את הגדולים<br />של המוזיקה היהודית</h1>
+        <p>בחרו חמישה אלבומים, שיר אהוב מכל אלבום ועד שלושה זמרים.</p>
       </section>
 
-      {creatorOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={closeCreator}>
-          <section className="creator-modal" role="dialog" aria-modal="true" aria-labelledby="creator-title" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="modal-close" onClick={closeCreator} aria-label="סגירה">×</button>
-            <p className="eyebrow"><span /> סקר חדש</p>
-            <h2 id="creator-title">מה תרצה לשאול?</h2>
-            <p>מתחילים בשם ובוחרים את סוג ההצבעה. תמיד אפשר ליצור סקר נוסף.</p>
-            <label>שם הסקר<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="לדוגמה: מצעד המוזיקה השנתי" /></label>
-            <label>השאלה<input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="לדוגמה: מי הוא זמר השנה?" /></label>
-            <div className="type-grid">
-              <button type="button" className={surveyType === "single" ? "selected" : ""} onClick={() => setSurveyType("single")}><b>◉</b><strong>בחירה אחת</strong><span>תשובה אחת מתוך הרשימה</span></button>
-              <button type="button" className={surveyType === "multiple" ? "selected" : ""} onClick={() => setSurveyType("multiple")}><b>☷</b><strong>בחירה מרובה</strong><span>כמה תשובות באותה שאלה</span></button>
-              <button type="button" className={surveyType === "ranking" ? "selected" : ""} onClick={() => setSurveyType("ranking")}><b>★</b><strong>דירוג</strong><span>סידור מועמדים לפי מקום</span></button>
-            </div>
-            <div className="options-editor">
-              <strong>אפשרויות תשובה</strong>
-              {options.map((option, index) => (
-                <div key={index}>
-                  <span>{index + 1}</span>
-                  <input value={option} onChange={(event) => setOptions(options.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`אפשרות ${index + 1}`} />
-                  {options.length > 2 && <button type="button" onClick={() => setOptions(options.filter((_, itemIndex) => itemIndex !== index))}>×</button>}
-                </div>
-              ))}
-              <button type="button" className="add-option" onClick={() => setOptions([...options, ""])}>＋ הוסף אפשרות</button>
-            </div>
-            <label className="publish-toggle"><input type="checkbox" checked={publishNow} onChange={(event) => setPublishNow(event.target.checked)} /><span /><div><strong>להציג כפעיל</strong><small>הסקר יופיע ברשימה כסקר פעיל</small></div></label>
-            {error && <p className="form-error">{error}</p>}
-            <div className="modal-actions"><button className="secondary" onClick={closeCreator}>ביטול</button><button className="primary" disabled={busy} onClick={createSurvey}>{busy ? "שומר..." : "שמור את הסקר"} <span>←</span></button></div>
-          </section>
-        </div>
-      )}
+      <ol className="stepper" aria-label="שלבי ההצבעה">
+        {steps.map((label, index) => <li key={label} className={index === step ? "current" : index < step ? "complete" : ""}><b>{index < step ? "✓" : index + 1}</b><span>{label}</span></li>)}
+      </ol>
+
+      <section className="vote-card">
+        {!catalog && !error && <div className="loading">טוענים את רשימת המצעד…</div>}
+        {catalog && catalog.albums.length === 0 && <div className="empty-catalog"><h2>המצעד בהכנה</h2><p>רשימת האלבומים, השירים והזמרים תעלה בקרוב.</p></div>}
+
+        {catalog && catalog.albums.length > 0 && step === 0 && <>
+          <div className="section-title"><div><p className="kicker">שלב ראשון</p><h2>בחרו 5 אלבומים</h2></div><strong>{albums.length}/5</strong></div>
+          <div className="album-grid">{catalog.albums.map((album) => <button type="button" key={album.id} className={`choice-card ${albums.includes(album.id) ? "selected" : ""}`} onClick={() => toggleAlbum(album.id)}>{album.coverUrl ? <img src={album.coverUrl} alt="" /> : <span className="cover-fallback">♫</span>}<b>{album.title}</b><small>{album.artistName}</small><i>{albums.includes(album.id) ? "✓" : "+"}</i></button>)}</div>
+        </>}
+
+        {catalog && step === 1 && <>
+          <div className="section-title"><div><p className="kicker">שלב שני</p><h2>בחרו שיר מכל אלבום</h2></div><strong>{Object.keys(songs).filter((id) => albums.includes(id)).length}/5</strong></div>
+          <div className="song-groups">{selectedAlbums.map((album) => <fieldset key={album.id}><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <label key={song.id} className={songs[album.id] === song.id ? "selected" : ""}><input type="radio" name={`album-${album.id}`} checked={songs[album.id] === song.id} onChange={() => setSongs({ ...songs, [album.id]: song.id })} /><span>{song.title}</span>{song.audioUrl && <audio controls preload="none" src={song.audioUrl} />}</label>)}</fieldset>)}</div>
+        </>}
+
+        {catalog && step === 2 && <>
+          <div className="section-title"><div><p className="kicker">שלב שלישי</p><h2>בחרו עד 3 זמרים</h2></div><strong>{artists.length}/3</strong></div>
+          <div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" /> : <span>{artist.name.slice(0, 1)}</span>}<b>{artist.name}</b><i>{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div>
+        </>}
+
+        {catalog && step === 3 && <>
+          <div className="section-title"><div><p className="kicker">כמעט סיימנו</p><h2>אישור ההצבעה</h2></div></div>
+          <div className="summary"><h3>האלבומים והשירים שבחרתם</h3>{selectedAlbums.map((album) => <div key={album.id}><b>{album.title}</b><span>{songName(album.id)}</span></div>)}<h3>הזמרים שבחרתם</h3><p>{selectedArtists.map((artist) => artist.name).join(" · ")}</p></div>
+          <label className="identity-field">מספר טלפון או אימייל<input value={voterKey} onChange={(event) => setVoterKey(event.target.value)} placeholder="למניעת הצבעה כפולה" /><small>הפרט משמש כמזהה הצבעה בלבד. בהמשך יתווסף אימות בקוד חד־פעמי.</small></label>
+        </>}
+
+        {error && <p className="vote-error">{error}</p>}
+        {catalog && catalog.albums.length > 0 && <footer className="vote-actions">{step > 0 && <button className="back" onClick={() => { setError(""); setStep(step - 1); }}>חזרה</button>}<button className="continue" disabled={busy} onClick={step === 3 ? submit : next}>{busy ? "שומרים…" : step === 3 ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
+      </section>
     </main>
   );
 }

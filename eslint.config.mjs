@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "ivr-service/**",
     "next-env.d.ts",
   ]),
 ]);

@@ -1,27 +1,51 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
-export const surveys = sqliteTable("surveys", {
+export const albums = sqliteTable("albums", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
-  description: text("description").notNull().default(""),
-  type: text("type").notNull().default("single"),
-  status: text("status").notNull().default("draft"),
-  question: text("question").notNull(),
-  optionsJson: text("options_json").notNull(),
-  channelsJson: text("channels_json").notNull().default('["site"]'),
-  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
-}, (table) => [index("surveys_status_idx").on(table.status)]);
+  artistName: text("artist_name").notNull(),
+  coverUrl: text("cover_url"),
+  position: integer("position").notNull().default(0),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+});
 
-export const votes = sqliteTable("votes", {
+export const songs = sqliteTable("songs", {
   id: text("id").primaryKey(),
-  surveyId: text("survey_id").notNull().references(() => surveys.id, { onDelete: "cascade" }),
+  albumId: text("album_id").notNull().references(() => albums.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  audioUrl: text("audio_url"),
+  position: integer("position").notNull().default(0),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+}, (table) => [index("songs_album_idx").on(table.albumId)]);
+
+export const artists = sqliteTable("artists", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  imageUrl: text("image_url"),
+  position: integer("position").notNull().default(0),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+});
+
+export const ballots = sqliteTable("ballots", {
+  id: text("id").primaryKey(),
   voterKey: text("voter_key").notNull(),
-  answersJson: text("answers_json").notNull(),
   channel: text("channel").notNull().default("site"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
-}, (table) => [
-  uniqueIndex("votes_survey_voter_unique").on(table.surveyId, table.voterKey),
-  index("votes_survey_idx").on(table.surveyId),
-]);
+}, (table) => [uniqueIndex("ballots_voter_unique").on(table.voterKey)]);
+
+export const albumVotes = sqliteTable("album_votes", {
+  ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),
+  albumId: text("album_id").notNull().references(() => albums.id),
+}, (table) => [uniqueIndex("album_votes_unique").on(table.ballotId, table.albumId)]);
+
+export const songVotes = sqliteTable("song_votes", {
+  ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),
+  albumId: text("album_id").notNull().references(() => albums.id),
+  songId: text("song_id").notNull().references(() => songs.id),
+}, (table) => [uniqueIndex("song_votes_album_unique").on(table.ballotId, table.albumId)]);
+
+export const artistVotes = sqliteTable("artist_votes", {
+  ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),
+  artistId: text("artist_id").notNull().references(() => artists.id),
+}, (table) => [uniqueIndex("artist_votes_unique").on(table.ballotId, table.artistId)]);
