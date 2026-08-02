@@ -1,5 +1,6 @@
 name: Deploy to GitHub Pages
 
+# Deployment retriggered after enabling GitHub Pages source: 2026-08-02
 on:
   push:
     branches: ["main"]
