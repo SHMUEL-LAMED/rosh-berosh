@@ -3,11 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "export",
   trailingSlash: true,
+  basePath: "/rosh-berosh",
   images: {
     unoptimized: true,
   },
-  basePath: "/rosh-berosh",
-  assetPrefix: "/rosh-berosh/",
 };
 
 export default nextConfig;
