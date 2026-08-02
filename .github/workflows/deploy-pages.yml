@@ -1,5 +1,6 @@
 name: Deploy to GitHub Pages
 
+# Manual publish trigger: 2026-08-02
 on:
   push:
     branches: ["main"]
