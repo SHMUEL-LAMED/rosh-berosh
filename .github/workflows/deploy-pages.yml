@@ -1,6 +1,6 @@
 name: Deploy to GitHub Pages
 
-# Deployment retriggered after enabling GitHub Pages source: 2026-08-02
+# Deployment fixed after enabling GitHub Pages source: 2026-08-02
 on:
   push:
     branches: ["main"]
@@ -27,7 +27,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
