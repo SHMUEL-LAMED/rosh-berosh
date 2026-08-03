@@ -21,18 +21,27 @@ const placeholders = (count: number) => Array(count).fill("?").join(",");
 
 async function readRules(env: Env): Promise<Rules> {
   await ensureRuntimeSchema(env);
-  return await env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id='main'").first<Rules>()
-    ?? { votingOpen: 1, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
+  const defaults = { votingOpen: 1, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
+  try {
+    return await env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id='main'").first<Rules>() ?? defaults;
+  } catch {
+    return defaults;
+  }
 }
 
 async function catalog(env: Env): Promise<Response> {
   try {
     const rules = await readRules(env);
-    const [albums, songs, artists] = await env.DB.batch([
+    const [albums, artists] = await env.DB.batch([
       env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl FROM albums WHERE active = 1 ORDER BY position, title"),
-      env.DB.prepare("SELECT id, album_id AS albumId, title, audio_url AS audioUrl, preview_start AS previewStart, preview_end AS previewEnd FROM songs WHERE active = 1 ORDER BY position, title"),
       env.DB.prepare("SELECT id, name, image_url AS imageUrl FROM artists WHERE active = 1 ORDER BY position, name"),
     ]);
+    let songs;
+    try {
+      songs = await env.DB.prepare("SELECT id, album_id AS albumId, title, audio_url AS audioUrl, preview_start AS previewStart, preview_end AS previewEnd FROM songs WHERE active = 1 ORDER BY position, title").all();
+    } catch {
+      songs = await env.DB.prepare("SELECT id, album_id AS albumId, title, audio_url AS audioUrl, 0 AS previewStart, 0 AS previewEnd FROM songs WHERE active = 1 ORDER BY position, title").all();
+    }
     return json({ albums: albums.results, songs: songs.results, artists: artists.results, rules });
   } catch (error) {
     console.error("catalog error", error);
