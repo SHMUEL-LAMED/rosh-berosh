@@ -34,7 +34,7 @@ export async function verifyGoogleCredential(credential: string): Promise<Sessio
 
   const response = await fetch("https://www.googleapis.com/oauth2/v3/certs", { cf: { cacheTtl: 3600, cacheEverything: true } });
   if (!response.ok) throw new Error("google keys unavailable");
-  const jwks = await response.json<{ keys: JsonWebKey[] }>();
+  const jwks = await response.json<{ keys: Array<JsonWebKey & { kid?: string }> }>();
   const jwk = jwks.keys.find((item) => item.kid === header.kid);
   if (!jwk) throw new Error("unknown key");
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
