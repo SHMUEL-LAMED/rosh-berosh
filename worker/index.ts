@@ -141,11 +141,11 @@ const worker = {
     if (url.pathname === "/api/ballots" && request.method === "POST") {
       const original = (await request.json()) as Submission;
       if (original.channel === "phone") {
-        return submitBallot(new Request(request, { body: JSON.stringify(original) }), env);
+        return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
       }
       const user = await readSession(request);
       if (!user) return json({ error: "יש להתחבר באמצעות Google." }, 401);
-      return submitBallot(new Request(request, { body: JSON.stringify({ ...original, voterKey: user.sub }) }), env);
+      return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub }) }), env);
     }
 
     if (url.pathname === "/_vinext/image") {
