@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { LoginScreen, logout, useCurrentUser } from "./auth-ui";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string | null };
 type Song = { id: string; albumId: string; title: string; audioUrl?: string | null };
@@ -15,7 +16,7 @@ export default function Home() {
   const [albums, setAlbums] = useState<string[]>([]);
   const [songs, setSongs] = useState<Record<string, string>>({});
   const [artists, setArtists] = useState<string[]>([]);
-  const [voterKey, setVoterKey] = useState("");
+  const [user] = useCurrentUser();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -56,10 +57,9 @@ export default function Home() {
   };
 
   const submit = async () => {
-    if (!voterKey.trim()) return setError("יש להזין מספר טלפון או כתובת אימייל לצורך מניעת הצבעה כפולה.");
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ voterKey, albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site" }) });
+      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site" }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
       setDone(true);
@@ -67,12 +67,16 @@ export default function Home() {
     finally { setBusy(false); }
   };
 
+  if (user === undefined) return <main className="login-shell"><div className="loading">בודקים התחברות…</div></main>;
+  if (!user) return <LoginScreen />;
+
   if (done) return <main className="voting-shell"><section className="success-card"><span>✓</span><p className="kicker">ההצבעה נקלטה</p><h1>תודה שהשתתפתם!</h1><p>הבחירות שלכם נשמרו בהצלחה וישוקללו בתוצאות המצעד.</p></section></main>;
 
   return (
     <main className="voting-shell" dir="rtl">
       <header className="vote-header">
         <div className="logo-mark">ר</div><div><strong>ראש בראש</strong><small>מצעד 25 שנות מוזיקה</small></div>
+        <nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>יציאה</button></nav>
       </header>
 
       <section className="hero">
@@ -107,7 +111,7 @@ export default function Home() {
         {catalog && step === 3 && <>
           <div className="section-title"><div><p className="kicker">כמעט סיימנו</p><h2>אישור ההצבעה</h2></div></div>
           <div className="summary"><h3>האלבומים והשירים שבחרתם</h3>{selectedAlbums.map((album) => <div key={album.id}><b>{album.title}</b><span>{songName(album.id)}</span></div>)}<h3>הזמרים שבחרתם</h3><p>{selectedArtists.map((artist) => artist.name).join(" · ")}</p></div>
-          <label className="identity-field">מספר טלפון או אימייל<input value={voterKey} onChange={(event) => setVoterKey(event.target.value)} placeholder="למניעת הצבעה כפולה" /><small>הפרט משמש כמזהה הצבעה בלבד. בהמשך יתווסף אימות בקוד חד־פעמי.</small></label>
+          <div className="signed-voter"><span>ההצבעה תישמר עבור</span><b>{user.email}</b></div>
         </>}
 
         {error && <p className="vote-error">{error}</p>}
