@@ -2,7 +2,7 @@ import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
 import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
 
-type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string };
+type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const ARCHIVE_PREFIX = "poll-archives/";
 
@@ -40,6 +40,7 @@ async function activeSurveyId(env: AdminEnv): Promise<string> {
 const text = (value: unknown) => String(value ?? "").trim();
 const number = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const flag = (value: unknown) => value === true || value === 1 || value === "1" || value === "true" || value === "on";
+const DEFAULT_SETTINGS = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
 const mediaUrl = (key: string) => `/media/${key.split("/").map(encodeURIComponent).join("/")}`;
 const safeName = (name: string) => name.normalize("NFKD").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 110) || "file";
 const keyFromMediaUrl = (url?: string | null) => url?.startsWith("/media/") ? decodeURIComponent(url.slice(7)) : null;
@@ -111,6 +112,66 @@ async function pollReadiness(env: AdminEnv, surveyId?: string) {
   if (Number(settings.songs_enabled) && missingSongs.length) warnings.push(`${missingSongs.length} אלבומים בלי מספיק שירים לבחירה`);
   if (Number(settings.artists_enabled) && artistCount < Number(settings.artists_max || 1)) warnings.push(`צריך לפחות ${settings.artists_max} זמרים פעילים`);
   return { ready: warnings.length === 0, warnings, counts: { albums: albums.results.length, songs: songs.results.reduce((sum, row) => sum + Number(row.total || 0), 0), artists: artistCount, missingCovers: albums.results.filter((album) => !album.coverUrl).length, missingSongs: missingSongs.length } };
+}
+
+const AI_MAX_BYTES = 25 * 1024 * 1024; // external transcription APIs cap uploads at 25MB
+
+// Detects the chorus of a song with an external, OpenAI-compatible AI service:
+// transcribe the audio with segment timestamps, then let a language model pick the
+// repeated hook and return a short excerpt. Throws on any failure so callers can fall back.
+async function suggestChorusAI(env: AdminEnv, audioUrl: string): Promise<{ start: number; end: number }> {
+  const key = env.AI_API_KEY;
+  if (!key) throw new Error("שירות ה-AI אינו מוגדר (חסר AI_API_KEY).");
+  const mediaKey = keyFromMediaUrl(audioUrl);
+  if (!mediaKey) throw new Error("לשיר אין קובץ שמע מקומי לניתוח.");
+  const object = await env.MEDIA.get(mediaKey);
+  if (!object) throw new Error("קובץ השמע לא נמצא.");
+  if (object.size > AI_MAX_BYTES) throw new Error("קובץ השמע גדול מ־25MB ולכן אי אפשר לנתחו ב-AI.");
+
+  const base = (env.AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const transcribeModel = env.AI_TRANSCRIBE_MODEL || "whisper-1";
+  const chatModel = env.AI_CHAT_MODEL || "gpt-4o-mini";
+  const contentType = object.httpMetadata?.contentType || "audio/mpeg";
+
+  // 1) Transcribe with per-segment timestamps.
+  const form = new FormData();
+  form.append("file", new File([await object.arrayBuffer()], "audio", { type: contentType }));
+  form.append("model", transcribeModel);
+  form.append("response_format", "verbose_json");
+  form.append("timestamp_granularities[]", "segment");
+  const transcription = await fetch(`${base}/audio/transcriptions`, { method: "POST", headers: { authorization: `Bearer ${key}` }, body: form });
+  if (!transcription.ok) throw new Error(`התמלול נכשל (שגיאה ${transcription.status}).`);
+  const transcript = (await transcription.json()) as { duration?: number; segments?: { start: number; end: number; text: string }[] };
+  const segments = (transcript.segments || []).map((s) => ({ start: Math.round(s.start), end: Math.round(s.end), text: String(s.text || "").trim() })).filter((s) => s.text);
+  const duration = Number(transcript.duration || (segments.length ? segments[segments.length - 1].end : 0));
+  if (!segments.length || !duration) throw new Error("לא התקבל תמלול עם חותמות זמן.");
+
+  // 2) Let the language model locate the chorus (the repeated hook).
+  const chat = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: chatModel,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "You are given a song's transcript as timestamped segments (in seconds). Identify the chorus — the most repeated, catchy hook — and return a 25-30 second excerpt that begins exactly where the chorus starts. Respond ONLY as JSON: {\"start\": number, \"end\": number} in seconds." },
+        { role: "user", content: JSON.stringify({ duration, segments }) },
+      ],
+    }),
+  });
+  if (!chat.ok) throw new Error(`ניתוח הפזמון נכשל (שגיאה ${chat.status}).`);
+  const completion = (await chat.json()) as { choices?: { message?: { content?: string } }[] };
+  let parsed: { start?: number; end?: number };
+  try { parsed = JSON.parse(completion.choices?.[0]?.message?.content || "{}"); } catch { throw new Error("תשובת ה-AI לא הייתה בפורמט תקין."); }
+
+  const start = Math.max(0, Math.round(Number(parsed.start) || 0));
+  let end = Math.round(Number(parsed.end) || 0);
+  if (!(end > start)) end = start + 28;
+  if (end - start > 45) end = start + 30; // keep the excerpt reasonable
+  end = Math.min(end, Math.floor(duration));
+  if (!(end > start)) throw new Error("ה-AI לא החזיר טווח זמן תקין.");
+  return { start, end };
 }
 
 type SurveyRow = { id: string; name: string; active: number; createdAt: number; votingOpen: number; albums: number; songs: number; artists: number; votes: number };
@@ -204,7 +265,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     ]);
     const [ivrPrompts, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
     const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0], readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey });
+    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey });
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/archives") {
@@ -321,6 +382,23 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const archive = url.searchParams.get("skipArchive") === "1" ? null : await createPollSnapshot(env, "ארכיון אוטומטי לפני מחיקה", surveyId);
     await clearCurrentPoll(env, surveyId);
     return json({ ok: true, archive });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/suggest-chorus") {
+    const body = await request.json<{ songId?: string; audioUrl?: string }>();
+    let audioUrl = text(body.audioUrl);
+    const songId = text(body.songId);
+    if (songId && !audioUrl) {
+      const song = await env.DB.prepare("SELECT audio_url AS audioUrl FROM songs WHERE id=?").bind(songId).first<{ audioUrl?: string }>();
+      audioUrl = text(song?.audioUrl);
+    }
+    if (!audioUrl) return json({ error: "לשיר אין קובץ שמע לניתוח." }, 400);
+    try {
+      const suggestion = await suggestChorusAI(env, audioUrl);
+      return json({ ok: true, source: "ai", ...suggestion });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "ניתוח הפזמון נכשל.", aiConfigured: Boolean(env.AI_API_KEY) }, 502);
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/catalog") {
