@@ -1,14 +1,22 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
+export const surveys = sqliteTable("surveys", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+});
+
 export const albums = sqliteTable("albums", {
   id: text("id").primaryKey(),
+  surveyId: text("survey_id").notNull().default("main").references(() => surveys.id),
   title: text("title").notNull(),
   artistName: text("artist_name").notNull(),
   coverUrl: text("cover_url"),
   position: integer("position").notNull().default(0),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
-});
+}, (table) => [index("albums_survey_idx").on(table.surveyId)]);
 
 export const songs = sqliteTable("songs", {
   id: text("id").primaryKey(),
@@ -23,18 +31,20 @@ export const songs = sqliteTable("songs", {
 
 export const artists = sqliteTable("artists", {
   id: text("id").primaryKey(),
+  surveyId: text("survey_id").notNull().default("main").references(() => surveys.id),
   name: text("name").notNull(),
   imageUrl: text("image_url"),
   position: integer("position").notNull().default(0),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
-});
+}, (table) => [index("artists_survey_idx").on(table.surveyId)]);
 
 export const ballots = sqliteTable("ballots", {
   id: text("id").primaryKey(),
+  surveyId: text("survey_id").notNull().default("main").references(() => surveys.id),
   voterKey: text("voter_key").notNull(),
   channel: text("channel").notNull().default("site"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
-}, (table) => [uniqueIndex("ballots_voter_unique").on(table.voterKey)]);
+}, (table) => [uniqueIndex("ballots_voter_survey_unique").on(table.surveyId, table.voterKey)]);
 
 export const albumVotes = sqliteTable("album_votes", {
   ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),

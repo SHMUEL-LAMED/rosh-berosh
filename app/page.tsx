@@ -15,6 +15,7 @@ const rangeText = (min: number, max: number, noun: string) => min === max ? `${m
 export default function Home() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [stageIndex, setStageIndex] = useState(0);
+  const [songAlbumIndex, setSongAlbumIndex] = useState(0);
   const [albums, setAlbums] = useState<string[]>([]);
   const [songs, setSongs] = useState<Record<string, string[]>>({});
   const [artists, setArtists] = useState<string[]>([]);
@@ -59,15 +60,34 @@ export default function Home() {
   };
   const toggleArtist = (id: string) => toggleLimited(artists, id, catalog?.rules.artistsMax ?? 3, setArtists, `אפשר לבחור עד ${catalog?.rules.artistsMax ?? 3} זמרים.`);
 
+  const scrollTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
+  const goToStage = (index: number) => { setStageIndex(Math.max(0, Math.min(stages.length - 1, index))); scrollTop(); };
   const next = () => {
     if (!catalog) return;
     setError("");
     const r = catalog.rules;
-    if (stage === "albums" && (albums.length < r.albumsMin || albums.length > r.albumsMax)) return setError(`יש לבחור ${rangeText(r.albumsMin, r.albumsMax, "אלבומים")}.`);
-    if (stage === "songs" && albums.some((id) => (songs[id]?.length ?? 0) < r.songsMin || (songs[id]?.length ?? 0) > r.songsMax)) return setError(`יש לבחור ${rangeText(r.songsMin, r.songsMax, "שירים")} מכל אלבום.`);
+    if (stage === "albums") {
+      if (albums.length < r.albumsMin || albums.length > r.albumsMax) return setError(`יש לבחור ${rangeText(r.albumsMin, r.albumsMax, "אלבומים")}.`);
+      setSongAlbumIndex(0);
+      return goToStage(stageIndex + 1);
+    }
+    if (stage === "songs") {
+      const album = selectedAlbums[songAlbumIndex];
+      const chosen = album ? (songs[album.id]?.length ?? 0) : 0;
+      if (album && (chosen < r.songsMin || chosen > r.songsMax)) return setError(`יש לבחור ${rangeText(r.songsMin, r.songsMax, "שירים")} מ״${album.title}״.`);
+      if (songAlbumIndex < selectedAlbums.length - 1) { setSongAlbumIndex(songAlbumIndex + 1); return scrollTop(); }
+      return goToStage(stageIndex + 1);
+    }
     if (stage === "artists" && (artists.length < r.artistsMin || artists.length > r.artistsMax)) return setError(`יש לבחור ${rangeText(r.artistsMin, r.artistsMax, "זמרים")}.`);
-    setStageIndex((current) => Math.min(stages.length - 1, current + 1));
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    goToStage(stageIndex + 1);
+  };
+  const back = () => {
+    setError("");
+    if (stage === "songs" && songAlbumIndex > 0) { setSongAlbumIndex(songAlbumIndex - 1); return scrollTop(); }
+    const target = stageIndex - 1;
+    if (target < 0) return;
+    if (stages[target]?.key === "songs") setSongAlbumIndex(Math.max(0, selectedAlbums.length - 1));
+    goToStage(target);
   };
   const submit = async () => {
     setBusy(true); setError("");
@@ -92,11 +112,18 @@ export default function Home() {
         {!catalog && !error && <div className="loading">טוענים את רשימת המצעד…</div>}
         {catalog && catalog.albums.length === 0 && <div className="empty-catalog"><h2>המצעד בהכנה</h2><p>התוכן יעלה בקרוב.</p></div>}
         {catalog && stage === "albums" && <><Title kicker="שלב ראשון" title={`בחרו ${rangeText(catalog.rules.albumsMin, catalog.rules.albumsMax, "אלבומים")}`} count={`${albums.length}/${catalog.rules.albumsMax}`} /><div className="album-grid">{catalog.albums.map((album) => <button type="button" key={album.id} className={`choice-card ${albums.includes(album.id) ? "selected" : ""}`} onClick={() => toggleAlbum(album.id)}>{album.coverUrl ? <img src={album.coverUrl} alt="" /> : <span className="cover-fallback">♫</span>}<b>{album.title}</b><small>{album.artistName}</small><i>{albums.includes(album.id) ? "✓" : "+"}</i></button>)}</div></>}
-        {catalog && stage === "songs" && <><Title kicker="שלב שני" title={`בחרו ${rangeText(catalog.rules.songsMin, catalog.rules.songsMax, "שירים")} מכל אלבום`} count={`${Object.values(songs).reduce((n, ids) => n + ids.length, 0)}/${albums.length * catalog.rules.songsMax}`} /><div className="song-groups">{selectedAlbums.map((album) => <fieldset key={album.id}><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button className="song-select" onClick={() => toggleSong(album.id, song.id)}><i>{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => setPlayer((current) => current?.id === song.id ? null : song)}>{player?.id === song.id ? "■" : "▶"}</button>}</div>)}</fieldset>)}</div></>}
+        {catalog && stage === "songs" && (() => {
+          const album = selectedAlbums[Math.min(songAlbumIndex, Math.max(0, selectedAlbums.length - 1))];
+          if (!album) return <div className="empty-catalog"><h2>עדיין לא נבחרו אלבומים</h2><p>חזרו אחורה ובחרו אלבומים כדי לבחור מהם שירים.</p></div>;
+          const chosen = songs[album.id]?.length ?? 0;
+          return <><Title kicker={`שלב שני · אלבום ${songAlbumIndex + 1} מתוך ${selectedAlbums.length}`} title={`בחרו ${rangeText(catalog.rules.songsMin, catalog.rules.songsMax, "שירים")} מ״${album.title}״`} count={`${chosen}/${catalog.rules.songsMax}`} />
+            <div className="song-progress"><span>{album.artistName}</span><div className="dots">{selectedAlbums.map((item, index) => <i key={item.id} className={index === songAlbumIndex ? "on" : index < songAlbumIndex ? "done" : ""} />)}</div></div>
+            <div className="song-groups"><fieldset><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button className="song-select" onClick={() => toggleSong(album.id, song.id)}><i>{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => setPlayer((current) => current?.id === song.id ? null : song)}>{player?.id === song.id ? "■" : "▶"}</button>}</div>)}</fieldset></div></>;
+        })()}
         {catalog && stage === "artists" && <><Title kicker="שלב שלישי" title={`בחרו ${rangeText(catalog.rules.artistsMin, catalog.rules.artistsMax, "זמרים")}`} count={`${artists.length}/${catalog.rules.artistsMax}`} /><div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" /> : <span>{artist.name.slice(0, 1)}</span>}<b>{artist.name}</b><i>{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "summary" && <><Title kicker="כמעט סיימנו" title="אישור ההצבעה" /><div className="summary">{catalog.rules.albumsEnabled ? <><h3>האלבומים והשירים שבחרתם</h3>{selectedAlbums.map((album) => <div key={album.id}><b>{album.title}</b><span>{selectedSongNames(album.id)}</span></div>)}</> : null}{catalog.rules.artistsEnabled ? <><h3>הזמרים שבחרתם</h3><p>{selectedArtists.map((artist) => artist.name).join(" · ")}</p></> : null}</div><div className="signed-voter"><span>ההצבעה תישמר עבור</span><b>{user.email}</b></div></>}
         {error && <p className="vote-error">{error}</p>}
-        {catalog && catalog.albums.length > 0 && <footer className="vote-actions">{stageIndex > 0 && <button className="back" onClick={() => { setError(""); setStageIndex(stageIndex - 1); }}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
+        {catalog && catalog.albums.length > 0 && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
       </section>
     </>}
     {player && <AudioPlayer song={player} onClose={() => setPlayer(null)} />}

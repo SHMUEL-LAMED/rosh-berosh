@@ -15,8 +15,9 @@ type Result = { id: string; title?: string; name?: string; albumTitle?: string; 
 type IvrPrompt = { key: string; label: string; audioUrl: string; yemotPath: string; updatedAt: number };
 type Readiness = { ready: boolean; warnings: string[]; counts: { albums: number; songs: number; artists: number; missingCovers: number; missingSongs: number } };
 type PollArchive = { key: string; name: string; createdAt: number; votes: number; albums: number; songs: number; artists: number };
-type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; yemotConnected: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] } };
-type Tab = "dashboard" | "albums" | "artists" | "ivr" | "settings" | "managers" | "results" | "archives";
+type Survey = { id: string; name: string; active: number; createdAt: number; votingOpen: number; albums: number; songs: number; artists: number; votes: number };
+type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; yemotConnected: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null };
+type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "managers" | "results" | "archives";
 
 const SYSTEM_PROMPTS = [
   ["system:main_menu", "תפריט ראשי — אלבומים 1, שירים 2, זמרים 3"], ["system:albums_intro", "פתיח לבחירת אלבומים"],
@@ -90,12 +91,13 @@ export default function AdminPage() {
 
   return <main className="admin-shell" dir="rtl">
     <aside className="admin-side"><div className="vote-header"><div className="logo-mark">ר</div><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
-      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "managers"} onClick={() => setTab("managers")}>מנהלי המערכת</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Link href="/">מעבר לאתר</Link>
+      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "managers"} onClick={() => setTab("managers")}>מנהלי המערכת</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
-    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", managers: "מנהלי המערכת", results: "תוצאות" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
+    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", managers: "מנהלי המערכת", results: "תוצאות" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
       <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>
       {message && <p className="admin-message">{message}</p>}
       {tab === "dashboard" && <Dashboard data={data} onNavigate={setTab} />}
+      {tab === "surveys" && data && <SurveysPanel data={data} onChanged={load} onMessage={setMessage} />}
       {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={setMessage} />}
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
       {tab === "archives" && <ArchivesPanel onChanged={load} onMessage={setMessage} />}
@@ -107,7 +109,7 @@ export default function AdminPage() {
   </main>;
 }
 
-function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab: Tab): void }) { return <div className="dashboard-grid"><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>; }
+function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab: Tab): void }) { return <div className="dashboard-grid"><button onClick={() => onNavigate("surveys")}><b>{data?.surveys.length ?? 0}</b><span>סקרים</span><small>{data?.activeSurvey ? `פעיל: ${data.activeSurvey.name}` : "בחירה והפעלה"}</small></button><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>; }
 
 function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const promptFor = (key: string) => data.ivrPrompts?.find((prompt) => prompt.key === key);
@@ -187,6 +189,40 @@ function ArchivesPanel({ onChanged, onMessage }: { onChanged(): Promise<void> | 
   const restore = async (item: PollArchive) => { if (!confirm(`לשחזר את „${item.name}”? הסקר הנוכחי יגובה אוטומטית והשחזור ייפתח כטיוטה.`)) return; const response = await fetch("/api/admin/archive", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ restoreKey: item.key }) }); if (response.ok) { onMessage("הסקר שוחזר כטיוטה. בדקו אותו לפני הפרסום."); await onChanged(); } else onMessage("השחזור נכשל."); };
   const remove = async (item: PollArchive) => { if (!confirm(`למחוק את „${item.name}” מהארכיון?`)) return; const response = await fetch("/api/admin/archive", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key }) }); if (response.ok) { onMessage("העותק נמחק מהארכיון."); await loadArchives(); } };
   return <AdminSection title="ארכיון סקרים וגיבויים"><p className="panel-help">שמרו גרסה מלאה של הסקר הנוכחי. אפשר לשחזר כל סקר כטיוטה, בלי לפרסם אותו מיד.</p><form className="archive-form" onSubmit={archive}><input name="name" placeholder="שם הסקר בארכיון" /><button>שמירת הסקר הנוכחי בארכיון</button></form>{loading ? <p>טוען ארכיון…</p> : <div className="archive-list">{archives.length ? archives.map((item) => <article key={item.key}><div><b>{item.name}</b><small>{new Date(item.createdAt).toLocaleString("he-IL")} · {item.votes} הצבעות</small><span>{item.albums} אלבומים · {item.songs} שירים · {item.artists} זמרים</span></div><div><button onClick={() => restore(item)}>שחזור כטיוטה</button><button className="danger" onClick={() => remove(item)}>מחיקה מהארכיון</button></div></article>) : <p>עדיין אין סקרים בארכיון.</p>}</div>}</AdminSection>;
+}
+function SurveysPanel({ data, onChanged, onMessage }: { data: Overview; onChanged(): Promise<void> | void; onMessage(message: string): void }) {
+  const surveys = data.surveys ?? [];
+  const send = async (method: string, body: Record<string, unknown>, ok: string) => {
+    onMessage("שומרים…");
+    try {
+      const response = await fetch("/api/admin/surveys", { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "הפעולה נכשלה.");
+      onMessage(ok); await onChanged();
+    } catch (error) { onMessage(error instanceof Error ? error.message : "הפעולה נכשלה."); }
+  };
+  const create = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget, name = String(new FormData(form).get("name") || "").trim(); if (!name) return onMessage("יש להזין שם לסקר."); await send("POST", { name }, "הסקר נוצר. אפשר להפעיל אותו וליצור לו תוכן."); form.reset(); };
+  const activate = async (survey: Survey) => {
+    if (survey.active) return;
+    if (!confirm(`להפעיל את „${survey.name}”? הסקר הפעיל הנוכחי יוסתר מהאתר ומהקו הטלפוני, וכל הניהול יעבור לסקר הזה.`)) return;
+    onMessage("מפעילים את הסקר…");
+    try {
+      const response = await fetch("/api/admin/surveys/activate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: survey.id }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "ההפעלה נכשלה.");
+      onMessage(`„${survey.name}” הוא כעת הסקר הפעיל.`); await onChanged();
+    } catch (error) { onMessage(error instanceof Error ? error.message : "ההפעלה נכשלה."); }
+  };
+  const rename = async (survey: Survey) => { const name = prompt("שם חדש לסקר:", survey.name)?.trim(); if (!name || name === survey.name) return; await send("POST", { id: survey.id, name }, "שם הסקר עודכן."); };
+  const remove = async (survey: Survey) => { if (!confirm(`למחוק את „${survey.name}” לצמיתות? כל האלבומים, השירים, הזמרים וההצבעות של הסקר יימחקו.`)) return; await send("DELETE", { id: survey.id }, "הסקר נמחק."); };
+  return <AdminSection title="ניהול סקרים">
+    <p className="panel-help">כל סקר שומר את האלבומים, השירים, הזמרים וההצבעות שלו בנפרד. רק סקר אחד יכול להיות פעיל בכל רגע — הפעלת סקר מסתירה אוטומטית את הסקר שהיה פעיל קודם. הניהול (אלבומים, זמרים, הגדרות, תוצאות) מתייחס תמיד לסקר הפעיל.</p>
+    <form className="archive-form" onSubmit={create}><input name="name" placeholder="שם הסקר החדש" required /><button>יצירת סקר חדש</button></form>
+    <div className="archive-list survey-list">{surveys.map((survey) => <article key={survey.id} className={survey.active ? "survey-active" : ""}>
+      <div><b>{survey.name} {survey.active ? <span className="survey-badge">פעיל</span> : survey.votingOpen ? <span className="survey-badge draft">פורסם</span> : <span className="survey-badge draft">טיוטה</span>}</b><small>{new Date(survey.createdAt * 1000).toLocaleDateString("he-IL")} · {survey.votes} הצבעות</small><span>{survey.albums} אלבומים · {survey.songs} שירים · {survey.artists} זמרים</span></div>
+      <div>{survey.active ? <button className="toggle on" disabled>הסקר הפעיל</button> : <button onClick={() => activate(survey)}>הפעלה</button>}<button onClick={() => rename(survey)}>שינוי שם</button><button className="danger" disabled={!!survey.active} onClick={() => remove(survey)}>מחיקה</button></div>
+    </article>)}</div>
+  </AdminSection>;
 }
 function AdminSection({ title, children }: { title: string; children: ReactNode }) { return <section className="admin-panel"><h2>{title}</h2>{children}</section>; }
 function Nav({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) { return <button className={active ? "active" : ""} onClick={onClick}>{children}</button>; }
