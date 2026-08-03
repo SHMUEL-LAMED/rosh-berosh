@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "ראש בראש | מצעד 25 שנות מוזיקה",
   description: "בוחרים את האלבומים, השירים והזמרים הגדולים של המוזיקה היהודית.",
+  other: {
+    "codex-preview": "development",
+  },
   robots: {
     index: false,
     follow: false,
