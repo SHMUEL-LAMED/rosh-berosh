@@ -15,6 +15,8 @@ export const songs = sqliteTable("songs", {
   albumId: text("album_id").notNull().references(() => albums.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   audioUrl: text("audio_url"),
+  previewStart: integer("preview_start").notNull().default(0),
+  previewEnd: integer("preview_end").notNull().default(0),
   position: integer("position").notNull().default(0),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
 }, (table) => [index("songs_album_idx").on(table.albumId)]);
@@ -43,9 +45,23 @@ export const songVotes = sqliteTable("song_votes", {
   ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),
   albumId: text("album_id").notNull().references(() => albums.id),
   songId: text("song_id").notNull().references(() => songs.id),
-}, (table) => [uniqueIndex("song_votes_album_unique").on(table.ballotId, table.albumId)]);
+}, (table) => [uniqueIndex("song_votes_unique").on(table.ballotId, table.albumId, table.songId)]);
 
 export const artistVotes = sqliteTable("artist_votes", {
   ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),
   artistId: text("artist_id").notNull().references(() => artists.id),
 }, (table) => [uniqueIndex("artist_votes_unique").on(table.ballotId, table.artistId)]);
+
+export const pollSettings = sqliteTable("poll_settings", {
+  id: text("id").primaryKey().default("main"),
+  votingOpen: integer("voting_open", { mode: "boolean" }).notNull().default(true),
+  albumsEnabled: integer("albums_enabled", { mode: "boolean" }).notNull().default(true),
+  albumsMin: integer("albums_min").notNull().default(5),
+  albumsMax: integer("albums_max").notNull().default(5),
+  songsEnabled: integer("songs_enabled", { mode: "boolean" }).notNull().default(true),
+  songsMin: integer("songs_min").notNull().default(1),
+  songsMax: integer("songs_max").notNull().default(1),
+  artistsEnabled: integer("artists_enabled", { mode: "boolean" }).notNull().default(true),
+  artistsMin: integer("artists_min").notNull().default(1),
+  artistsMax: integer("artists_max").notNull().default(3),
+});
