@@ -4,7 +4,7 @@ import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { LoginScreen, logout, useCurrentUser } from "../auth-ui";
-import { fromDirectory, fromZip, splitAlbumFiles, suggestChorus, type UploadFile } from "./upload-utils";
+import { blobToWav, fromDirectory, fromZip, splitAlbumFiles, suggestChorus, type UploadFile } from "./upload-utils";
 import { downloadResultsXlsx } from "./xlsx-export";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string; position: number; active: number };
@@ -126,23 +126,65 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
 
 function PromptRow({ item, prompt, onSaved, onMessage }: { item: { key: string; label: string }; prompt?: IvrPrompt; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const [busy, setBusy] = useState(false);
-  const upload = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); const form = event.currentTarget, file = (form.elements.namedItem("file") as HTMLInputElement).files?.[0];
-    if (!file) return onMessage("יש לבחור קובץ שמע.");
+  const [recording, setRecording] = useState(false), [elapsed, setElapsed] = useState(0), [recorded, setRecorded] = useState<{ file: File; url: string } | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null), chunksRef = useRef<Blob[]>([]), timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const submitFile = async (file: File) => {
     setBusy(true); onMessage("מעלים את הקריינות…");
     try {
       const body = new FormData(); body.set("key", item.key); body.set("label", item.label); body.set("file", file);
       const response = await fetch("/api/admin/ivr-prompt", { method: "POST", body }), result = await response.json();
       if (!response.ok) throw new Error(result.error || "העלאת הקריינות נכשלה.");
-      onMessage(result.warning || "הקריינות נשמרה והיא פעילה בקו."); form.reset(); await onSaved();
-    } catch (error) { onMessage(error instanceof Error ? error.message : "העלאת הקריינות נכשלה."); } finally { setBusy(false); }
+      onMessage(result.warning || "הקריינות נשמרה והיא פעילה בקו."); await onSaved(); return true;
+    } catch (error) { onMessage(error instanceof Error ? error.message : "העלאת הקריינות נכשלה."); return false; }
+    finally { setBusy(false); }
   };
+  const upload = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = event.currentTarget, file = (form.elements.namedItem("file") as HTMLInputElement).files?.[0];
+    if (!file) return onMessage("יש לבחור קובץ שמע.");
+    if (await submitFile(file)) form.reset();
+  };
+  const clearRecording = () => { setRecorded((current) => { if (current) URL.revokeObjectURL(current.url); return null; }); setElapsed(0); };
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return onMessage("הדפדפן אינו תומך בהקלטה. אפשר להעלות קובץ במקום.");
+    clearRecording();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream); recorderRef.current = recorder; chunksRef.current = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setRecording(false);
+        try {
+          const wav = await blobToWav(new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" }));
+          setRecorded({ file: wav, url: URL.createObjectURL(wav) });
+        } catch { onMessage("עיבוד ההקלטה נכשל. נסו שוב או העלו קובץ."); }
+      };
+      recorder.start(); setRecording(true); setElapsed(0);
+      timerRef.current = setInterval(() => setElapsed((value) => value + 1), 1000);
+    } catch { onMessage("לא ניתן לגשת למיקרופון. יש לאשר הרשאה בדפדפן."); }
+  };
+  const stopRecording = () => recorderRef.current?.state === "recording" && recorderRef.current.stop();
+  const saveRecording = async () => { if (recorded && await submitFile(recorded.file)) clearRecording(); };
+  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+
   const removePrompt = async () => {
     if (!prompt || !confirm("להסיר את הקריינות ולחזור להקראה האוטומטית?")) return;
     const response = await fetch("/api/admin/ivr-prompt", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key }) });
     if (response.ok) { onMessage("הקריינות הוסרה. הקו יחזור להקראה אוטומטית."); await onSaved(); }
   };
-  return <article className="prompt-row"><div className="prompt-copy"><b>{item.label}</b><small className={prompt?.yemotPath ? "prompt-live" : ""}>{prompt ? prompt.yemotPath ? "פעיל בקו" : "נשמר באתר — נדרש חיבור לימות המשיח" : "הקראה אוטומטית"}</small>{prompt?.audioUrl && <audio controls preload="metadata" src={prompt.audioUrl} />}</div><form onSubmit={upload}><input name="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg" /><button disabled={busy}>{busy ? "מעלה…" : prompt ? "החלפה" : "העלאה"}</button>{prompt && <button type="button" className="danger" onClick={removePrompt}>הסרה</button>}</form></article>;
+  return <article className="prompt-row">
+    <div className="prompt-copy"><b>{item.label}</b><small className={prompt?.yemotPath ? "prompt-live" : ""}>{prompt ? prompt.yemotPath ? "פעיל בקו" : "נשמר באתר — נדרש חיבור לימות המשיח" : "הקראה אוטומטית"}</small>{prompt?.audioUrl && <audio controls preload="metadata" src={prompt.audioUrl} />}</div>
+    <div className="prompt-actions">
+      <div className="prompt-recorder">
+        {recording ? <button type="button" className="rec-stop" onClick={stopRecording}>■ עצור ({formatTime(elapsed)})</button>
+          : <button type="button" className="rec-start" onClick={startRecording} disabled={busy}>🎙 הקלטה ישירה</button>}
+        {recorded && !recording && <><audio controls preload="metadata" src={recorded.url} /><button type="button" onClick={saveRecording} disabled={busy}>{busy ? "שומר…" : "שמירת ההקלטה לקו"}</button><button type="button" className="danger" onClick={clearRecording}>ביטול</button></>}
+      </div>
+      <form onSubmit={upload}><input name="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg" /><button disabled={busy}>{busy ? "מעלה…" : prompt ? "החלפה" : "העלאה"}</button>{prompt && <button type="button" className="danger" onClick={removePrompt}>הסרה</button>}</form>
+    </div>
+  </article>;
 }
 
 function SettingsPanel({ data, onSaved }: { data: Overview; onSaved(): void }) {

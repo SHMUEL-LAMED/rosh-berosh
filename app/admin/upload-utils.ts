@@ -72,6 +72,31 @@ export async function suggestChorus(url: string): Promise<{ start: number; end: 
   } finally { await context.close(); }
 }
 
+// Converts a recorded audio Blob (e.g. MediaRecorder webm/opus) into a mono
+// 16-bit PCM WAV File — a format both the browser and the Yemot phone line accept.
+export async function blobToWav(blob: Blob): Promise<File> {
+  const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const context = new AudioCtx();
+  try {
+    const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+    const length = buffer.length, channels = buffer.numberOfChannels, sampleRate = buffer.sampleRate;
+    const mono = new Float32Array(length);
+    for (let channel = 0; channel < channels; channel++) {
+      const data = buffer.getChannelData(channel);
+      for (let index = 0; index < length; index++) mono[index] += data[index] / channels;
+    }
+    const output = new ArrayBuffer(44 + length * 2), view = new DataView(output);
+    const writeText = (offset: number, text: string) => { for (let index = 0; index < text.length; index++) view.setUint8(offset + index, text.charCodeAt(index)); };
+    writeText(0, "RIFF"); view.setUint32(4, 36 + length * 2, true); writeText(8, "WAVE");
+    writeText(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+    writeText(36, "data"); view.setUint32(40, length * 2, true);
+    let offset = 44;
+    for (let index = 0; index < length; index++) { const sample = Math.max(-1, Math.min(1, mono[index])); view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true); offset += 2; }
+    return new File([output], `recording-${Date.now()}.wav`, { type: "audio/wav" });
+  } finally { await context.close(); }
+}
+
 function mimeFor(path: string) {
   const extension = path.split(".").pop()?.toLowerCase();
   return ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", mp3: "audio/mpeg", m4a: "audio/mp4", aac: "audio/aac", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac" } as Record<string, string>)[extension || ""] || "application/octet-stream";
