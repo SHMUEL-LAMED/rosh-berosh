@@ -427,9 +427,24 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   if (request.method === "POST" && url.pathname === "/api/admin/media") {
     const form = await request.formData();
     const file = form.get("file");
-    const albumId = text(form.get("albumId"));
+    if (!(file instanceof File)) return json({ error: "קובץ חסר." }, 400);
     const kind = text(form.get("kind"));
-    if (!(file instanceof File) || !albumId || !["cover", "audio"].includes(kind)) return json({ error: "קובץ או אלבום חסרים." }, 400);
+    const artistId = text(form.get("artistId"));
+    if (kind === "artist" || artistId) {
+      if (!artistId) return json({ error: "לא נבחר זמר." }, 400);
+      if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif)$/i.test(file.name)) return json({ error: "יש לבחור קובץ תמונה." }, 415);
+      if (file.size > 15 * 1024 * 1024) return json({ error: "התמונה גדולה מ־15MB." }, 413);
+      const artist = await env.DB.prepare("SELECT image_url AS imageUrl FROM artists WHERE id=?").bind(artistId).first<{ imageUrl?: string }>();
+      if (!artist) return json({ error: "הזמר לא נמצא." }, 404);
+      const imageKey = `artists/${artistId}/image-${crypto.randomUUID()}-${safeName(file.name)}`;
+      await env.MEDIA.put(imageKey, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, artistId } });
+      const imageUrl = mediaUrl(imageKey);
+      await env.DB.prepare("UPDATE artists SET image_url=? WHERE id=?").bind(imageUrl, artistId).run();
+      await deleteMediaUrls(env, [artist.imageUrl]);
+      return json({ ok: true, url: imageUrl });
+    }
+    const albumId = text(form.get("albumId"));
+    if (!albumId || !["cover", "audio"].includes(kind)) return json({ error: "קובץ או אלבום חסרים." }, 400);
     if (file.size > 75 * 1024 * 1024) return json({ error: "הקובץ גדול מ־75MB." }, 413);
     const key = `albums/${albumId}/${kind}-${crypto.randomUUID()}-${safeName(file.name)}`;
     await env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId, kind } });
@@ -448,7 +463,15 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   }
 
   if (request.method === "DELETE" && url.pathname === "/api/admin/media") {
-    const body = await request.json<{ albumId?: string; kind?: string }>();
+    const body = await request.json<{ albumId?: string; artistId?: string; kind?: string }>();
+    if (body.kind === "artist" || body.artistId) {
+      if (!body.artistId) return json({ error: "לא נבחר זמר." }, 400);
+      const artist = await env.DB.prepare("SELECT image_url AS imageUrl FROM artists WHERE id=?").bind(body.artistId).first<{ imageUrl?: string }>();
+      if (!artist) return json({ error: "הזמר לא נמצא." }, 404);
+      await env.DB.prepare("UPDATE artists SET image_url=NULL WHERE id=?").bind(body.artistId).run();
+      await deleteMediaUrls(env, [artist.imageUrl]);
+      return json({ ok: true });
+    }
     if (!body.albumId || body.kind !== "cover") return json({ error: "בקשת מחיקת הקובץ אינה תקינה." }, 400);
     const album = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(body.albumId).first<{ coverUrl?: string }>();
     if (!album) return json({ error: "האלבום לא נמצא." }, 404);
@@ -489,12 +512,13 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       ]);
       await deleteMediaUrls(env, [song.audioUrl]);
     } else {
-      const artist = await env.DB.prepare("SELECT id FROM artists WHERE id=?").bind(body.id).first();
+      const artist = await env.DB.prepare("SELECT image_url AS imageUrl FROM artists WHERE id=?").bind(body.id).first<{ imageUrl?: string }>();
       if (!artist) return json({ error: "הזמר כבר אינו קיים." }, 404);
       await env.DB.batch([
         env.DB.prepare("DELETE FROM artist_votes WHERE artist_id=?").bind(body.id),
         env.DB.prepare("DELETE FROM artists WHERE id=?").bind(body.id),
       ]);
+      await deleteMediaUrls(env, [artist.imageUrl]);
     }
     return json({ ok: true });
   }
