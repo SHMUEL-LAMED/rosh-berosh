@@ -107,6 +107,27 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     return json({ ok: true });
   }
 
+  // A poll stays a draft while voting_open is 0. This route intentionally clears
+  // the current poll only after an explicit confirmation in the admin UI.
+  if (request.method === "DELETE" && url.pathname === "/api/admin/poll") {
+    const [albums, songs] = await env.DB.batch([
+      env.DB.prepare("SELECT cover_url AS coverUrl FROM albums"),
+      env.DB.prepare("SELECT audio_url AS audioUrl FROM songs"),
+    ]);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM song_votes"),
+      env.DB.prepare("DELETE FROM album_votes"),
+      env.DB.prepare("DELETE FROM artist_votes"),
+      env.DB.prepare("DELETE FROM ballots"),
+      env.DB.prepare("DELETE FROM songs"),
+      env.DB.prepare("DELETE FROM albums"),
+      env.DB.prepare("DELETE FROM artists"),
+      env.DB.prepare("UPDATE poll_settings SET voting_open=0, albums_enabled=1, albums_min=5, albums_max=5, songs_enabled=1, songs_min=1, songs_max=1, artists_enabled=1, artists_min=1, artists_max=3 WHERE id='main'"),
+    ]);
+    await deleteMediaUrls(env, [...albums.results.map((row) => String(row.coverUrl || "")), ...songs.results.map((row) => String(row.audioUrl || ""))]);
+    return json({ ok: true });
+  }
+
   if (request.method === "POST" && url.pathname === "/api/admin/catalog") {
     const body = await request.json<Record<string, unknown>>();
     const kind = text(body.kind);
