@@ -97,7 +97,8 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
 
 async function serveMedia(request: Request, env: Env, pathname: string): Promise<Response> {
   const key = pathname.slice(7).split("/").map(decodeURIComponent).join("/");
-  if (!key || key.includes("..")) return new Response("Not Found", { status: 404 });
+  const privateObject = key.startsWith("settings/") || key.startsWith("poll-archives/") || key === "ivr-prompts/config.json";
+  if (!key || key.includes("..") || privateObject) return new Response("Not Found", { status: 404 });
   const object = await env.MEDIA.get(key);
   if (!object) return new Response("Not Found", { status: 404 });
   const headers = new Headers();
