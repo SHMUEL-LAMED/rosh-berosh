@@ -1,42 +1,27 @@
+import { unzipSync } from "fflate";
+
 export type UploadFile = { file: File; path: string };
 
 export function fromDirectory(files: FileList | File[]): UploadFile[] {
   return Array.from(files).filter((file) => file.size > 0).map((file) => ({ file, path: file.webkitRelativePath || file.name }));
 }
 
+// Uses fflate for full ZIP-spec coverage (ZIP64, data descriptors, stored/deflate),
+// which the previous hand-rolled reader did not handle. Directory entries and macOS
+// metadata (__MACOSX, dotfiles) are skipped.
 export async function fromZip(zip: File): Promise<UploadFile[]> {
   const bytes = new Uint8Array(await zip.arrayBuffer());
-  const view = new DataView(bytes.buffer);
-  let eocd = -1;
-  for (let index = bytes.length - 22; index >= Math.max(0, bytes.length - 65557); index--) {
-    if (view.getUint32(index, true) === 0x06054b50) { eocd = index; break; }
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(bytes, { filter: (file) => !file.name.endsWith("/") && !file.name.startsWith("__MACOSX/") });
+  } catch {
+    throw new Error("לא ניתן לפתוח את קובץ ה-ZIP. ייתכן שהוא דחוס בשיטה שאינה נתמכת (למשל Deflate64) או מוגן בסיסמה — נסו לדחוס מחדש כ-ZIP רגיל או להעלות את התיקייה ישירות.");
   }
-  if (eocd < 0) throw new Error("קובץ ה־ZIP אינו תקין.");
-  const entries = view.getUint16(eocd + 10, true);
-  let cursor = view.getUint32(eocd + 16, true);
   const result: UploadFile[] = [];
-  for (let index = 0; index < entries; index++) {
-    if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error("מבנה ZIP אינו נתמך.");
-    const method = view.getUint16(cursor + 10, true);
-    const compressedSize = view.getUint32(cursor + 20, true);
-    const uncompressedSize = view.getUint32(cursor + 24, true);
-    const nameLength = view.getUint16(cursor + 28, true), extraLength = view.getUint16(cursor + 30, true), commentLength = view.getUint16(cursor + 32, true);
-    const localOffset = view.getUint32(cursor + 42, true);
-    const path = new TextDecoder().decode(bytes.slice(cursor + 46, cursor + 46 + nameLength));
-    cursor += 46 + nameLength + extraLength + commentLength;
-    if (path.endsWith("/") || path.startsWith("__MACOSX/")) continue;
-    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error("רשומת ZIP פגומה.");
-    const localNameLength = view.getUint16(localOffset + 26, true), localExtraLength = view.getUint16(localOffset + 28, true);
-    const start = localOffset + 30 + localNameLength + localExtraLength;
-    const compressed = bytes.slice(start, start + compressedSize);
-    let data: Uint8Array;
-    if (method === 0) data = compressed;
-    else if (method === 8) {
-      const stream = new Blob([new Uint8Array(compressed).buffer]).stream().pipeThrough(new DecompressionStream("deflate-raw" as "deflate"));
-      data = new Uint8Array(await new Response(stream).arrayBuffer());
-    } else throw new Error(`שיטת דחיסה ${method} אינה נתמכת.`);
-    if (uncompressedSize && data.length !== uncompressedSize) throw new Error(`הקובץ ${path} לא חולץ בשלמותו.`);
-    result.push({ file: new File([new Uint8Array(data).buffer], path.split("/").pop() || "file", { type: mimeFor(path) }), path });
+  for (const [path, data] of Object.entries(entries)) {
+    const name = path.split("/").pop() || "file";
+    if (!data.length || name.startsWith(".")) continue;
+    result.push({ file: new File([new Uint8Array(data).buffer], name, { type: mimeFor(path) }), path });
   }
   return result;
 }
