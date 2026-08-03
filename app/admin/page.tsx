@@ -88,6 +88,27 @@ export default function AdminPage() {
     try { const split = splitAlbumFiles(fromDirectory(files)); if (split.cover) await uploadMedia(albumId, split.cover, "cover"); for (let i = 0; i < split.audio.length; i++) { setMessage(`מעלים קובץ ${i + 1} מתוך ${split.audio.length}…`); await uploadMedia(albumId, split.audio[i], "audio", i); } setMessage("הקבצים נוספו לאלבום."); await load(); }
     catch (error) { setMessage(error instanceof Error ? error.message : "ההעלאה נכשלה."); } finally { setUploading(false); }
   };
+  const uploadArtistImage = async (artistId: string, file: File) => {
+    setMessage("מעלים תמונת זמר…");
+    try { const form = new FormData(); form.set("artistId", artistId); form.set("kind", "artist"); form.set("file", file); await api("/api/admin/media", { method: "POST", body: form }); setMessage("תמונת הזמר עודכנה."); await load(); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "העלאת התמונה נכשלה."); }
+  };
+  const removeArtistImage = async (artistId: string) => {
+    if (!confirm("להסיר את תמונת הזמר?")) return;
+    try { await api("/api/admin/media", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ artistId, kind: "artist" }) }); setMessage("תמונת הזמר הוסרה."); await load(); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "מחיקת התמונה נכשלה."); }
+  };
+  const addArtist = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = event.currentTarget, values = new FormData(form), name = String(values.get("name") || "").trim();
+    if (!name) return setMessage("יש להזין שם זמר.");
+    setMessage("שומרים…");
+    try {
+      const { id } = await api("/api/admin/catalog", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "artist", name, imageUrl: String(values.get("imageUrl") || ""), position: Number(values.get("position") || 0) }) });
+      const file = (form.elements.namedItem("image") as HTMLInputElement)?.files?.[0];
+      if (file) { const body = new FormData(); body.set("artistId", id); body.set("kind", "artist"); body.set("file", file); setMessage("מעלים תמונת זמר…"); await api("/api/admin/media", { method: "POST", body }); }
+      form.reset(); setMessage("הזמר נוסף."); await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "השמירה נכשלה."); }
+  };
 
   return <main className="admin-shell" dir="rtl">
     <aside className="admin-side"><div className="vote-header"><div className="logo-mark">ר</div><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
@@ -102,7 +123,7 @@ export default function AdminPage() {
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
       {tab === "archives" && <ArchivesPanel onChanged={load} onMessage={setMessage} />}
       {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP. התמונה הראשונה תהפוך לעטיפה וכל קובצי השמע יהפכו לשירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*,image/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מעלה…" : "יצירת האלבום"}</button></form></AdminSection><div className="album-admin-grid">{data?.albums.map((album) => <AlbumEditor key={album.id} album={album} songs={data.songs.filter((song) => song.albumId === album.id)} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onDeleteCover={deleteCover} onFiles={(files) => addFiles(album.id, files)} />)}</div></>}
-      {tab === "artists" && <AdminSection title="ניהול זמרים"><form onSubmit={(event) => saveCatalog(event, "artist")}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><button>הוסף זמר</button></form><div className="admin-list">{data?.artists.map((item) => <article key={item.id}><div>{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <i>{item.name[0]}</i>}<span><b>{item.name}</b><small>זמר</small></span></div><div className="row-actions"><Toggle active={!!item.active} onClick={() => toggle("artist", item.id, !item.active)} /><button className="danger" onClick={() => remove("artist", item.id)}>מחיקה</button></div></article>)}</div></AdminSection>}
+      {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{data?.artists.map((item) => <ArtistRow key={item.id} item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} />)}</div></AdminSection>}
       {tab === "managers" && data && <ManagersPanel managers={data.managers} currentEmail={user.email} onSaved={load} onMessage={setMessage} />}
       {tab === "results" && data && <Results data={data.results} />}
     </section>
@@ -223,6 +244,12 @@ function SongEditor({ song, onSave, onToggle, onDelete }: { song: Song; onSave(e
     } finally { setAnalyzing(false); }
   };
   return <form className="song-editor" onSubmit={(event) => { if (end && end <= start) { event.preventDefault(); return; } onSave(event, "song"); }}><input type="hidden" name="id" value={song.id} /><input type="hidden" name="albumId" value={song.albumId} /><input className="song-title-input" name="title" defaultValue={song.title} />{song.audioUrl && <div className="chorus-picker"><audio ref={audio} preload="metadata" src={song.audioUrl} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onTimeUpdate={(event) => { const current = event.currentTarget.currentTime; setPosition(current); if (playing && end > start && current >= end) { event.currentTarget.pause(); setPlaying(false); event.currentTarget.currentTime = start; } }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} /><div className="chorus-player"><button type="button" className="round-play" onClick={() => playing ? audio.current?.pause() : preview()}>{playing ? "❚❚" : "▶"}</button><input aria-label="מיקום בשיר" type="range" min="0" max={Math.max(1, duration)} step="0.1" value={position} onChange={(event) => seek(Number(event.target.value))} /><span>{formatTime(position)} / {formatTime(duration)}</span></div><div className="chorus-actions"><button type="button" onClick={setStartHere}>קבע התחלה כאן</button><button type="button" onClick={setEndHere}>קבע סיום כאן</button><button type="button" onClick={preview}>השמע את הקטע</button><button type="button" onClick={analyze} disabled={analyzing}>{analyzing ? "מנתח…" : "פזמון AI"}</button></div></div>}<label>תחילת הקטע<input name="previewStart" type="number" min="0" max={duration || undefined} step="0.1" value={start} onChange={(e) => setStart(clamp(Number(e.target.value)))} /></label><label>סיום הקטע<input name="previewEnd" type="number" min="0" max={duration || undefined} step="0.1" value={end} onChange={(e) => setEnd(clamp(Number(e.target.value)))} /></label><div className="song-editor-actions"><button>שמירת השיר</button><Toggle active={!!song.active} onClick={() => onToggle("song", song.id, !song.active)} /><button type="button" className="danger" onClick={() => onDelete("song", song.id)}>מחיקת השיר והקובץ</button></div>{end > 0 && end <= start && <small className="field-error">זמן הסיום חייב להיות אחרי זמן ההתחלה.</small>}</form>;
+}
+
+function ArtistRow({ item, onToggle, onDelete, onUploadImage, onRemoveImage }: { item: Artist; onToggle(kind: "album" | "song" | "artist", id: string, active: boolean): void; onDelete(kind: "album" | "song" | "artist", id: string): void; onUploadImage(artistId: string, file: File): Promise<void> | void; onRemoveImage(artistId: string): Promise<void> | void }) {
+  const [busy, setBusy] = useState(false);
+  const pick = async (files: FileList | null) => { const file = files?.[0]; if (!file) return; setBusy(true); try { await onUploadImage(item.id, file); } finally { setBusy(false); } };
+  return <article><div>{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <i>{item.name[0]}</i>}<span><b>{item.name}</b><small>זמר</small></span></div><div className="row-actions"><label className="mini-upload">{busy ? "מעלה…" : item.imageUrl ? "החלפת תמונה" : "העלאת תמונה"}<input type="file" accept="image/*" disabled={busy} onChange={(event) => pick(event.target.files)} /></label>{item.imageUrl && <button type="button" onClick={() => onRemoveImage(item.id)}>הסרת תמונה</button>}<Toggle active={!!item.active} onClick={() => onToggle("artist", item.id, !item.active)} /><button className="danger" onClick={() => onDelete("artist", item.id)}>מחיקה</button></div></article>;
 }
 
 function ManagersPanel({ managers, currentEmail, onSaved, onMessage }: { managers: string[]; currentEmail: string; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
