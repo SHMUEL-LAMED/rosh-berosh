@@ -27,6 +27,8 @@ async function chooseOne(call, title, items, label) {
 }
 
 async function chooseMany(call, title, items, amount, label) {
+  if (!amount) return [];
+  if (items.length < amount) throw new Error(`not enough ${label} choices`);
   const remaining = [...items];
   const selected = [];
   while (selected.length < amount) {
@@ -49,18 +51,25 @@ const router = YemotRouter({
 
 router.get("/", async (call) => {
   const { response, result: catalog } = await api("/api/catalog");
-  if (!response.ok || !catalog.albums?.length) return call.id_list_message([text("ההצבעה עדיין אינה פתוחה.")]);
+  if (!response.ok || !catalog.rules?.votingOpen) return call.id_list_message([text("ההצבעה עדיין אינה פתוחה.")]);
 
-  const selectedAlbums = await chooseMany(call, "בחרו חמישה אלבומים. ", catalog.albums, 5, "לאלבום");
+  const rules = catalog.rules;
+  const albumAmount = rules.albumsEnabled ? rules.albumsMax : 0;
+  const songsPerAlbum = rules.songsEnabled ? rules.songsMax : 0;
+  const artistAmount = rules.artistsEnabled ? rules.artistsMax : 0;
+  if (rules.albumsEnabled && (!catalog.albums?.length || catalog.albums.length < albumAmount)) return call.id_list_message([text("רשימת האלבומים עדיין אינה מוכנה.")]);
+
+  const selectedAlbums = await chooseMany(call, `בחרו ${albumAmount} אלבומים. `, catalog.albums || [], albumAmount, "לאלבום");
   const songIdsByAlbum = {};
-  for (const album of selectedAlbums) {
-    const albumSongs = catalog.songs.filter((song) => song.albumId === album.id);
-    const song = await chooseOne(call, `בחרו שיר מתוך האלבום ${album.title}. `, albumSongs, "לשיר");
-    if (!song) throw new Error("album has no songs");
-    songIdsByAlbum[album.id] = song.id;
+  if (rules.songsEnabled) {
+    for (const album of selectedAlbums) {
+      const albumSongs = (catalog.songs || []).filter((song) => song.albumId === album.id);
+      const selectedSongs = await chooseMany(call, `בחרו ${songsPerAlbum} שירים מתוך האלבום ${album.title}. `, albumSongs, songsPerAlbum, "לשיר");
+      songIdsByAlbum[album.id] = selectedSongs.map((song) => song.id);
+    }
   }
 
-  const selectedArtists = await chooseMany(call, "בחרו שלושה זמרים. ", catalog.artists, 3, "לזמר");
+  const selectedArtists = await chooseMany(call, `בחרו ${artistAmount} זמרים. `, catalog.artists || [], artistAmount, "לזמר");
   const submission = await api("/api/ballots", {
     method: "POST",
     headers: { "content-type": "application/json" },
