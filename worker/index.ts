@@ -118,14 +118,14 @@ const worker = {
       try {
         const { credential } = await request.json<{ credential?: string }>();
         if (!credential) return json({ error: "חסר אישור Google." }, 400);
-        const user = await verifyGoogleCredential(credential);
+        const user = await verifyGoogleCredential(credential, env);
         const response = json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } });
         response.headers.set("set-cookie", sessionCookie(credential));
         return response;
       } catch (error) { console.error("google auth error", error); return json({ error: "ההתחברות באמצעות Google נכשלה." }, 401); }
     }
     if (url.pathname === "/api/auth/me" && request.method === "GET") {
-      const user = await readSession(request);
+      const user = await readSession(request, env);
       return user ? json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } }) : json({ user: null }, 401);
     }
     if (url.pathname === "/api/auth/logout" && request.method === "POST") { const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
@@ -134,7 +134,7 @@ const worker = {
     if (url.pathname === "/api/ballots" && request.method === "POST") {
       const original = await request.json<Submission>();
       if (original.channel === "phone") return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
-      const user = await readSession(request);
+      const user = await readSession(request, env);
       if (!user) return json({ error: "יש להתחבר באמצעות Google." }, 401);
       return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub }) }), env);
     }

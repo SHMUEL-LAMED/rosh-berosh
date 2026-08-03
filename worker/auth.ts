@@ -14,6 +14,34 @@ const ADMIN_EMAILS = new Set([
   "0534169095@xn--4dbjbascrao3i.com",
 ]);
 
+type AuthEnv = { MEDIA?: R2Bucket };
+const ADMIN_LIST_KEY = "settings/admin-emails.json";
+
+export async function readAdminEmails(env?: AuthEnv): Promise<string[]> {
+  const emails = new Set(ADMIN_EMAILS);
+  if (env?.MEDIA) {
+    try {
+      const object = await env.MEDIA.get(ADMIN_LIST_KEY);
+      if (object) {
+        const saved = await object.json<string[]>();
+        saved.forEach((email) => emails.add(String(email).trim().toLowerCase()));
+      }
+    } catch (error) {
+      console.error("admin list read error", error);
+    }
+  }
+  return [...emails].sort();
+}
+
+export async function saveAdminEmails(env: AuthEnv, emails: string[]): Promise<string[]> {
+  if (!env.MEDIA) throw new Error("media storage unavailable");
+  const normalized = [...new Set(emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
+  await env.MEDIA.put(ADMIN_LIST_KEY, JSON.stringify(normalized), {
+    httpMetadata: { contentType: "application/json", cacheControl: "no-store" },
+  });
+  return readAdminEmails(env);
+}
+
 const encoder = new TextEncoder();
 
 function fromBase64Url(value: string): Uint8Array {
@@ -25,7 +53,7 @@ function decodePart<T>(part: string): T {
   return JSON.parse(new TextDecoder().decode(fromBase64Url(part))) as T;
 }
 
-export async function verifyGoogleCredential(credential: string): Promise<SessionUser> {
+export async function verifyGoogleCredential(credential: string, env?: AuthEnv): Promise<SessionUser> {
   const parts = credential.split(".");
   if (parts.length !== 3) throw new Error("invalid credential");
   const header = decodePart<{ alg?: string; kid?: string }>(parts[0]);
@@ -44,15 +72,16 @@ export async function verifyGoogleCredential(credential: string): Promise<Sessio
     throw new Error("invalid google identity");
   }
   const email = payload.email.toLowerCase();
-  return { sub: payload.sub, email, name: payload.name || email, picture: payload.picture, isAdmin: ADMIN_EMAILS.has(email), exp: payload.exp };
+  const admins = await readAdminEmails(env);
+  return { sub: payload.sub, email, name: payload.name || email, picture: payload.picture, isAdmin: admins.includes(email), exp: payload.exp };
 }
 
-export async function readSession(request: Request): Promise<SessionUser | null> {
+export async function readSession(request: Request, env?: AuthEnv): Promise<SessionUser | null> {
   const cookie = request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith("rosh_session="));
   const token = cookie?.slice("rosh_session=".length);
   if (!token) return null;
   try {
-    return await verifyGoogleCredential(token);
+    return await verifyGoogleCredential(token, env);
   } catch {
     return null;
   }

@@ -92,7 +92,7 @@ export default function Home() {
         {!catalog && !error && <div className="loading">טוענים את רשימת המצעד…</div>}
         {catalog && catalog.albums.length === 0 && <div className="empty-catalog"><h2>המצעד בהכנה</h2><p>התוכן יעלה בקרוב.</p></div>}
         {catalog && stage === "albums" && <><Title kicker="שלב ראשון" title={`בחרו ${rangeText(catalog.rules.albumsMin, catalog.rules.albumsMax, "אלבומים")}`} count={`${albums.length}/${catalog.rules.albumsMax}`} /><div className="album-grid">{catalog.albums.map((album) => <button type="button" key={album.id} className={`choice-card ${albums.includes(album.id) ? "selected" : ""}`} onClick={() => toggleAlbum(album.id)}>{album.coverUrl ? <img src={album.coverUrl} alt="" /> : <span className="cover-fallback">♫</span>}<b>{album.title}</b><small>{album.artistName}</small><i>{albums.includes(album.id) ? "✓" : "+"}</i></button>)}</div></>}
-        {catalog && stage === "songs" && <><Title kicker="שלב שני" title={`בחרו ${rangeText(catalog.rules.songsMin, catalog.rules.songsMax, "שירים")} מכל אלבום`} count={`${Object.values(songs).reduce((n, ids) => n + ids.length, 0)}/${albums.length * catalog.rules.songsMax}`} /><div className="song-groups">{selectedAlbums.map((album) => <fieldset key={album.id}><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button className="song-select" onClick={() => toggleSong(album.id, song.id)}><i>{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => setPlayer(song)}>{player?.id === song.id ? "❚❚" : "▶"}</button>}</div>)}</fieldset>)}</div></>}
+        {catalog && stage === "songs" && <><Title kicker="שלב שני" title={`בחרו ${rangeText(catalog.rules.songsMin, catalog.rules.songsMax, "שירים")} מכל אלבום`} count={`${Object.values(songs).reduce((n, ids) => n + ids.length, 0)}/${albums.length * catalog.rules.songsMax}`} /><div className="song-groups">{selectedAlbums.map((album) => <fieldset key={album.id}><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button className="song-select" onClick={() => toggleSong(album.id, song.id)}><i>{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => setPlayer((current) => current?.id === song.id ? null : song)}>{player?.id === song.id ? "■" : "▶"}</button>}</div>)}</fieldset>)}</div></>}
         {catalog && stage === "artists" && <><Title kicker="שלב שלישי" title={`בחרו ${rangeText(catalog.rules.artistsMin, catalog.rules.artistsMax, "זמרים")}`} count={`${artists.length}/${catalog.rules.artistsMax}`} /><div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" /> : <span>{artist.name.slice(0, 1)}</span>}<b>{artist.name}</b><i>{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "summary" && <><Title kicker="כמעט סיימנו" title="אישור ההצבעה" /><div className="summary">{catalog.rules.albumsEnabled ? <><h3>האלבומים והשירים שבחרתם</h3>{selectedAlbums.map((album) => <div key={album.id}><b>{album.title}</b><span>{selectedSongNames(album.id)}</span></div>)}</> : null}{catalog.rules.artistsEnabled ? <><h3>הזמרים שבחרתם</h3><p>{selectedArtists.map((artist) => artist.name).join(" · ")}</p></> : null}</div><div className="signed-voter"><span>ההצבעה תישמר עבור</span><b>{user.email}</b></div></>}
         {error && <p className="vote-error">{error}</p>}
@@ -107,14 +107,25 @@ function Title({ kicker, title, count }: { kicker: string; title: string; count?
 
 function AudioPlayer({ song, onClose }: { song: Song; onClose(): void }) {
   const audio = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const start = Math.max(0, song.previewStart ?? 0);
+  const configuredEnd = Math.max(start, song.previewEnd ?? 0);
+  const end = configuredEnd > start ? configuredEnd : duration;
   useEffect(() => {
     const element = audio.current;
     if (!element) return;
-    const start = Math.max(0, song.previewStart ?? 0), end = Math.max(start, song.previewEnd ?? 0);
-    const begin = () => { if (start) element.currentTime = start; element.play().catch(() => undefined); };
-    const stopAtEnd = () => { if (end && element.currentTime >= end) { element.pause(); element.currentTime = start; } };
-    element.addEventListener("loadedmetadata", begin, { once: true }); element.addEventListener("timeupdate", stopAtEnd);
-    return () => element.removeEventListener("timeupdate", stopAtEnd);
-  }, [song]);
-  return <div className="audio-dock"><button onClick={onClose} aria-label="סגירת הנגן">×</button><div><small>עכשיו מתנגן</small><b>{song.title}</b></div><audio ref={audio} key={song.id} controls autoPlay src={song.audioUrl ?? ""} /></div>;
+    setCurrent(start); setPlaying(false);
+    const begin = () => { setDuration(element.duration || 0); element.currentTime = start; setCurrent(start); element.play().then(() => setPlaying(true)).catch(() => undefined); };
+    element.addEventListener("loadedmetadata", begin, { once: true });
+    return () => { element.pause(); };
+  }, [song, start]);
+  const toggle = () => { const element = audio.current; if (!element) return; if (element.paused) { if (element.currentTime >= end) element.currentTime = start; element.play().then(() => setPlaying(true)).catch(() => undefined); } else { element.pause(); setPlaying(false); } };
+  const seek = (value: number) => { if (!audio.current) return; audio.current.currentTime = value; setCurrent(value); };
+  const changeVolume = (value: number) => { if (audio.current) audio.current.volume = value; setVolume(value); };
+  return <div className="audio-dock"><audio ref={audio} key={song.id} src={song.audioUrl ?? ""} preload="metadata" onDurationChange={(event) => setDuration(event.currentTarget.duration || 0)} onTimeUpdate={(event) => { const value = event.currentTarget.currentTime; setCurrent(value); if (configuredEnd > start && value >= configuredEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = start; setCurrent(start); setPlaying(false); } }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} /><button className="player-close" onClick={onClose} aria-label="סגירת הנגן">×</button><button className="player-main" onClick={toggle} aria-label={playing ? "השהיה" : "נגינה"}>{playing ? "❚❚" : "▶"}</button><div className="player-copy"><small>{configuredEnd > start ? "קטע נבחר" : "השיר המלא"}</small><b>{song.title}</b></div><div className="player-progress"><input aria-label="מיקום בשיר" type="range" min={start} max={Math.max(start + 1, end || duration || 1)} step="0.1" value={Math.min(current, Math.max(start + 1, end || duration || 1))} onChange={(event) => seek(Number(event.target.value))} /><span>{formatPlayerTime(current - start)} / {formatPlayerTime(Math.max(0, end - start))}</span></div><label className="player-volume" aria-label="עוצמת שמע">🔊<input type="range" min="0" max="1" step="0.05" value={volume} onChange={(event) => changeVolume(Number(event.target.value))} /></label></div>;
 }
+
+function formatPlayerTime(value: number) { if (!Number.isFinite(value) || value < 0) return "0:00"; return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`; }

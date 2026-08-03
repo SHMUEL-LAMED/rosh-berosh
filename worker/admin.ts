@@ -1,12 +1,12 @@
-import { readSession } from "./auth";
+import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
 import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
 
 type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 
-async function requireAdmin(request: Request) {
-  const user = await readSession(request);
+async function requireAdmin(request: Request, env: AdminEnv) {
+  const user = await readSession(request, env);
   return user?.isAdmin ? user : null;
 }
 
@@ -15,9 +15,19 @@ const number = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) 
 const flag = (value: unknown) => value === true || value === 1 || value === "1" || value === "true" || value === "on";
 const mediaUrl = (key: string) => `/media/${key.split("/").map(encodeURIComponent).join("/")}`;
 const safeName = (name: string) => name.normalize("NFKD").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 110) || "file";
+const keyFromMediaUrl = (url?: string | null) => url?.startsWith("/media/") ? decodeURIComponent(url.slice(7)) : null;
+
+async function deleteMediaUrls(env: AdminEnv, urls: Array<string | null | undefined>) {
+  const keys = [...new Set(urls.map(keyFromMediaUrl).filter((key): key is string => !!key))];
+  if (keys.length) {
+    const results = await Promise.allSettled(keys.map((key) => env.MEDIA.delete(key)));
+    results.forEach((result, index) => { if (result.status === "rejected") console.error("media cleanup failed", keys[index], result.reason); });
+  }
+}
 
 export async function adminApi(request: Request, env: AdminEnv): Promise<Response> {
-  if (!await requireAdmin(request)) return json({ error: "אין הרשאת מנהל." }, 403);
+  const currentAdmin = await requireAdmin(request, env);
+  if (!currentAdmin) return json({ error: "אין הרשאת מנהל." }, 403);
   await ensureRuntimeSchema(env);
   const url = new URL(request.url);
 
@@ -32,8 +42,28 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       env.DB.prepare("SELECT s.id,s.title,a.title AS albumTitle,COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id GROUP BY s.id ORDER BY votes DESC,s.title"),
       env.DB.prepare("SELECT a.id,a.name,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id GROUP BY a.id ORDER BY votes DESC,a.name"),
     ]);
-    const ivrPrompts = await readIvrPrompts(env);
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0], ivrPrompts, results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results } });
+    const [ivrPrompts, managers] = await Promise.all([readIvrPrompts(env), readAdminEmails(env)]);
+    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0], ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results } });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/managers") {
+    const body = await request.json<{ email?: string }>();
+    const email = text(body.email).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "כתובת הדוא״ל אינה תקינה." }, 400);
+    const managers = await readAdminEmails(env);
+    if (!managers.includes(email)) managers.push(email);
+    return json({ ok: true, managers: await saveAdminEmails(env, managers) });
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/admin/managers") {
+    const body = await request.json<{ email?: string }>();
+    const email = text(body.email).toLowerCase();
+    if (!email) return json({ error: "כתובת מנהל חסרה." }, 400);
+    if (email === currentAdmin.email) return json({ error: "אי אפשר להסיר את החשבון שבו אתם מחוברים." }, 400);
+    const protectedEmails = new Set(["o0534169095@gmail.com", "0534169095@xn--4dbjbascrao3i.com"]);
+    if (protectedEmails.has(email)) return json({ error: "זהו חשבון מנהל ראשי ואי אפשר להסירו." }, 400);
+    const managers = (await readAdminEmails(env)).filter((item) => item !== email);
+    return json({ ok: true, managers: await saveAdminEmails(env, managers) });
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/ivr-prompt") {
@@ -111,7 +141,9 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     await env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId, kind } });
     const urlPath = mediaUrl(key);
     if (kind === "cover") {
+      const previous = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(albumId).first<{ coverUrl?: string }>();
       await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=?").bind(urlPath, albumId).run();
+      await deleteMediaUrls(env, [previous?.coverUrl]);
       return json({ ok: true, url: urlPath });
     }
     const songId = crypto.randomUUID();
@@ -119,6 +151,16 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     await env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,0,0,?,1)")
       .bind(songId, albumId, title, urlPath, number(form.get("position"))).run();
     return json({ ok: true, id: songId, url: urlPath });
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/admin/media") {
+    const body = await request.json<{ albumId?: string; kind?: string }>();
+    if (!body.albumId || body.kind !== "cover") return json({ error: "בקשת מחיקת הקובץ אינה תקינה." }, 400);
+    const album = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(body.albumId).first<{ coverUrl?: string }>();
+    if (!album) return json({ error: "האלבום לא נמצא." }, 404);
+    await env.DB.prepare("UPDATE albums SET cover_url=NULL WHERE id=?").bind(body.albumId).run();
+    await deleteMediaUrls(env, [album.coverUrl]);
+    return json({ ok: true });
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/toggle") {
@@ -132,10 +174,34 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
 
   if (request.method === "DELETE" && url.pathname === "/api/admin/catalog") {
     const body = await request.json<{ kind?: string; id?: string }>();
-    const tables: Record<string, string> = { album: "albums", song: "songs", artist: "artists" };
-    const table = tables[body.kind ?? ""];
-    if (!table || !body.id) return json({ error: "בקשה לא תקינה." }, 400);
-    await env.DB.prepare(`DELETE FROM ${table} WHERE id=?`).bind(body.id).run();
+    if (!body.id || !["album", "song", "artist"].includes(body.kind ?? "")) return json({ error: "בקשה לא תקינה." }, 400);
+    if (body.kind === "album") {
+      const album = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(body.id).first<{ coverUrl?: string }>();
+      const songs = await env.DB.prepare("SELECT audio_url AS audioUrl FROM songs WHERE album_id=?").bind(body.id).all<{ audioUrl?: string }>();
+      if (!album) return json({ error: "האלבום כבר אינו קיים." }, 404);
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM song_votes WHERE album_id=?").bind(body.id),
+        env.DB.prepare("DELETE FROM album_votes WHERE album_id=?").bind(body.id),
+        env.DB.prepare("DELETE FROM songs WHERE album_id=?").bind(body.id),
+        env.DB.prepare("DELETE FROM albums WHERE id=?").bind(body.id),
+      ]);
+      await deleteMediaUrls(env, [album.coverUrl, ...songs.results.map((song) => song.audioUrl)]);
+    } else if (body.kind === "song") {
+      const song = await env.DB.prepare("SELECT audio_url AS audioUrl FROM songs WHERE id=?").bind(body.id).first<{ audioUrl?: string }>();
+      if (!song) return json({ error: "השיר כבר אינו קיים." }, 404);
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM song_votes WHERE song_id=?").bind(body.id),
+        env.DB.prepare("DELETE FROM songs WHERE id=?").bind(body.id),
+      ]);
+      await deleteMediaUrls(env, [song.audioUrl]);
+    } else {
+      const artist = await env.DB.prepare("SELECT id FROM artists WHERE id=?").bind(body.id).first();
+      if (!artist) return json({ error: "הזמר כבר אינו קיים." }, 404);
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM artist_votes WHERE artist_id=?").bind(body.id),
+        env.DB.prepare("DELETE FROM artists WHERE id=?").bind(body.id),
+      ]);
+    }
     return json({ ok: true });
   }
 
