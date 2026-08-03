@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/ivr-service/node_modules
 /.npm-cache
 *.tsbuildinfo
 /.pnp

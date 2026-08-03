@@ -11,8 +11,18 @@ type Song = { id: string; albumId: string; title: string; audioUrl?: string; pre
 type Artist = { id: string; name: string; imageUrl?: string; position: number; active: number };
 type Settings = { votingOpen: number; albumsEnabled: number; albumsMin: number; albumsMax: number; songsEnabled: number; songsMin: number; songsMax: number; artistsEnabled: number; artistsMin: number; artistsMax: number };
 type Result = { id: string; title?: string; name?: string; albumTitle?: string; votes: number };
-type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; votes: { total?: number; phone?: number; site?: number }; settings: Settings; results: { albums: Result[]; songs: Result[]; artists: Result[] } };
-type Tab = "dashboard" | "albums" | "artists" | "settings" | "results";
+type IvrPrompt = { key: string; label: string; audioUrl: string; yemotPath: string; updatedAt: number };
+type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; votes: { total?: number; phone?: number; site?: number }; settings: Settings; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] } };
+type Tab = "dashboard" | "albums" | "artists" | "ivr" | "settings" | "results";
+
+const SYSTEM_PROMPTS = [
+  ["system:main_menu", "תפריט ראשי — אלבומים 1, שירים 2, זמרים 3"], ["system:albums_intro", "פתיח לבחירת אלבומים"],
+  ["system:songs_intro", "פתיח לבחירת שירים"], ["system:artists_intro", "פתיח לבחירת זמרים"],
+  ["system:need_albums", "יש לבחור קודם אלבומים"], ["system:section_saved", "הבחירה נשמרה וחוזרים לתפריט"],
+  ["system:already_voted", "כבר הצבעתם"], ["system:voting_closed", "ההצבעה עדיין אינה פתוחה"],
+  ["system:not_ready", "רשימות המצעד עדיין אינן מוכנות"], ["system:error", "אירעה שגיאה"],
+  ["system:success", "ההצבעה נקלטה בהצלחה"],
+] as const;
 
 export default function AdminPage() {
   const [user] = useCurrentUser();
@@ -66,12 +76,13 @@ export default function AdminPage() {
 
   return <main className="admin-shell" dir="rtl">
     <aside className="admin-side"><div className="vote-header"><div className="logo-mark">ר</div><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
-      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Link href="/">מעבר לאתר</Link>
+      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
-    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ albums: "אלבומים ושירים", artists: "זמרים", settings: "הגדרות הסקר", results: "תוצאות" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
+    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", results: "תוצאות" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
       <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>
       {message && <p className="admin-message">{message}</p>}
       {tab === "dashboard" && <Dashboard data={data} onNavigate={setTab} />}
+      {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={setMessage} />}
       {tab === "settings" && data && <SettingsPanel settings={data.settings} onSaved={async () => { setMessage("ההגדרות נשמרו גם לאתר וגם לקו."); await load(); }} />}
       {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP. התמונה הראשונה תהפוך לעטיפה וכל קובצי השמע יהפכו לשירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*,image/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מעלה…" : "יצירת האלבום"}</button></form></AdminSection><div className="album-admin-grid">{data?.albums.map((album) => <AlbumEditor key={album.id} album={album} songs={data.songs.filter((song) => song.albumId === album.id)} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onFiles={(files) => addFiles(album.id, files)} />)}</div></>}
       {tab === "artists" && <AdminSection title="ניהול זמרים"><form onSubmit={(event) => saveCatalog(event, "artist")}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><button>הוסף זמר</button></form><div className="admin-list">{data?.artists.map((item) => <article key={item.id}><div>{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <i>{item.name[0]}</i>}<span><b>{item.name}</b><small>זמר</small></span></div><div className="row-actions"><Toggle active={!!item.active} onClick={() => toggle("artist", item.id, !item.active)} /><button className="danger" onClick={() => remove("artist", item.id)}>מחיקה</button></div></article>)}</div></AdminSection>}
@@ -81,6 +92,39 @@ export default function AdminPage() {
 }
 
 function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab: Tab): void }) { return <div className="dashboard-grid"><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>; }
+
+function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
+  const promptFor = (key: string) => data.ivrPrompts?.find((prompt) => prompt.key === key);
+  const rows = (items: { key: string; label: string }[]) => <div className="prompt-list">{items.map((item) => <PromptRow key={item.key} item={item} prompt={promptFor(item.key)} onSaved={onSaved} onMessage={onMessage} />)}</div>;
+  return <AdminSection title="קריינות הקו הטלפוני">
+    <p className="panel-help">בכל שורה אפשר להעלות הקלטה משלכם. אם אין הקלטה פעילה, הקו משתמש בהקראה אוטומטית. התפריט הראשי נשאר קצר: 1 אלבומים, 2 שירים מתוך האלבומים שנבחרו, 3 זמרים.</p>
+    <h3 className="prompt-heading">הודעות המערכת</h3>{rows(SYSTEM_PROMPTS.map(([key, label]) => ({ key, label })))}
+    <details className="prompt-group"><summary>שמות האלבומים</summary>{rows(data.albums.map((album) => ({ key: `album:${album.id}`, label: `${album.title} — ${album.artistName}` })))}</details>
+    <details className="prompt-group"><summary>שמות השירים</summary>{rows(data.songs.map((song) => ({ key: `song:${song.id}`, label: song.title })))}</details>
+    <details className="prompt-group"><summary>שמות הזמרים</summary>{rows(data.artists.map((artist) => ({ key: `artist:${artist.id}`, label: artist.name })))}</details>
+  </AdminSection>;
+}
+
+function PromptRow({ item, prompt, onSaved, onMessage }: { item: { key: string; label: string }; prompt?: IvrPrompt; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
+  const [busy, setBusy] = useState(false);
+  const upload = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = event.currentTarget, file = (form.elements.namedItem("file") as HTMLInputElement).files?.[0];
+    if (!file) return onMessage("יש לבחור קובץ שמע.");
+    setBusy(true); onMessage("מעלים את הקריינות…");
+    try {
+      const body = new FormData(); body.set("key", item.key); body.set("label", item.label); body.set("file", file);
+      const response = await fetch("/api/admin/ivr-prompt", { method: "POST", body }), result = await response.json();
+      if (!response.ok) throw new Error(result.error || "העלאת הקריינות נכשלה.");
+      onMessage(result.warning || "הקריינות נשמרה והיא פעילה בקו."); form.reset(); await onSaved();
+    } catch (error) { onMessage(error instanceof Error ? error.message : "העלאת הקריינות נכשלה."); } finally { setBusy(false); }
+  };
+  const removePrompt = async () => {
+    if (!prompt || !confirm("להסיר את הקריינות ולחזור להקראה האוטומטית?")) return;
+    const response = await fetch("/api/admin/ivr-prompt", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key }) });
+    if (response.ok) { onMessage("הקריינות הוסרה. הקו יחזור להקראה אוטומטית."); await onSaved(); }
+  };
+  return <article className="prompt-row"><div className="prompt-copy"><b>{item.label}</b><small className={prompt?.yemotPath ? "prompt-live" : ""}>{prompt ? prompt.yemotPath ? "פעיל בקו" : "נשמר באתר — נדרש חיבור לימות המשיח" : "הקראה אוטומטית"}</small>{prompt?.audioUrl && <audio controls preload="metadata" src={prompt.audioUrl} />}</div><form onSubmit={upload}><input name="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg" /><button disabled={busy}>{busy ? "מעלה…" : prompt ? "החלפה" : "העלאה"}</button>{prompt && <button type="button" className="danger" onClick={removePrompt}>הסרה</button>}</form></article>;
+}
 
 function SettingsPanel({ settings, onSaved }: { settings: Settings; onSaved(): void }) {
   const save = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.currentTarget)); const response = await fetch("/api/admin/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); if (response.ok) onSaved(); };

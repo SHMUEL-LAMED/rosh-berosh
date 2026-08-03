@@ -1,7 +1,8 @@
 import { readSession } from "./auth";
 import { ensureRuntimeSchema } from "./schema";
+import { readIvrPrompts, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
 
-type AdminEnv = { DB: D1Database; MEDIA: R2Bucket };
+type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 
 async function requireAdmin(request: Request) {
@@ -31,7 +32,36 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       env.DB.prepare("SELECT s.id,s.title,a.title AS albumTitle,COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id GROUP BY s.id ORDER BY votes DESC,s.title"),
       env.DB.prepare("SELECT a.id,a.name,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id GROUP BY a.id ORDER BY votes DESC,a.name"),
     ]);
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0], results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results } });
+    const ivrPrompts = await readIvrPrompts(env);
+    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0], ivrPrompts, results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results } });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/ivr-prompt") {
+    const form = await request.formData();
+    const file = form.get("file"), key = text(form.get("key")), label = text(form.get("label"));
+    if (!(file instanceof File) || !key || !label || !/^[a-z0-9:_-]+$/i.test(key)) return json({ error: "קובץ או סוג קריינות חסרים." }, 400);
+    if (!file.type.startsWith("audio/") && !/\.(wav|mp3|m4a|ogg)$/i.test(file.name)) return json({ error: "יש לבחור קובץ שמע." }, 415);
+    if (file.size > 25 * 1024 * 1024) return json({ error: "קובץ הקריינות גדול מ־25MB." }, 413);
+    const mediaKey = `ivr-prompts/${safeName(key)}-${crypto.randomUUID()}-${safeName(file.name)}`;
+    await env.MEDIA.put(mediaKey, file.stream(), { httpMetadata: { contentType: file.type || "audio/mpeg", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, promptKey: key } });
+    const sync = await syncPromptToYemot(env, key, file);
+    const prompts = await readIvrPrompts(env), previous = prompts.find((prompt) => prompt.key === key);
+    const next = prompts.filter((prompt) => prompt.key !== key);
+    next.push({ key, label, audioUrl: mediaUrl(mediaKey), yemotPath: sync.path || previous?.yemotPath || "", updatedAt: Date.now() });
+    await saveIvrPrompts(env, next);
+    if (previous?.audioUrl.startsWith("/media/") && previous.audioUrl !== mediaUrl(mediaKey)) {
+      await env.MEDIA.delete(decodeURIComponent(previous.audioUrl.slice(7)));
+    }
+    return json({ ok: true, warning: sync.warning, yemotPath: sync.path || previous?.yemotPath || "" });
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/admin/ivr-prompt") {
+    const body = await request.json<{ key?: string }>();
+    if (!body.key) return json({ error: "סוג הקריינות חסר." }, 400);
+    const prompts = await readIvrPrompts(env), current = prompts.find((prompt) => prompt.key === body.key);
+    if (current?.audioUrl.startsWith("/media/")) await env.MEDIA.delete(decodeURIComponent(current.audioUrl.slice(7)));
+    await saveIvrPrompts(env, prompts.filter((prompt) => prompt.key !== body.key));
+    return json({ ok: true });
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/settings") {

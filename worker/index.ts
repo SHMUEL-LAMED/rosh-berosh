@@ -4,11 +4,14 @@ import handler from "vinext/server/app-router-entry";
 import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import { adminApi } from "./admin";
 import { ensureRuntimeSchema } from "./schema";
+import { readIvrPrompts } from "./ivr-prompts";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   MEDIA: R2Bucket;
+  YEMOT_TOKEN?: string;
+  YEMOT_API_BASE?: string;
   IMAGES: { input(stream: ReadableStream): { transform(options: Record<string, unknown>): { output(options: { format: string; quality: number }): Promise<{ response(): Response }> } } };
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
@@ -42,7 +45,8 @@ async function catalog(env: Env): Promise<Response> {
     } catch {
       songs = await env.DB.prepare("SELECT id, album_id AS albumId, title, audio_url AS audioUrl, 0 AS previewStart, 0 AS previewEnd FROM songs WHERE active = 1 ORDER BY position, title").all();
     }
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, rules });
+    const ivrPrompts = await readIvrPrompts(env);
+    return json({ albums: albums.results, songs: songs.results, artists: artists.results, rules, ivrPrompts });
   } catch (error) {
     console.error("catalog error", error);
     return json({ error: "לא ניתן לטעון את רשימת המצעד." }, 500);
