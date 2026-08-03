@@ -1,6 +1,8 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
+import { adminApi } from "./admin";
 
 interface Env {
   ASSETS: Fetcher;
@@ -103,6 +105,33 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    if (url.pathname === "/api/auth/config" && request.method === "GET") {
+      return json({ clientId: GOOGLE_CLIENT_ID });
+    }
+    if (url.pathname === "/api/auth/google" && request.method === "POST") {
+      try {
+        const { credential } = await request.json<{ credential?: string }>();
+        if (!credential) return json({ error: "חסר אישור Google." }, 400);
+        const user = await verifyGoogleCredential(credential);
+        const response = json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } });
+        response.headers.set("set-cookie", sessionCookie(credential));
+        return response;
+      } catch (error) {
+        console.error("google auth error", error);
+        return json({ error: "ההתחברות באמצעות Google נכשלה." }, 401);
+      }
+    }
+    if (url.pathname === "/api/auth/me" && request.method === "GET") {
+      const user = await readSession(request);
+      return user ? json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } }) : json({ user: null }, 401);
+    }
+    if (url.pathname === "/api/auth/logout" && request.method === "POST") {
+      const response = json({ ok: true });
+      response.headers.set("set-cookie", clearSessionCookie);
+      return response;
+    }
+    if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
+
     // Vinext currently returns a plain 404 for route handlers on the deployed
     // Worker. Handle the two public API endpoints at the Worker boundary so
     // both the website and the IVR always reach D1.
@@ -110,7 +139,13 @@ const worker = {
       return catalog(env);
     }
     if (url.pathname === "/api/ballots" && request.method === "POST") {
-      return submitBallot(request, env);
+      const original = (await request.json()) as Submission;
+      if (original.channel === "phone") {
+        return submitBallot(new Request(request, { body: JSON.stringify(original) }), env);
+      }
+      const user = await readSession(request);
+      if (!user) return json({ error: "יש להתחבר באמצעות Google." }, 401);
+      return submitBallot(new Request(request, { body: JSON.stringify({ ...original, voterKey: user.sub }) }), env);
     }
 
     if (url.pathname === "/_vinext/image") {
