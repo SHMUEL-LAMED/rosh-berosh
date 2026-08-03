@@ -22,11 +22,20 @@ const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
 const placeholders = (count: number) => Array(count).fill("?").join(",");
 
-async function readRules(env: Env): Promise<Rules> {
+async function activeSurveyId(env: Env): Promise<string> {
+  try {
+    const row = await env.DB.prepare("SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1").first<{ id: string }>();
+    return row?.id ?? "main";
+  } catch {
+    return "main";
+  }
+}
+
+async function readRules(env: Env, surveyId: string): Promise<Rules> {
   await ensureRuntimeSchema(env);
   const defaults = { votingOpen: 1, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
   try {
-    return await env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id='main'").first<Rules>() ?? defaults;
+    return await env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id=?").bind(surveyId).first<Rules>() ?? defaults;
   } catch {
     return defaults;
   }
@@ -34,16 +43,17 @@ async function readRules(env: Env): Promise<Rules> {
 
 async function catalog(env: Env): Promise<Response> {
   try {
-    const rules = await readRules(env);
+    const surveyId = await activeSurveyId(env);
+    const rules = await readRules(env, surveyId);
     const [albums, artists] = await env.DB.batch([
-      env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl FROM albums WHERE active = 1 ORDER BY position, title"),
-      env.DB.prepare("SELECT id, name, image_url AS imageUrl FROM artists WHERE active = 1 ORDER BY position, name"),
+      env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl FROM albums WHERE active = 1 AND survey_id = ? ORDER BY position, title").bind(surveyId),
+      env.DB.prepare("SELECT id, name, image_url AS imageUrl FROM artists WHERE active = 1 AND survey_id = ? ORDER BY position, name").bind(surveyId),
     ]);
     let songs;
     try {
-      songs = await env.DB.prepare("SELECT id, album_id AS albumId, title, audio_url AS audioUrl, preview_start AS previewStart, preview_end AS previewEnd FROM songs WHERE active = 1 ORDER BY position, title").all();
+      songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
     } catch {
-      songs = await env.DB.prepare("SELECT id, album_id AS albumId, title, audio_url AS audioUrl, 0 AS previewStart, 0 AS previewEnd FROM songs WHERE active = 1 ORDER BY position, title").all();
+      songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, 0 AS previewStart, 0 AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
     }
     const ivrPrompts = await readIvrPrompts(env);
     return json({ albums: albums.results, songs: songs.results, artists: artists.results, rules, ivrPrompts });
@@ -56,7 +66,8 @@ async function catalog(env: Env): Promise<Response> {
 async function submitBallot(request: Request, env: Env): Promise<Response> {
   let body: Submission;
   try { body = await request.json<Submission>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
-  const rules = await readRules(env);
+  const surveyId = await activeSurveyId(env);
+  const rules = await readRules(env, surveyId);
   if (!rules.votingOpen) return json({ error: "ההצבעה סגורה כרגע." }, 403);
 
   const voterKey = body.voterKey?.trim().toLowerCase();
@@ -70,17 +81,17 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
     return json({ error: "הבחירות אינן תואמות להגדרות הסקר." }, 400);
   }
 
-  const validAlbums = albumIds.length ? await env.DB.prepare(`SELECT id FROM albums WHERE active=1 AND id IN (${placeholders(albumIds.length)})`).bind(...albumIds).all<{ id: string }>() : { results: [] };
-  const validArtists = artistIds.length ? await env.DB.prepare(`SELECT id FROM artists WHERE active=1 AND id IN (${placeholders(artistIds.length)})`).bind(...artistIds).all<{ id: string }>() : { results: [] };
+  const validAlbums = albumIds.length ? await env.DB.prepare(`SELECT id FROM albums WHERE active=1 AND survey_id=? AND id IN (${placeholders(albumIds.length)})`).bind(surveyId, ...albumIds).all<{ id: string }>() : { results: [] };
+  const validArtists = artistIds.length ? await env.DB.prepare(`SELECT id FROM artists WHERE active=1 AND survey_id=? AND id IN (${placeholders(artistIds.length)})`).bind(surveyId, ...artistIds).all<{ id: string }>() : { results: [] };
   const songIds = unique(albumIds.flatMap((id) => songMap[id] ?? []));
-  const validSongs = songIds.length ? await env.DB.prepare(`SELECT id,album_id AS albumId FROM songs WHERE active=1 AND id IN (${placeholders(songIds.length)})`).bind(...songIds).all<{ id: string; albumId: string }>() : { results: [] };
+  const validSongs = songIds.length ? await env.DB.prepare(`SELECT s.id, s.album_id AS albumId FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.survey_id=? AND s.id IN (${placeholders(songIds.length)})`).bind(surveyId, ...songIds).all<{ id: string; albumId: string }>() : { results: [] };
   if (validAlbums.results.length !== albumIds.length || validArtists.results.length !== artistIds.length || validSongs.results.length !== songIds.length || validSongs.results.some((song) => !songMap[song.albumId]?.includes(song.id))) {
     return json({ error: "אחת הבחירות אינה קיימת או אינה פעילה." }, 400);
   }
 
   const ballotId = crypto.randomUUID();
   const statements = [
-    env.DB.prepare("INSERT INTO ballots (id,voter_key,channel) VALUES (?,?,?)").bind(ballotId, voterKey, body.channel === "phone" ? "phone" : "site"),
+    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel) VALUES (?,?,?,?)").bind(ballotId, surveyId, voterKey, body.channel === "phone" ? "phone" : "site"),
     ...albumIds.map((id) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(ballotId, id)),
     ...albumIds.flatMap((id) => (songMap[id] ?? []).map((songId) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(ballotId, id, songId))),
     ...artistIds.map((id) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(ballotId, id)),

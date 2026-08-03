@@ -26,6 +26,17 @@ async function requireAdmin(request: Request, env: AdminEnv) {
   return user?.isAdmin ? user : null;
 }
 
+async function activeSurveyId(env: AdminEnv): Promise<string> {
+  const row = await env.DB.prepare("SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1").first<{ id: string }>();
+  if (row?.id) return row.id;
+  // No active survey (fresh install upgraded mid-flight): fall back to 'main' and make sure a row exists.
+  await env.DB.batch([
+    env.DB.prepare("INSERT OR IGNORE INTO surveys (id,name,active) VALUES ('main','הסקר הראשי',1)"),
+    env.DB.prepare("INSERT OR IGNORE INTO poll_settings (id) VALUES ('main')"),
+  ]);
+  return "main";
+}
+
 const text = (value: unknown) => String(value ?? "").trim();
 const number = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const flag = (value: unknown) => value === true || value === 1 || value === "1" || value === "true" || value === "on";
@@ -48,16 +59,17 @@ async function readPollSnapshot(env: AdminEnv, key: string) {
   return JSON.parse(await object.text()) as PollSnapshot;
 }
 
-async function createPollSnapshot(env: AdminEnv, requestedName = "") {
+async function createPollSnapshot(env: AdminEnv, requestedName = "", surveyId?: string) {
+  const survey = surveyId ?? await activeSurveyId(env);
   const [albums, songs, artists, ballots, albumVotes, songVotes, artistVotes, settings] = await env.DB.batch([
-    env.DB.prepare("SELECT * FROM albums ORDER BY position,title"),
-    env.DB.prepare("SELECT * FROM songs ORDER BY album_id,position,title"),
-    env.DB.prepare("SELECT * FROM artists ORDER BY position,name"),
-    env.DB.prepare("SELECT * FROM ballots ORDER BY created_at"),
-    env.DB.prepare("SELECT * FROM album_votes"),
-    env.DB.prepare("SELECT * FROM song_votes"),
-    env.DB.prepare("SELECT * FROM artist_votes"),
-    env.DB.prepare("SELECT * FROM poll_settings WHERE id='main'"),
+    env.DB.prepare("SELECT * FROM albums WHERE survey_id=? ORDER BY position,title").bind(survey),
+    env.DB.prepare("SELECT s.* FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? ORDER BY s.album_id,s.position,s.title").bind(survey),
+    env.DB.prepare("SELECT * FROM artists WHERE survey_id=? ORDER BY position,name").bind(survey),
+    env.DB.prepare("SELECT * FROM ballots WHERE survey_id=? ORDER BY created_at").bind(survey),
+    env.DB.prepare("SELECT v.* FROM album_votes v JOIN ballots b ON b.id=v.ballot_id WHERE b.survey_id=?").bind(survey),
+    env.DB.prepare("SELECT v.* FROM song_votes v JOIN ballots b ON b.id=v.ballot_id WHERE b.survey_id=?").bind(survey),
+    env.DB.prepare("SELECT v.* FROM artist_votes v JOIN ballots b ON b.id=v.ballot_id WHERE b.survey_id=?").bind(survey),
+    env.DB.prepare("SELECT * FROM poll_settings WHERE id=?").bind(survey),
   ]);
   const createdAt = Date.now(), id = crypto.randomUUID();
   const name = requestedName.trim() || `סקר ${new Date(createdAt).toLocaleDateString("he-IL")}`;
@@ -67,20 +79,27 @@ async function createPollSnapshot(env: AdminEnv, requestedName = "") {
   return { key, name, createdAt, votes: ballots.results.length, albums: albums.results.length, songs: songs.results.length, artists: artists.results.length, snapshot };
 }
 
-async function clearCurrentPoll(env: AdminEnv) {
+async function clearCurrentPoll(env: AdminEnv, surveyId?: string) {
+  const survey = surveyId ?? await activeSurveyId(env);
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM song_votes"), env.DB.prepare("DELETE FROM album_votes"), env.DB.prepare("DELETE FROM artist_votes"),
-    env.DB.prepare("DELETE FROM ballots"), env.DB.prepare("DELETE FROM songs"), env.DB.prepare("DELETE FROM albums"), env.DB.prepare("DELETE FROM artists"),
-    env.DB.prepare("UPDATE poll_settings SET voting_open=0, albums_enabled=1, albums_min=5, albums_max=5, songs_enabled=1, songs_min=1, songs_max=1, artists_enabled=1, artists_min=1, artists_max=3 WHERE id='main'"),
+    env.DB.prepare("DELETE FROM song_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(survey),
+    env.DB.prepare("DELETE FROM album_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(survey),
+    env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(survey),
+    env.DB.prepare("DELETE FROM ballots WHERE survey_id=?").bind(survey),
+    env.DB.prepare("DELETE FROM songs WHERE album_id IN (SELECT id FROM albums WHERE survey_id=?)").bind(survey),
+    env.DB.prepare("DELETE FROM albums WHERE survey_id=?").bind(survey),
+    env.DB.prepare("DELETE FROM artists WHERE survey_id=?").bind(survey),
+    env.DB.prepare("UPDATE poll_settings SET voting_open=0, albums_enabled=1, albums_min=5, albums_max=5, songs_enabled=1, songs_min=1, songs_max=1, artists_enabled=1, artists_min=1, artists_max=3 WHERE id=?").bind(survey),
   ]);
 }
 
-async function pollReadiness(env: AdminEnv) {
+async function pollReadiness(env: AdminEnv, surveyId?: string) {
+  const survey = surveyId ?? await activeSurveyId(env);
   const [albums, songs, artists, settingsResult] = await env.DB.batch([
-    env.DB.prepare("SELECT id,title,cover_url AS coverUrl FROM albums WHERE active=1"),
-    env.DB.prepare("SELECT album_id AS albumId,COUNT(*) AS total,SUM(CASE WHEN audio_url IS NOT NULL AND audio_url<>'' THEN 1 ELSE 0 END) AS withAudio FROM songs WHERE active=1 GROUP BY album_id"),
-    env.DB.prepare("SELECT COUNT(*) AS total FROM artists WHERE active=1"),
-    env.DB.prepare("SELECT * FROM poll_settings WHERE id='main'"),
+    env.DB.prepare("SELECT id,title,cover_url AS coverUrl FROM albums WHERE active=1 AND survey_id=?").bind(survey),
+    env.DB.prepare("SELECT s.album_id AS albumId,COUNT(*) AS total,SUM(CASE WHEN s.audio_url IS NOT NULL AND s.audio_url<>'' THEN 1 ELSE 0 END) AS withAudio FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.survey_id=? GROUP BY s.album_id").bind(survey),
+    env.DB.prepare("SELECT COUNT(*) AS total FROM artists WHERE active=1 AND survey_id=?").bind(survey),
+    env.DB.prepare("SELECT * FROM poll_settings WHERE id=?").bind(survey),
   ]);
   const settings = settingsResult.results[0] || {};
   const songMap = new Map(songs.results.map((row) => [String(row.albumId), Number(row.total || 0)]));
@@ -94,25 +113,98 @@ async function pollReadiness(env: AdminEnv) {
   return { ready: warnings.length === 0, warnings, counts: { albums: albums.results.length, songs: songs.results.reduce((sum, row) => sum + Number(row.total || 0), 0), artists: artistCount, missingCovers: albums.results.filter((album) => !album.coverUrl).length, missingSongs: missingSongs.length } };
 }
 
+type SurveyRow = { id: string; name: string; active: number; createdAt: number; votingOpen: number; albums: number; songs: number; artists: number; votes: number };
+
+async function listSurveys(env: AdminEnv): Promise<{ surveys: SurveyRow[] }> {
+  const result = await env.DB.prepare(
+    `SELECT s.id, s.name, s.active, s.created_at AS createdAt, COALESCE(p.voting_open,0) AS votingOpen,
+       (SELECT COUNT(*) FROM albums a WHERE a.survey_id=s.id) AS albums,
+       (SELECT COUNT(*) FROM songs so JOIN albums a ON a.id=so.album_id WHERE a.survey_id=s.id) AS songs,
+       (SELECT COUNT(*) FROM artists ar WHERE ar.survey_id=s.id) AS artists,
+       (SELECT COUNT(*) FROM ballots b WHERE b.survey_id=s.id) AS votes
+     FROM surveys s LEFT JOIN poll_settings p ON p.id=s.id
+     ORDER BY s.active DESC, s.created_at DESC`,
+  ).all<SurveyRow>();
+  return { surveys: result.results };
+}
+
 export async function adminApi(request: Request, env: AdminEnv): Promise<Response> {
   const currentAdmin = await requireAdmin(request, env);
   if (!currentAdmin) return json({ error: "אין הרשאת מנהל." }, 403);
   await ensureRuntimeSchema(env);
   const url = new URL(request.url);
+  const surveyId = await activeSurveyId(env);
+
+  if (request.method === "GET" && url.pathname === "/api/admin/surveys") {
+    return json(await listSurveys(env));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/surveys/activate") {
+    const body = await request.json<{ id?: string }>();
+    const id = text(body.id);
+    const survey = id ? await env.DB.prepare("SELECT id FROM surveys WHERE id=?").bind(id).first<{ id: string }>() : null;
+    if (!survey) return json({ error: "הסקר לא נמצא." }, 404);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE surveys SET active=0"),
+      env.DB.prepare("UPDATE surveys SET active=1 WHERE id=?").bind(id),
+    ]);
+    return json({ ok: true, surveys: await listSurveys(env) });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/surveys") {
+    const body = await request.json<{ id?: string; name?: string }>();
+    const name = text(body.name);
+    if (!name) return json({ error: "יש להזין שם לסקר." }, 400);
+    if (body.id) {
+      const existing = await env.DB.prepare("SELECT id FROM surveys WHERE id=?").bind(text(body.id)).first();
+      if (!existing) return json({ error: "הסקר לא נמצא." }, 404);
+      await env.DB.prepare("UPDATE surveys SET name=? WHERE id=?").bind(name, text(body.id)).run();
+      return json({ ok: true, surveys: await listSurveys(env) });
+    }
+    const id = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO surveys (id,name,active) VALUES (?,?,0)").bind(id, name),
+      env.DB.prepare("INSERT INTO poll_settings (id,voting_open) VALUES (?,0)").bind(id),
+    ]);
+    return json({ ok: true, id, surveys: await listSurveys(env) });
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/admin/surveys") {
+    const body = await request.json<{ id?: string }>();
+    const id = text(body.id);
+    if (!id) return json({ error: "מזהה הסקר חסר." }, 400);
+    const total = await env.DB.prepare("SELECT COUNT(*) AS total FROM surveys").first<{ total: number }>();
+    if (Number(total?.total || 0) <= 1) return json({ error: "אי אפשר למחוק את הסקר האחרון." }, 400);
+    const target = await env.DB.prepare("SELECT active FROM surveys WHERE id=?").bind(id).first<{ active: number }>();
+    if (!target) return json({ error: "הסקר לא נמצא." }, 404);
+    if (Number(target.active)) return json({ error: "אי אפשר למחוק סקר פעיל. הפעילו קודם סקר אחר." }, 400);
+    const media = await env.DB.batch([
+      env.DB.prepare("SELECT cover_url AS url FROM albums WHERE survey_id=?").bind(id),
+      env.DB.prepare("SELECT s.audio_url AS url FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=?").bind(id),
+    ]);
+    await clearCurrentPoll(env, id);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM poll_settings WHERE id=?").bind(id),
+      env.DB.prepare("DELETE FROM surveys WHERE id=?").bind(id),
+    ]);
+    await deleteMediaUrls(env, [...media[0].results, ...media[1].results].map((row) => (row as { url?: string }).url));
+    return json({ ok: true, surveys: await listSurveys(env) });
+  }
 
   if (request.method === "GET" && url.pathname === "/api/admin/overview") {
     const [albums, songs, artists, ballots, settings, albumResults, songResults, artistResults] = await env.DB.batch([
-      env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl, position, active FROM albums ORDER BY position, title"),
-      env.DB.prepare("SELECT id, album_id AS albumId, title, audio_url AS audioUrl, preview_start AS previewStart, preview_end AS previewEnd, position, active FROM songs ORDER BY album_id, position, title"),
-      env.DB.prepare("SELECT id, name, image_url AS imageUrl, position, active FROM artists ORDER BY position, name"),
-      env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN channel = 'phone' THEN 1 ELSE 0 END) AS phone, SUM(CASE WHEN channel = 'site' THEN 1 ELSE 0 END) AS site FROM ballots"),
-      env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id = 'main'"),
-      env.DB.prepare("SELECT a.id,a.title,COUNT(v.album_id) AS votes FROM albums a LEFT JOIN album_votes v ON v.album_id=a.id GROUP BY a.id ORDER BY votes DESC,a.title"),
-      env.DB.prepare("SELECT s.id,s.title,a.title AS albumTitle,COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id GROUP BY s.id ORDER BY votes DESC,s.title"),
-      env.DB.prepare("SELECT a.id,a.name,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id GROUP BY a.id ORDER BY votes DESC,a.name"),
+      env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl, position, active FROM albums WHERE survey_id=? ORDER BY position, title").bind(surveyId),
+      env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd, s.position, s.active FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? ORDER BY s.album_id, s.position, s.title").bind(surveyId),
+      env.DB.prepare("SELECT id, name, image_url AS imageUrl, position, active FROM artists WHERE survey_id=? ORDER BY position, name").bind(surveyId),
+      env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN channel = 'phone' THEN 1 ELSE 0 END) AS phone, SUM(CASE WHEN channel = 'site' THEN 1 ELSE 0 END) AS site FROM ballots WHERE survey_id=?").bind(surveyId),
+      env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id = ?").bind(surveyId),
+      env.DB.prepare("SELECT a.id,a.title,COUNT(v.album_id) AS votes FROM albums a LEFT JOIN album_votes v ON v.album_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.title").bind(surveyId),
+      env.DB.prepare("SELECT s.id,s.title,a.title AS albumTitle,COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id WHERE a.survey_id=? GROUP BY s.id ORDER BY votes DESC,s.title").bind(surveyId),
+      env.DB.prepare("SELECT a.id,a.name,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.name").bind(surveyId),
     ]);
-    const [ivrPrompts, managers, readiness] = await Promise.all([readIvrPrompts(env), readAdminEmails(env), pollReadiness(env)]);
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0], readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results } });
+    const [ivrPrompts, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
+    const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
+    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0], readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey });
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/archives") {
@@ -125,29 +217,29 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/backup") {
-    const backup = await createPollSnapshot(env, text(url.searchParams.get("name")));
+    const backup = await createPollSnapshot(env, text(url.searchParams.get("name")), surveyId);
     return new Response(JSON.stringify(backup.snapshot, null, 2), { headers: { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="rosh-berosh-backup-${backup.createdAt}.json"` } });
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/archive") {
     const body = await request.json<{ name?: string; restoreKey?: string }>();
-    if (!body.restoreKey) return json({ ok: true, archive: await createPollSnapshot(env, text(body.name)) });
+    if (!body.restoreKey) return json({ ok: true, archive: await createPollSnapshot(env, text(body.name), surveyId) });
     const snapshot = await readPollSnapshot(env, body.restoreKey);
     if (!snapshot) return json({ error: "הסקר שבארכיון לא נמצא." }, 404);
-    await createPollSnapshot(env, "גיבוי אוטומטי לפני שחזור");
-    await clearCurrentPoll(env);
+    await createPollSnapshot(env, "גיבוי אוטומטי לפני שחזור", surveyId);
+    await clearCurrentPoll(env, surveyId);
     const statements = [
-      ...snapshot.albums.map((row) => env.DB.prepare("INSERT INTO albums (id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,?)").bind(row.id, row.title, row.artist_name, row.cover_url, row.position, row.active)),
+      ...snapshot.albums.map((row) => env.DB.prepare("INSERT INTO albums (id,survey_id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,?,?)").bind(row.id, surveyId, row.title, row.artist_name, row.cover_url, row.position, row.active)),
       ...snapshot.songs.map((row) => env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,?,?,?)").bind(row.id, row.album_id, row.title, row.audio_url, row.preview_start || 0, row.preview_end || 0, row.position, row.active)),
-      ...snapshot.artists.map((row) => env.DB.prepare("INSERT INTO artists (id,name,image_url,position,active) VALUES (?,?,?,?,?)").bind(row.id, row.name, row.image_url, row.position, row.active)),
-      ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,voter_key,channel,created_at) VALUES (?,?,?,?)").bind(row.id, row.voter_key, row.channel, row.created_at)),
+      ...snapshot.artists.map((row) => env.DB.prepare("INSERT INTO artists (id,survey_id,name,image_url,position,active) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.name, row.image_url, row.position, row.active)),
+      ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES (?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.channel, row.created_at)),
       ...snapshot.albumVotes.map((row) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(row.ballot_id, row.album_id)),
       ...snapshot.songVotes.map((row) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(row.ballot_id, row.album_id, row.song_id)),
       ...snapshot.artistVotes.map((row) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(row.ballot_id, row.artist_id)),
     ];
     for (let index = 0; index < statements.length; index += 80) await env.DB.batch(statements.slice(index, index + 80));
     const settings = snapshot.settings;
-    if (settings) await env.DB.prepare("UPDATE poll_settings SET voting_open=0,albums_enabled=?,albums_min=?,albums_max=?,songs_enabled=?,songs_min=?,songs_max=?,artists_enabled=?,artists_min=?,artists_max=? WHERE id='main'").bind(settings.albums_enabled, settings.albums_min, settings.albums_max, settings.songs_enabled, settings.songs_min, settings.songs_max, settings.artists_enabled, settings.artists_min, settings.artists_max).run();
+    if (settings) await env.DB.prepare("UPDATE poll_settings SET voting_open=0,albums_enabled=?,albums_min=?,albums_max=?,songs_enabled=?,songs_min=?,songs_max=?,artists_enabled=?,artists_min=?,artists_max=? WHERE id=?").bind(settings.albums_enabled, settings.albums_min, settings.albums_max, settings.songs_enabled, settings.songs_min, settings.songs_max, settings.artists_enabled, settings.artists_min, settings.artists_max, surveyId).run();
     return json({ ok: true });
   }
 
@@ -215,19 +307,19 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     ] as const;
     if (pairs.some(([, min, max]) => min < 0 || max < min || max > 50)) return json({ error: "טווחי הבחירה אינם תקינים." }, 400);
     if (flag(body.votingOpen)) {
-      const readiness = await pollReadiness(env);
+      const readiness = await pollReadiness(env, surveyId);
       if (!readiness.ready) return json({ error: `אי אפשר לפרסם עדיין: ${readiness.warnings.join(", ")}.`, readiness }, 400);
     }
-    await env.DB.prepare(`UPDATE poll_settings SET voting_open=?, albums_enabled=?, albums_min=?, albums_max=?, songs_enabled=?, songs_min=?, songs_max=?, artists_enabled=?, artists_min=?, artists_max=? WHERE id='main'`)
-      .bind(flag(body.votingOpen) ? 1 : 0, flag(body.albumsEnabled) ? 1 : 0, pairs[0][1], pairs[0][2], flag(body.songsEnabled) ? 1 : 0, pairs[1][1], pairs[1][2], flag(body.artistsEnabled) ? 1 : 0, pairs[2][1], pairs[2][2]).run();
+    await env.DB.prepare(`UPDATE poll_settings SET voting_open=?, albums_enabled=?, albums_min=?, albums_max=?, songs_enabled=?, songs_min=?, songs_max=?, artists_enabled=?, artists_min=?, artists_max=? WHERE id=?`)
+      .bind(flag(body.votingOpen) ? 1 : 0, flag(body.albumsEnabled) ? 1 : 0, pairs[0][1], pairs[0][2], flag(body.songsEnabled) ? 1 : 0, pairs[1][1], pairs[1][2], flag(body.artistsEnabled) ? 1 : 0, pairs[2][1], pairs[2][2], surveyId).run();
     return json({ ok: true });
   }
 
   // A poll stays a draft while voting_open is 0. This route intentionally clears
   // the current poll only after an explicit confirmation in the admin UI.
   if (request.method === "DELETE" && url.pathname === "/api/admin/poll") {
-    const archive = url.searchParams.get("skipArchive") === "1" ? null : await createPollSnapshot(env, "ארכיון אוטומטי לפני מחיקה");
-    await clearCurrentPoll(env);
+    const archive = url.searchParams.get("skipArchive") === "1" ? null : await createPollSnapshot(env, "ארכיון אוטומטי לפני מחיקה", surveyId);
+    await clearCurrentPoll(env, surveyId);
     return json({ ok: true, archive });
   }
 
@@ -238,8 +330,8 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     if (kind === "album") {
       const title = text(body.title), artistName = text(body.artistName);
       if (!title || !artistName) return json({ error: "חובה להזין שם אלבום ושם אמן." }, 400);
-      await env.DB.prepare("INSERT INTO albums (id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET title=excluded.title,artist_name=excluded.artist_name,cover_url=COALESCE(excluded.cover_url,albums.cover_url),position=excluded.position")
-        .bind(id, title, artistName, text(body.coverUrl) || null, number(body.position)).run();
+      await env.DB.prepare("INSERT INTO albums (id,survey_id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET title=excluded.title,artist_name=excluded.artist_name,cover_url=COALESCE(excluded.cover_url,albums.cover_url),position=excluded.position")
+        .bind(id, surveyId, title, artistName, text(body.coverUrl) || null, number(body.position)).run();
     } else if (kind === "song") {
       const title = text(body.title), albumId = text(body.albumId);
       if (!title || !albumId) return json({ error: "חובה לבחור אלבום ולהזין שם שיר." }, 400);
@@ -248,8 +340,8 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     } else if (kind === "artist") {
       const name = text(body.name);
       if (!name) return json({ error: "חובה להזין שם זמר." }, 400);
-      await env.DB.prepare("INSERT INTO artists (id,name,image_url,position,active) VALUES (?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET name=excluded.name,image_url=COALESCE(excluded.image_url,artists.image_url),position=excluded.position")
-        .bind(id, name, text(body.imageUrl) || null, number(body.position)).run();
+      await env.DB.prepare("INSERT INTO artists (id,survey_id,name,image_url,position,active) VALUES (?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET name=excluded.name,image_url=COALESCE(excluded.image_url,artists.image_url),position=excluded.position")
+        .bind(id, surveyId, name, text(body.imageUrl) || null, number(body.position)).run();
     } else return json({ error: "סוג פריט לא מוכר." }, 400);
     return json({ ok: true, id });
   }
