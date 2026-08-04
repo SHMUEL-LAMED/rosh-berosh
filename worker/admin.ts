@@ -2,7 +2,7 @@ import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
 import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
 
-type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string };
+type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const ARCHIVE_PREFIX = "poll-archives/";
 
@@ -224,6 +224,45 @@ async function listSurveys(env: AdminEnv): Promise<{ surveys: SurveyRow[] }> {
   return { surveys: result.results };
 }
 
+function ttsConfigured(env: AdminEnv): boolean {
+  if (env.TTS_PROVIDER === "elevenlabs") return Boolean(env.ELEVENLABS_API_KEY);
+  return Boolean(env.AI_API_KEY);
+}
+
+async function generateTtsAudio(env: AdminEnv, inputText: string): Promise<ArrayBuffer> {
+  if (env.TTS_PROVIDER === "elevenlabs") {
+    const apiKey = env.ELEVENLABS_API_KEY;
+    if (!apiKey) throw new Error("שירות ה-TTS אינו מוגדר (חסר ELEVENLABS_API_KEY).");
+    const voiceId = env.ELEVENLABS_VOICE_ID || "onwK4e9ZLuTAKqWW03F9"; // Daniel — male, supports Hebrew
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: "POST",
+      headers: { "xi-api-key": apiKey, "content-type": "application/json", accept: "audio/mpeg" },
+      body: JSON.stringify({ text: inputText, model_id: "eleven_multilingual_v2", output_format: "mp3_44100_128" }),
+    });
+    if (!response.ok) {
+      const status = response.status;
+      if (status === 401) throw new Error("מפתח ElevenLabs אינו תקין. בדקו את ELEVENLABS_API_KEY.");
+      if (status === 429) throw new Error("חריגה ממכסת הבקשות ב-ElevenLabs. נסו שוב בעוד מספר שניות.");
+      throw new Error(`יצירת הקריינות נכשלה ב-ElevenLabs (שגיאה ${status}).`);
+    }
+    return response.arrayBuffer();
+  }
+  // Fallback: OpenAI-compatible API
+  if (!env.AI_API_KEY) throw new Error("שירות ה-TTS אינו מוגדר (חסר AI_API_KEY).");
+  const base = (env.AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const response = await fetch(`${base}/audio/speech`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.AI_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: "tts-1", input: inputText, voice: "alloy", response_format: "mp3" }),
+  });
+  if (!response.ok) {
+    const status = response.status;
+    if (status === 429) throw new Error("חריגה ממכסת הבקשות. נסו שוב בעוד מספר שניות.");
+    throw new Error(`יצירת הקריינות נכשלה (שגיאה ${status}).`);
+  }
+  return response.arrayBuffer();
+}
+
 export async function adminApi(request: Request, env: AdminEnv): Promise<Response> {
   const currentAdmin = await requireAdmin(request, env);
   if (!currentAdmin) return json({ error: "אין הרשאת מנהל." }, 403);
@@ -305,7 +344,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       const dupFp = await env.DB.prepare("SELECT fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(voter_key, ', ') AS voters FROM ballots WHERE survey_id=? AND fingerprint IS NOT NULL AND fingerprint != '' GROUP BY fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string }>();
       suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", ") }));
     } catch { /* fingerprint column may not exist yet */ }
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: Boolean(env.AI_API_KEY), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
+    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/archives") {
@@ -403,22 +442,21 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const body = await request.json<{ label?: string }>();
     const label = text(body.label);
     if (!label) return json({ error: "טקסט חסר." }, 400);
-    if (!env.AI_API_KEY) return json({ error: "שירות ה-TTS אינו מוגדר (חסר AI_API_KEY)." }, 503);
-    const base = (env.AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
-    const ttsRes = await fetch(`${base}/audio/speech`, { method: "POST", headers: { authorization: `Bearer ${env.AI_API_KEY}`, "content-type": "application/json" }, body: JSON.stringify({ model: "tts-1", input: label, voice: "alloy", response_format: "mp3" }) });
-    if (!ttsRes.ok) return json({ error: `יצירת הקריינות נכשלה (שגיאה ${ttsRes.status}).` }, 502);
-    return new Response(ttsRes.body, { headers: { "content-type": "audio/mpeg" } });
+    if (!ttsConfigured(env)) return json({ error: "שירות ה-TTS אינו מוגדר." }, 503);
+    try {
+      const audio = await generateTtsAudio(env, label);
+      return new Response(audio, { headers: { "content-type": "audio/mpeg" } });
+    } catch (error) { return json({ error: error instanceof Error ? error.message : "יצירת הקריינות נכשלה." }, 502); }
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/ivr-tts") {
     const body = await request.json<{ key?: string; label?: string }>();
     const key = text(body.key), label = text(body.label);
     if (!key || !label) return json({ error: "מפתח או טקסט חסרים." }, 400);
-    if (!env.AI_API_KEY) return json({ error: "שירות ה-TTS אינו מוגדר (חסר AI_API_KEY)." }, 503);
-    const base = (env.AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
-    const ttsRes = await fetch(`${base}/audio/speech`, { method: "POST", headers: { authorization: `Bearer ${env.AI_API_KEY}`, "content-type": "application/json" }, body: JSON.stringify({ model: "tts-1", input: label, voice: "alloy", response_format: "mp3" }) });
-    if (!ttsRes.ok) return json({ error: `יצירת הקריינות נכשלה (שגיאה ${ttsRes.status}).` }, 502);
-    const audioBuffer = await ttsRes.arrayBuffer();
+    if (!ttsConfigured(env)) return json({ error: "שירות ה-TTS אינו מוגדר." }, 503);
+    let audioBuffer: ArrayBuffer;
+    try { audioBuffer = await generateTtsAudio(env, label); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : "יצירת הקריינות נכשלה." }, 502); }
     const mediaKey = `ivr-prompts/${safeName(key)}-${crypto.randomUUID()}-tts.mp3`;
     await env.MEDIA.put(mediaKey, audioBuffer, { httpMetadata: { contentType: "audio/mpeg", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { promptKey: key } });
     const ttsFile = new File([audioBuffer], "tts.mp3", { type: "audio/mpeg" });
