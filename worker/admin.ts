@@ -300,7 +300,12 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     ]);
     const [ivrPrompts, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
     const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: Boolean(env.AI_API_KEY), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey });
+    let suspicious: { fingerprint: string; count: number; voters: string[] }[] = [];
+    try {
+      const dupFp = await env.DB.prepare("SELECT fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(voter_key, ', ') AS voters FROM ballots WHERE survey_id=? AND fingerprint IS NOT NULL AND fingerprint != '' GROUP BY fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string }>();
+      suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", ") }));
+    } catch { /* fingerprint column may not exist yet */ }
+    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: Boolean(env.AI_API_KEY), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/archives") {

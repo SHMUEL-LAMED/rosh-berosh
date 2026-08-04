@@ -12,6 +12,38 @@ type Stage = "albums" | "songs" | "artists" | "summary";
 
 const rangeText = (min: number, max: number, noun: string) => min === max ? `${min} ${noun}` : min === 0 ? `עד ${max} ${noun}` : `בין ${min} ל־${max} ${noun}`;
 
+async function browserFingerprint(): Promise<string> {
+  const signals = [
+    navigator.language,
+    navigator.languages?.join(","),
+    screen.width + "x" + screen.height,
+    screen.colorDepth,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    navigator.hardwareConcurrency,
+    navigator.maxTouchPoints,
+    navigator.platform,
+  ];
+  try {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      canvas.width = 200; canvas.height = 50;
+      ctx.textBaseline = "top";
+      ctx.font = "14px Arial";
+      ctx.fillStyle = "#f60";
+      ctx.fillRect(40, 0, 62, 20);
+      ctx.fillStyle = "#069";
+      ctx.fillText("fingerprint", 2, 15);
+      ctx.fillStyle = "rgba(102,204,0,0.7)";
+      ctx.fillText("fingerprint", 4, 17);
+      signals.push(canvas.toDataURL());
+    }
+  } catch { /* canvas not available */ }
+  const data = new TextEncoder().encode(signals.join("|"));
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export default function Home() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [stageIndex, setStageIndex] = useState(0);
@@ -92,7 +124,8 @@ export default function Home() {
   const submit = async () => {
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site" }) });
+      const fp = await browserFingerprint().catch(() => "");
+      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site", fingerprint: fp }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
       setDone(true); setPlayer(null);

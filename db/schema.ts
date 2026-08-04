@@ -44,6 +44,7 @@ export const ballots = sqliteTable("ballots", {
   surveyId: text("survey_id").notNull().default("main").references(() => surveys.id),
   voterKey: text("voter_key").notNull(),
   channel: text("channel").notNull().default("site"),
+  fingerprint: text("fingerprint"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 }, (table) => [uniqueIndex("ballots_voter_survey_unique").on(table.surveyId, table.voterKey)]);
 
