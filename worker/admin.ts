@@ -523,6 +523,19 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       return json({ ok: true, url: imageUrl });
     }
     const albumId = text(form.get("albumId"));
+    if (kind === "cover") {
+      if (!albumId) return json({ error: "לא נבחר אלבום." }, 400);
+      if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif)$/i.test(file.name)) return json({ error: "יש לבחור קובץ תמונה." }, 415);
+      if (file.size > 15 * 1024 * 1024) return json({ error: "התמונה גדולה מ־15MB." }, 413);
+      const album = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(albumId).first<{ coverUrl?: string }>();
+      if (!album) return json({ error: "האלבום לא נמצא." }, 404);
+      const coverKey = `albums/${albumId}/cover-${crypto.randomUUID()}-${safeName(file.name)}`;
+      await env.MEDIA.put(coverKey, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId } });
+      const coverUrl = mediaUrl(coverKey);
+      await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=?").bind(coverUrl, albumId).run();
+      await deleteMediaUrls(env, [album.coverUrl]);
+      return json({ ok: true, url: coverUrl });
+    }
     if (!albumId || kind !== "audio") return json({ error: "קובץ או אלבום חסרים." }, 400);
     if (file.size > 75 * 1024 * 1024) return json({ error: "הקובץ גדול מ־75MB." }, 413);
     const audioBuffer = await file.arrayBuffer();
