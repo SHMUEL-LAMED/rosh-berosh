@@ -69,6 +69,13 @@ router.get("/", async (call) => {
   const prompts = promptMap(catalog);
   if (!response.ok || !catalog.rules?.votingOpen) return call.id_list_message(prompt(prompts, "system:voting_closed", "ההצבעה עדיין אינה פתוחה"));
 
+  const voterPhone = phone(call);
+  try {
+    const { result: check } = await api(`/api/ballots/check?voterKey=${encodeURIComponent(voterPhone)}`);
+    if (check.voted) return call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"));
+  } catch {}
+
+
   const rules = catalog.rules;
   const albumAmount = rules.albumsEnabled ? rules.albumsMax : 0;
   const songsPerAlbum = rules.songsEnabled ? rules.songsMax : 0;

@@ -376,8 +376,18 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     return json({ ok: true });
   }
 
-  // A poll stays a draft while voting_open is 0. This route intentionally clears
-  // the current poll only after an explicit confirmation in the admin UI.
+  if (request.method === "POST" && url.pathname === "/api/admin/reset-votes") {
+    const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM ballots WHERE survey_id=?").bind(surveyId).first<{ total: number }>();
+    if (!count?.total) return json({ ok: true, deleted: 0 });
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM song_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
+      env.DB.prepare("DELETE FROM album_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
+      env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
+      env.DB.prepare("DELETE FROM ballots WHERE survey_id=?").bind(surveyId),
+    ]);
+    return json({ ok: true, deleted: count.total });
+  }
+
   if (request.method === "DELETE" && url.pathname === "/api/admin/poll") {
     const archive = url.searchParams.get("skipArchive") === "1" ? null : await createPollSnapshot(env, "ארכיון אוטומטי לפני מחיקה", surveyId);
     await clearCurrentPoll(env, surveyId);

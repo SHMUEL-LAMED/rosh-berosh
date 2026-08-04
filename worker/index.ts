@@ -143,6 +143,13 @@ const worker = {
     if (url.pathname === "/api/auth/logout" && request.method === "POST") { const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
     if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
     if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
+    if (url.pathname === "/api/ballots/check" && request.method === "GET") {
+      const voterKey = url.searchParams.get("voterKey")?.trim().toLowerCase();
+      if (!voterKey) return json({ voted: false });
+      const surveyId = await activeSurveyId(env);
+      const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first();
+      return json({ voted: !!existing });
+    }
     if (url.pathname === "/api/ballots" && request.method === "POST") {
       const original = await request.json<Submission>();
       if (original.channel === "phone") return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
