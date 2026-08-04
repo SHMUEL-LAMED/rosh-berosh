@@ -45,6 +45,41 @@ const mediaUrl = (key: string) => `/media/${key.split("/").map(encodeURIComponen
 const safeName = (name: string) => name.normalize("NFKD").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 110) || "file";
 const keyFromMediaUrl = (url?: string | null) => url?.startsWith("/media/") ? decodeURIComponent(url.slice(7)) : null;
 
+function extractCoverFromAudio(buffer: ArrayBuffer): { data: Uint8Array; mime: string } | null {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] !== 0x49 || bytes[1] !== 0x44 || bytes[2] !== 0x33) return null; // not ID3v2
+  const version = bytes[3];
+  const tagSize = (bytes[6] & 0x7f) << 21 | (bytes[7] & 0x7f) << 14 | (bytes[8] & 0x7f) << 7 | (bytes[9] & 0x7f);
+  const headerSize = version >= 4 && (bytes[5] & 0x40) ? 20 : 10;
+  let pos = headerSize;
+  const end = Math.min(10 + tagSize, bytes.length);
+  while (pos + 10 < end) {
+    const frameId = String.fromCharCode(bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]);
+    if (frameId[0] === "\0") break;
+    let frameSize: number;
+    if (version >= 4) {
+      frameSize = (bytes[pos + 4] & 0x7f) << 21 | (bytes[pos + 5] & 0x7f) << 14 | (bytes[pos + 6] & 0x7f) << 7 | (bytes[pos + 7] & 0x7f);
+    } else {
+      frameSize = bytes[pos + 4] << 24 | bytes[pos + 5] << 16 | bytes[pos + 6] << 8 | bytes[pos + 7];
+    }
+    if (frameSize <= 0 || pos + 10 + frameSize > end) break;
+    if (frameId === "APIC") {
+      let offset = pos + 10;
+      const encoding = bytes[offset++];
+      let mime = "";
+      while (offset < pos + 10 + frameSize && bytes[offset] !== 0) mime += String.fromCharCode(bytes[offset++]);
+      offset++; // null terminator
+      offset++; // picture type
+      if (encoding === 0 || encoding === 3) { while (offset < pos + 10 + frameSize && bytes[offset] !== 0) offset++; offset++; }
+      else if (encoding === 1 || encoding === 2) { while (offset + 1 < pos + 10 + frameSize && !(bytes[offset] === 0 && bytes[offset + 1] === 0)) offset += 2; offset += 2; }
+      const data = bytes.slice(offset, pos + 10 + frameSize);
+      if (data.length > 100) return { data, mime: mime || "image/jpeg" };
+    }
+    pos += 10 + frameSize;
+  }
+  return null;
+}
+
 async function deleteMediaUrls(env: AdminEnv, urls: Array<string | null | undefined>) {
   const keys = [...new Set(urls.map(keyFromMediaUrl).filter((key): key is string => !!key))];
   if (keys.length) {
@@ -255,7 +290,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   if (request.method === "GET" && url.pathname === "/api/admin/overview") {
     const [albums, songs, artists, ballots, settings, albumResults, songResults, artistResults] = await env.DB.batch([
       env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl, position, active FROM albums WHERE survey_id=? ORDER BY position, title").bind(surveyId),
-      env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd, s.position, s.active FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? ORDER BY s.album_id, s.position, s.title").bind(surveyId),
+      env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, s.cover_url AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd, s.position, s.active FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? ORDER BY s.album_id, s.position, s.title").bind(surveyId),
       env.DB.prepare("SELECT id, name, image_url AS imageUrl, position, active FROM artists WHERE survey_id=? ORDER BY position, name").bind(surveyId),
       env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN channel = 'phone' THEN 1 ELSE 0 END) AS phone, SUM(CASE WHEN channel = 'site' THEN 1 ELSE 0 END) AS site FROM ballots WHERE survey_id=?").bind(surveyId),
       env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id = ?").bind(surveyId),
@@ -483,22 +518,24 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       return json({ ok: true, url: imageUrl });
     }
     const albumId = text(form.get("albumId"));
-    if (!albumId || !["cover", "audio"].includes(kind)) return json({ error: "קובץ או אלבום חסרים." }, 400);
+    if (!albumId || kind !== "audio") return json({ error: "קובץ או אלבום חסרים." }, 400);
     if (file.size > 75 * 1024 * 1024) return json({ error: "הקובץ גדול מ־75MB." }, 413);
-    const key = `albums/${albumId}/${kind}-${crypto.randomUUID()}-${safeName(file.name)}`;
-    await env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId, kind } });
-    const urlPath = mediaUrl(key);
-    if (kind === "cover") {
-      const previous = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(albumId).first<{ coverUrl?: string }>();
-      await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=?").bind(urlPath, albumId).run();
-      await deleteMediaUrls(env, [previous?.coverUrl]);
-      return json({ ok: true, url: urlPath });
-    }
+    const audioBuffer = await file.arrayBuffer();
+    const key = `albums/${albumId}/audio-${crypto.randomUUID()}-${safeName(file.name)}`;
+    await env.MEDIA.put(key, audioBuffer, { httpMetadata: { contentType: file.type || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId, kind: "audio" } });
+    const audioUrl = mediaUrl(key);
     const songId = crypto.randomUUID();
     const title = text(form.get("title")) || file.name.replace(/\.[^.]+$/, "").replace(/^\d+[\s._-]*/, "");
-    await env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,0,0,?,1)")
-      .bind(songId, albumId, title, urlPath, number(form.get("position"))).run();
-    return json({ ok: true, id: songId, url: urlPath });
+    let coverUrl: string | null = null;
+    const cover = await extractCoverFromAudio(audioBuffer);
+    if (cover) {
+      const coverKey = `albums/${albumId}/cover-${songId}-${crypto.randomUUID()}.jpg`;
+      await env.MEDIA.put(coverKey, cover.data, { httpMetadata: { contentType: cover.mime, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { songId, albumId } });
+      coverUrl = mediaUrl(coverKey);
+    }
+    await env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,cover_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,0,0,?,1)")
+      .bind(songId, albumId, title, audioUrl, coverUrl, number(form.get("position"))).run();
+    return json({ ok: true, id: songId, url: audioUrl, coverUrl });
   }
 
   if (request.method === "DELETE" && url.pathname === "/api/admin/media") {

@@ -23,6 +23,7 @@ export const songs = sqliteTable("songs", {
   albumId: text("album_id").notNull().references(() => albums.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   audioUrl: text("audio_url"),
+  coverUrl: text("cover_url"),
   previewStart: integer("preview_start").notNull().default(0),
   previewEnd: integer("preview_end").notNull().default(0),
   position: integer("position").notNull().default(0),

@@ -51,12 +51,27 @@ async function catalog(env: Env): Promise<Response> {
     ]);
     let songs;
     try {
-      songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
+      songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, s.cover_url AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
     } catch {
-      songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, 0 AS previewStart, 0 AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
+      songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, NULL AS coverUrl, 0 AS previewStart, 0 AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
     }
+    const songsMap = new Map<string, Array<{ coverUrl?: string }>>();
+    (songs.results || []).forEach((song: any) => {
+      const covers = songsMap.get(song.albumId) || [];
+      if (song.coverUrl) covers.push({ coverUrl: song.coverUrl });
+      songsMap.set(song.albumId, covers);
+    });
+    const albumsWithCovers = albums.results.map((album: any) => {
+      const albumSongs = songsMap.get(album.id) || [];
+      if (!album.coverUrl && albumSongs.length > 0) {
+        const uniqueCovers = [...new Set(albumSongs.map((s) => s.coverUrl).filter(Boolean))];
+        if (uniqueCovers.length === 1) album.coverUrl = uniqueCovers[0];
+        else if (uniqueCovers.length > 1) album.coverUrl = uniqueCovers[0];
+      }
+      return album;
+    });
     const ivrPrompts = await readIvrPrompts(env);
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, rules, ivrPrompts });
+    return json({ albums: albumsWithCovers, songs: songs.results, artists: artists.results, rules, ivrPrompts });
   } catch (error) {
     console.error("catalog error", error);
     return json({ error: "לא ניתן לטעון את רשימת המצעד." }, 500);
