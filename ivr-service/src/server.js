@@ -43,14 +43,22 @@ async function chooseOne(call, messages, items, label, kind, prompts) {
 async function chooseMany(call, intro, items, amount, label, kind, prompts) {
   if (!amount) return [];
   if (items.length < amount) throw new Error(`not enough ${label} choices`);
-  const remaining = [...items];
   const selected = [];
+  const selectedIds = new Set();
+  let lead = [];
+  let showIntro = true;
   while (selected.length < amount) {
-    const messages = [...(selected.length === 0 ? intro : []), text(`בחירה ${selected.length + 1} מתוך ${amount}`)];
-    const choice = await chooseOne(call, messages, remaining, label, kind, prompts);
+    const messages = [...lead, ...(showIntro ? intro : []), text(`בחירה ${selected.length + 1} מתוך ${amount}`)];
+    lead = [];
+    showIntro = false;
+    const choice = await chooseOne(call, messages, items, label, kind, prompts);
     if (!choice) throw new Error("invalid choice");
+    if (selectedIds.has(choice.id)) {
+      lead = prompt(prompts, "system:already_selected", "כבר הצבעתם לזה בחרו אפשרות אחרת");
+      continue;
+    }
     selected.push(choice);
-    remaining.splice(remaining.findIndex((item) => item.id === choice.id), 1);
+    selectedIds.add(choice.id);
   }
   return selected;
 }
