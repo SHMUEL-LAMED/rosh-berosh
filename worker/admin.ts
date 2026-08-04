@@ -2,7 +2,7 @@ import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
 import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
 
-type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string };
+type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const ARCHIVE_PREFIX = "poll-archives/";
 
@@ -224,12 +224,63 @@ async function listSurveys(env: AdminEnv): Promise<{ surveys: SurveyRow[] }> {
   return { surveys: result.results };
 }
 
+function toBase64Url(buffer: ArrayBuffer): string {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function strToBase64Url(str: string): string {
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function googleAccessToken(saKeyJson: string): Promise<string> {
+  const sa = JSON.parse(saKeyJson) as { client_email: string; private_key: string };
+  const now = Math.floor(Date.now() / 1000);
+  const header = strToBase64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const payload = strToBase64Url(JSON.stringify({ iss: sa.client_email, scope: "https://www.googleapis.com/auth/cloud-platform", aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 }));
+  const pem = sa.private_key.replace(/-----BEGIN PRIVATE KEY-----/, "").replace(/-----END PRIVATE KEY-----/, "").replace(/\s/g, "");
+  const keyData = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey("pkcs8", keyData, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(`${header}.${payload}`));
+  const jwt = `${header}.${payload}.${toBase64Url(signature)}`;
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+  if (!response.ok) throw new Error(`אימות Google נכשל (שגיאה ${response.status}).`);
+  const token = await response.json<{ access_token: string }>();
+  return token.access_token;
+}
+
 function ttsConfigured(env: AdminEnv): boolean {
+  if (env.TTS_PROVIDER === "google") return Boolean(env.GOOGLE_SA_KEY);
   if (env.TTS_PROVIDER === "elevenlabs") return Boolean(env.ELEVENLABS_API_KEY);
   return Boolean(env.AI_API_KEY);
 }
 
 async function generateTtsAudio(env: AdminEnv, inputText: string): Promise<ArrayBuffer> {
+  if (env.TTS_PROVIDER === "google") {
+    if (!env.GOOGLE_SA_KEY) throw new Error("שירות ה-TTS אינו מוגדר (חסר GOOGLE_SA_KEY).");
+    const accessToken = await googleAccessToken(env.GOOGLE_SA_KEY);
+    const response = await fetch("https://texttospeech.googleapis.com/v1/text:synthesize", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        input: { text: inputText },
+        voice: { languageCode: "he-IL", name: "he-IL-Standard-B" },
+        audioConfig: { audioEncoding: "MP3", sampleRateHertz: 44100 },
+      }),
+    });
+    if (!response.ok) {
+      const status = response.status;
+      if (status === 403) throw new Error("ל-Service Account אין הרשאה ל-Text-to-Speech API. בדקו שה-API מופעל בפרויקט.");
+      throw new Error(`יצירת הקריינות נכשלה ב-Google Cloud (שגיאה ${status}).`);
+    }
+    const result = await response.json<{ audioContent: string }>();
+    const binary = atob(result.audioContent);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
   if (env.TTS_PROVIDER === "elevenlabs") {
     const apiKey = env.ELEVENLABS_API_KEY;
     if (!apiKey) throw new Error("שירות ה-TTS אינו מוגדר (חסר ELEVENLABS_API_KEY).");
