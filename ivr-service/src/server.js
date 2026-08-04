@@ -35,7 +35,14 @@ function itemPrompt(prompts, kind, item, label) {
 
 async function chooseOne(call, messages, items, label, kind, prompts) {
   const full = [...messages];
-  items.forEach((item, index) => full.push(...itemPrompt(prompts, kind, item, label), text("הקישו"), number(index + 1)));
+  items.forEach((item, index) => {
+    const recorded = prompts.get(`${kind}:${item.id}`);
+    if (recorded?.yemotPath) {
+      full.push(file(recorded.yemotPath));
+    } else {
+      full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(index + 1));
+    }
+  });
   const answer = await call.read(full, "tap", { min_digits: 1, max_digits: String(items.length).length, digits_allowed: items.map((_, index) => index + 1), typing_playback_mode: "No" });
   return items[Number(answer) - 1];
 }
