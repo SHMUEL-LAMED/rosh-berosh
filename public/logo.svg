@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="מצעד האלבומים 25 שנות מוזיקה">
+  <defs>
+    <radialGradient id="gold" cx="40%" cy="32%" r="80%"><stop offset="0%" stop-color="#ffe9a0"/><stop offset="42%" stop-color="#ecc23f"/><stop offset="78%" stop-color="#d19b16"/><stop offset="100%" stop-color="#a9760a"/></radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fff0b0"/><stop offset="100%" stop-color="#996a06"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4a4ad8"/><stop offset="50%" stop-color="#1414a0"/><stop offset="100%" stop-color="#080858"/></linearGradient>
+    <filter id="drop" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="#000" flood-opacity="0.35"/></filter>
+    <path id="toparc" d="M 120 256 A 136 136 0 0 1 392 256"/>
+  </defs>
+  <path filter="url(#drop)" fill="url(#gold)" stroke="#8a6206" stroke-width="4" d="M 256.0 25.2 C 286.6 26.7 319.8 51.9 345.7 69.7 C 371.6 87.5 390.5 109.2 411.4 132.1 C 432.2 155.0 460.8 178.2 470.7 207.0 C 480.6 235.8 477.7 274.0 470.5 305.0 C 463.4 336.0 448.2 369.4 427.7 392.9 C 407.2 416.5 376.2 436.1 347.6 446.1 C 318.9 456.2 287.3 451.6 256.0 453.2 C 224.7 454.7 189.9 464.3 160.0 455.3 C 130.1 446.3 94.5 424.5 76.7 399.0 C 59.0 373.4 57.3 333.8 53.4 302.2 C 49.5 270.7 46.7 239.1 53.3 209.7 C 59.9 180.4 75.0 151.0 93.1 126.1 C 111.2 101.2 134.7 77.3 161.9 60.5 C 189.0 43.7 225.4 23.6 256.0 25.2 Z"/>
+  <circle cx="256" cy="256" r="176" fill="url(#gold)" stroke="url(#rim)" stroke-width="11"/>
+  <circle cx="256" cy="256" r="159" fill="none" stroke="#94670a" stroke-width="3" opacity="0.5"/>
+  <text font-family="Arial,sans-serif" font-weight="700" font-size="33" fill="#0b0b64" letter-spacing="1"><textPath href="#toparc" startOffset="50%" text-anchor="middle">מצעד האלבומים</textPath></text>
+  <text x="256" y="300" text-anchor="middle" dominant-baseline="middle" font-family="Georgia,'Times New Roman',serif" font-weight="700" font-size="235" fill="url(#blue)" stroke="#05053c" stroke-width="4" paint-order="stroke" style="letter-spacing:-6px">25</text>
+  <text x="256" y="300" text-anchor="middle" dominant-baseline="middle" font-family="Arial,sans-serif" font-weight="700" font-size="40" fill="#0b0b64" stroke="#ffffff" stroke-width="0.6" paint-order="stroke">שנות מוזיקה</text>
+</svg>
