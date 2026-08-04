@@ -16,7 +16,7 @@ type IvrPrompt = { key: string; label: string; audioUrl: string; yemotPath: stri
 type Readiness = { ready: boolean; warnings: string[]; counts: { albums: number; songs: number; artists: number; missingCovers: number; missingSongs: number } };
 type PollArchive = { key: string; name: string; createdAt: number; votes: number; albums: number; songs: number; artists: number };
 type Survey = { id: string; name: string; active: number; createdAt: number; votingOpen: number; albums: number; songs: number; artists: number; votes: number };
-type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; yemotConnected: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null };
+type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null };
 type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "managers" | "results" | "archives";
 
 const SYSTEM_PROMPTS = [
@@ -34,8 +34,16 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [albumOrder, setAlbumOrder] = useState<Album[]>([]);
+  const [artistOrder, setArtistOrder] = useState<Artist[]>([]);
+  const [dragAlbum, setDragAlbum] = useState<number | null>(null);
+  const [dragAlbumOver, setDragAlbumOver] = useState<number | null>(null);
+  const [dragArtist, setDragArtist] = useState<number | null>(null);
+  const [dragArtistOver, setDragArtistOver] = useState<number | null>(null);
   const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); setData(await response.json()); }).catch(() => setMessage("לא הצלחנו לטעון את נתוני הניהול.")), []);
   useEffect(() => { if (user?.isAdmin) load(); }, [user, load]);
+  useEffect(() => { if (data?.albums) setAlbumOrder(data.albums); }, [data]);
+  useEffect(() => { if (data?.artists) setArtistOrder(data.artists); }, [data]);
 
   if (user === undefined) return <main className="login-shell"><div className="loading">בודקים הרשאות…</div></main>;
   if (!user) return <LoginScreen />;
@@ -110,6 +118,17 @@ export default function AdminPage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : "השמירה נכשלה."); }
   };
 
+  const reorder = async (kind: "album" | "artist", from: number, to: number) => {
+    if (from === to || from === null) return;
+    if (kind === "album") {
+      const next = [...albumOrder]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); setAlbumOrder(next);
+      await fetch("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "album", ids: next.map((a) => a.id) }) }).catch(() => {});
+    } else {
+      const next = [...artistOrder]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); setArtistOrder(next);
+      await fetch("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "artist", ids: next.map((a) => a.id) }) }).catch(() => {});
+    }
+  };
+
   return <main className="admin-shell" dir="rtl">
     <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
       <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "managers"} onClick={() => setTab("managers")}>מנהלי המערכת</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Link href="/">מעבר לאתר</Link>
@@ -122,8 +141,8 @@ export default function AdminPage() {
       {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={setMessage} />}
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
       {tab === "archives" && <ArchivesPanel onChanged={load} onMessage={setMessage} />}
-      {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP. התמונה הראשונה תהפוך לעטיפה וכל קובצי השמע יהפכו לשירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*,image/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מעלה…" : "יצירת האלבום"}</button></form></AdminSection><div className="album-admin-grid">{data?.albums.map((album) => <AlbumEditor key={album.id} album={album} songs={data.songs.filter((song) => song.albumId === album.id)} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onDeleteCover={deleteCover} onFiles={(files) => addFiles(album.id, files)} />)}</div></>}
-      {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{data?.artists.map((item) => <ArtistRow key={item.id} item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} />)}</div></AdminSection>}
+      {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP. התמונה הראשונה תהפוך לעטיפה וכל קובצי השמע יהפכו לשירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*,image/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מעלה…" : "יצירת האלבום"}</button></form></AdminSection><div className="album-admin-grid">{albumOrder.map((album, index) => <div key={album.id} draggable className={`drag-item${dragAlbum === index ? " dragging" : ""}${dragAlbumOver === index && dragAlbum !== index ? " drag-over" : ""}`} onDragStart={() => setDragAlbum(index)} onDragOver={(e) => { e.preventDefault(); setDragAlbumOver(index); }} onDragLeave={() => setDragAlbumOver(null)} onDrop={(e) => { e.preventDefault(); if (dragAlbum !== null) reorder("album", dragAlbum, index); setDragAlbum(null); setDragAlbumOver(null); }} onDragEnd={() => { setDragAlbum(null); setDragAlbumOver(null); }}><AlbumEditor album={album} songs={data?.songs.filter((song) => song.albumId === album.id) ?? []} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onDeleteCover={deleteCover} onFiles={(files) => addFiles(album.id, files)} /></div>)}</div></>}
+      {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{artistOrder.map((item, index) => <div key={item.id} draggable className={`drag-item${dragArtist === index ? " dragging" : ""}${dragArtistOver === index && dragArtist !== index ? " drag-over" : ""}`} onDragStart={() => setDragArtist(index)} onDragOver={(e) => { e.preventDefault(); setDragArtistOver(index); }} onDragLeave={() => setDragArtistOver(null)} onDrop={(e) => { e.preventDefault(); if (dragArtist !== null) reorder("artist", dragArtist, index); setDragArtist(null); setDragArtistOver(null); }} onDragEnd={() => { setDragArtist(null); setDragArtistOver(null); }}><ArtistRow item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} /></div>)}</div></AdminSection>}
       {tab === "managers" && data && <ManagersPanel managers={data.managers} currentEmail={user.email} onSaved={load} onMessage={setMessage} />}
       {tab === "results" && data && <Results data={data.results} />}
     </section>
@@ -134,7 +153,7 @@ function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab
 
 function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const promptFor = (key: string) => data.ivrPrompts?.find((prompt) => prompt.key === key);
-  const rows = (items: { key: string; label: string }[]) => <div className="prompt-list">{items.map((item) => <PromptRow key={item.key} item={item} prompt={promptFor(item.key)} onSaved={onSaved} onMessage={onMessage} />)}</div>;
+  const rows = (items: { key: string; label: string }[]) => <div className="prompt-list">{items.map((item) => <PromptRow key={item.key} item={item} prompt={promptFor(item.key)} ttsAvailable={data.ttsAvailable} onSaved={onSaved} onMessage={onMessage} />)}</div>;
   return <AdminSection title="קריינות הקו הטלפוני">
     <div className={`connection-banner ${data.yemotConnected ? "connected" : "disconnected"}`}><b>{data.yemotConnected ? "החיבור לימות המשיח מוגדר" : "החיבור לימות המשיח עדיין לא מוגדר"}</b><span>{data.yemotConnected ? "קבצים חדשים יישלחו גם לקו." : "הקבצים נשמרים באתר בלבד עד להוספת YEMOT_TOKEN בסביבת Cloudflare."}</span></div>
     <p className="panel-help">בכל שורה אפשר להעלות הקלטה משלכם. אם אין הקלטה פעילה, הקו משתמש בהקראה אוטומטית. התפריט הראשי נשאר קצר: 1 אלבומים, 2 שירים מתוך האלבומים שנבחרו, 3 זמרים.</p>
@@ -145,7 +164,7 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
   </AdminSection>;
 }
 
-function PromptRow({ item, prompt, onSaved, onMessage }: { item: { key: string; label: string }; prompt?: IvrPrompt; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
+function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: { key: string; label: string }; prompt?: IvrPrompt; ttsAvailable?: boolean; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false), [elapsed, setElapsed] = useState(0), [recorded, setRecorded] = useState<{ file: File; url: string } | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null), chunksRef = useRef<Blob[]>([]), timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -195,6 +214,16 @@ function PromptRow({ item, prompt, onSaved, onMessage }: { item: { key: string; 
     const response = await fetch("/api/admin/ivr-prompt", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key }) });
     if (response.ok) { onMessage("הקריינות הוסרה. הקו יחזור להקראה אוטומטית."); await onSaved(); }
   };
+  const generateTts = async () => {
+    setBusy(true); onMessage("יוצרים קריינות אוטומטית...");
+    try {
+      const response = await fetch("/api/admin/ivr-tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key, label: item.label }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "יצירת הקריינות נכשלה.");
+      onMessage(result.warning || "הקריינות נוצרה ופעילה בקו."); await onSaved();
+    } catch (error) { onMessage(error instanceof Error ? error.message : "יצירת הקריינות נכשלה."); }
+    finally { setBusy(false); }
+  };
   return <article className="prompt-row">
     <div className="prompt-copy"><b>{item.label}</b><small className={prompt?.yemotPath ? "prompt-live" : ""}>{prompt ? prompt.yemotPath ? "פעיל בקו" : "נשמר באתר — נדרש חיבור לימות המשיח" : "הקראה אוטומטית"}</small>{prompt?.audioUrl && <audio controls preload="metadata" src={prompt.audioUrl} />}</div>
     <div className="prompt-actions">
@@ -203,6 +232,7 @@ function PromptRow({ item, prompt, onSaved, onMessage }: { item: { key: string; 
           : <button type="button" className="rec-start" onClick={startRecording} disabled={busy}>🎙 הקלטה ישירה</button>}
         {recorded && !recording && <><audio controls preload="metadata" src={recorded.url} /><button type="button" onClick={saveRecording} disabled={busy}>{busy ? "שומר…" : "שמירת ההקלטה לקו"}</button><button type="button" className="danger" onClick={clearRecording}>ביטול</button></>}
       </div>
+      {ttsAvailable && !recording && !recorded && <button type="button" className="tts-btn" onClick={generateTts} disabled={busy}>{busy ? "יוצר..." : "🔊 קריינות AI"}</button>}
       <form onSubmit={upload}><input name="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg" /><button disabled={busy}>{busy ? "מעלה…" : prompt ? "החלפה" : "העלאה"}</button>{prompt && <button type="button" className="danger" onClick={removePrompt}>הסרה</button>}</form>
     </div>
   </article>;

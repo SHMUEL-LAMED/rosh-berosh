@@ -265,7 +265,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     ]);
     const [ivrPrompts, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
     const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
-    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey });
+    return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: Boolean(env.AI_API_KEY), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey });
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/archives") {
@@ -356,6 +356,35 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const prompts = await readIvrPrompts(env), current = prompts.find((prompt) => prompt.key === body.key);
     if (current?.audioUrl.startsWith("/media/")) await env.MEDIA.delete(decodeURIComponent(current.audioUrl.slice(7)));
     await saveIvrPrompts(env, prompts.filter((prompt) => prompt.key !== body.key));
+    return json({ ok: true });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/ivr-tts") {
+    const body = await request.json<{ key?: string; label?: string }>();
+    const key = text(body.key), label = text(body.label);
+    if (!key || !label) return json({ error: "מפתח או טקסט חסרים." }, 400);
+    if (!env.AI_API_KEY) return json({ error: "שירות ה-TTS אינו מוגדר (חסר AI_API_KEY)." }, 503);
+    const base = (env.AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+    const ttsRes = await fetch(`${base}/audio/speech`, { method: "POST", headers: { authorization: `Bearer ${env.AI_API_KEY}`, "content-type": "application/json" }, body: JSON.stringify({ model: "tts-1", input: label, voice: "alloy", response_format: "mp3" }) });
+    if (!ttsRes.ok) return json({ error: `יצירת הקריינות נכשלה (שגיאה ${ttsRes.status}).` }, 502);
+    const audioBuffer = await ttsRes.arrayBuffer();
+    const mediaKey = `ivr-prompts/${safeName(key)}-${crypto.randomUUID()}-tts.mp3`;
+    await env.MEDIA.put(mediaKey, audioBuffer, { httpMetadata: { contentType: "audio/mpeg", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { promptKey: key } });
+    const ttsFile = new File([audioBuffer], "tts.mp3", { type: "audio/mpeg" });
+    const sync = await syncPromptToYemot(env, key, ttsFile);
+    const prompts = await readIvrPrompts(env), previous = prompts.find((p) => p.key === key);
+    const next = prompts.filter((p) => p.key !== key);
+    next.push({ key, label, audioUrl: mediaUrl(mediaKey), yemotPath: sync.path || previous?.yemotPath || "", updatedAt: Date.now() });
+    await saveIvrPrompts(env, next);
+    if (previous?.audioUrl.startsWith("/media/") && previous.audioUrl !== mediaUrl(mediaKey)) await env.MEDIA.delete(decodeURIComponent(previous.audioUrl.slice(7)));
+    return json({ ok: true, warning: sync.warning });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/reorder") {
+    const body = await request.json<{ kind?: string; ids?: string[] }>();
+    if (!Array.isArray(body.ids) || !body.ids.length || !["album", "artist"].includes(body.kind ?? "")) return json({ error: "בקשה לא תקינה." }, 400);
+    const table = body.kind === "album" ? "albums" : "artists";
+    await env.DB.batch(body.ids.map((id, index) => env.DB.prepare(`UPDATE ${table} SET position=? WHERE id=? AND survey_id=?`).bind(index, id, surveyId)));
     return json({ ok: true });
   }
 
