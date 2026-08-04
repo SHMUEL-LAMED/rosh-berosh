@@ -169,6 +169,7 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
 function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: { key: string; label: string }; prompt?: IvrPrompt; ttsAvailable?: boolean; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false), [elapsed, setElapsed] = useState(0), [recorded, setRecorded] = useState<{ file: File; url: string } | null>(null);
+  const [ttsPreview, setTtsPreview] = useState<{ file: File; url: string } | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null), chunksRef = useRef<Blob[]>([]), timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const submitFile = async (file: File) => {
@@ -187,9 +188,10 @@ function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: {
     if (await submitFile(file)) form.reset();
   };
   const clearRecording = () => { setRecorded((current) => { if (current) URL.revokeObjectURL(current.url); return null; }); setElapsed(0); };
+  const clearTtsPreview = () => { setTtsPreview((current) => { if (current) URL.revokeObjectURL(current.url); return null; }); };
   const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return onMessage("הדפדפן אינו תומך בהקלטה. אפשר להעלות קובץ במקום.");
-    clearRecording();
+    clearRecording(); clearTtsPreview();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream); recorderRef.current = recorder; chunksRef.current = [];
@@ -209,6 +211,7 @@ function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: {
   };
   const stopRecording = () => recorderRef.current?.state === "recording" && recorderRef.current.stop();
   const saveRecording = async () => { if (recorded && await submitFile(recorded.file)) clearRecording(); };
+  const saveTtsPreview = async () => { if (ttsPreview && await submitFile(ttsPreview.file)) clearTtsPreview(); };
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
 
   const removePrompt = async () => {
@@ -216,13 +219,15 @@ function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: {
     const response = await fetch("/api/admin/ivr-prompt", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key }) });
     if (response.ok) { onMessage("הקריינות הוסרה. הקו יחזור להקראה אוטומטית."); await onSaved(); }
   };
-  const generateTts = async () => {
-    setBusy(true); onMessage("יוצרים קריינות אוטומטית...");
+  const previewTts = async () => {
+    setBusy(true); clearTtsPreview(); onMessage("יוצרים תצוגה מקדימה…");
     try {
-      const response = await fetch("/api/admin/ivr-tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key, label: item.label }) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "יצירת הקריינות נכשלה.");
-      onMessage(result.warning || "הקריינות נוצרה ופעילה בקו."); await onSaved();
+      const response = await fetch("/api/admin/ivr-tts-preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: item.label }) });
+      if (!response.ok) { const result = await response.json().catch(() => ({})); throw new Error((result as { error?: string }).error || "יצירת הקריינות נכשלה."); }
+      const blob = await response.blob();
+      const file = new File([blob], "tts-preview.mp3", { type: "audio/mpeg" });
+      setTtsPreview({ file, url: URL.createObjectURL(blob) });
+      onMessage("האזינו לתצוגה המקדימה ולחצו ״שמירה לקו״ לאישור.");
     } catch (error) { onMessage(error instanceof Error ? error.message : "יצירת הקריינות נכשלה."); }
     finally { setBusy(false); }
   };
@@ -234,7 +239,8 @@ function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: {
           : <button type="button" className="rec-start" onClick={startRecording} disabled={busy}>🎙 הקלטה ישירה</button>}
         {recorded && !recording && <><audio controls preload="metadata" src={recorded.url} /><button type="button" onClick={saveRecording} disabled={busy}>{busy ? "שומר…" : "שמירת ההקלטה לקו"}</button><button type="button" className="danger" onClick={clearRecording}>ביטול</button></>}
       </div>
-      {ttsAvailable && !recording && !recorded && <button type="button" className="tts-btn" onClick={generateTts} disabled={busy}>{busy ? "יוצר..." : "🔊 קריינות AI"}</button>}
+      {ttsAvailable && !recording && !recorded && !ttsPreview && <button type="button" className="tts-btn" onClick={previewTts} disabled={busy}>{busy ? "יוצר..." : "🔊 קריינות AI"}</button>}
+      {ttsPreview && <div className="tts-preview"><audio controls autoPlay preload="metadata" src={ttsPreview.url} /><button type="button" onClick={saveTtsPreview} disabled={busy}>{busy ? "שומר…" : "שמירה לקו"}</button><button type="button" className="danger" onClick={clearTtsPreview}>ביטול</button></div>}
       <form onSubmit={upload}><input name="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg" /><button disabled={busy}>{busy ? "מעלה…" : prompt ? "החלפה" : "העלאה"}</button>{prompt && <button type="button" className="danger" onClick={removePrompt}>הסרה</button>}</form>
     </div>
   </article>;

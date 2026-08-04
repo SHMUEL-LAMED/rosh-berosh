@@ -399,6 +399,17 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     return json({ ok: true });
   }
 
+  if (request.method === "POST" && url.pathname === "/api/admin/ivr-tts-preview") {
+    const body = await request.json<{ label?: string }>();
+    const label = text(body.label);
+    if (!label) return json({ error: "טקסט חסר." }, 400);
+    if (!env.AI_API_KEY) return json({ error: "שירות ה-TTS אינו מוגדר (חסר AI_API_KEY)." }, 503);
+    const base = (env.AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+    const ttsRes = await fetch(`${base}/audio/speech`, { method: "POST", headers: { authorization: `Bearer ${env.AI_API_KEY}`, "content-type": "application/json" }, body: JSON.stringify({ model: "tts-1", input: label, voice: "alloy", response_format: "mp3" }) });
+    if (!ttsRes.ok) return json({ error: `יצירת הקריינות נכשלה (שגיאה ${ttsRes.status}).` }, 502);
+    return new Response(ttsRes.body, { headers: { "content-type": "audio/mpeg" } });
+  }
+
   if (request.method === "POST" && url.pathname === "/api/admin/ivr-tts") {
     const body = await request.json<{ key?: string; label?: string }>();
     const key = text(body.key), label = text(body.label);
