@@ -233,11 +233,12 @@ async function generateTtsAudio(env: AdminEnv, inputText: string): Promise<Array
   if (env.TTS_PROVIDER === "elevenlabs") {
     const apiKey = env.ELEVENLABS_API_KEY;
     if (!apiKey) throw new Error("שירות ה-TTS אינו מוגדר (חסר ELEVENLABS_API_KEY).");
-    const voiceId = env.ELEVENLABS_VOICE_ID || "onwK4e9ZLuTAKqWW03F9"; // Daniel — male, supports Hebrew
+    const voiceId = env.ELEVENLABS_VOICE_ID;
+    if (!voiceId) throw new Error("חסר ELEVENLABS_VOICE_ID. הגדירו מזהה קול בסביבת Cloudflare.");
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: "POST",
       headers: { "xi-api-key": apiKey, "content-type": "application/json", accept: "audio/mpeg" },
-      body: JSON.stringify({ text: inputText, model_id: "eleven_multilingual_v2", output_format: "mp3_44100_128" }),
+      body: JSON.stringify({ text: inputText, model_id: "eleven_v3", language_code: "he", output_format: "mp3_44100_128" }),
     });
     if (!response.ok) {
       const status = response.status;
