@@ -37,7 +37,7 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
   const [albumOrderOverride, setAlbumOrder] = useState<Album[] | null>(null);
   const [artistOrderOverride, setArtistOrder] = useState<Artist[] | null>(null);
-  const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); setAlbumOrder(null); setArtistOrder(null); setData(await response.json()); }).catch(() => setMessage("לא הצלחנו לטעון את נתוני הניהול.")), []);
+  const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`); setAlbumOrder(null); setArtistOrder(null); setData(body); }).catch((err) => setMessage(err?.message || "לא הצלחנו לטעון את נתוני הניהול.")), []);
   useEffect(() => { if (user?.isAdmin) load(); }, [user, load]);
   const albumOrder = useMemo(() => albumOrderOverride ?? data?.albums ?? [], [albumOrderOverride, data]);
   const artistOrder = useMemo(() => artistOrderOverride ?? data?.artists ?? [], [artistOrderOverride, data]);
