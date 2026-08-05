@@ -172,7 +172,8 @@ function Title({ kicker, title, count }: { kicker: string; title: string; count?
 
 function BrowsePanel({ catalog, currentSong, onPlay }: { catalog: Catalog; currentSong: Song | null; onPlay(song: Song): void }) {
   const [open, setOpen] = useState(false);
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [expandedAlbum, setExpandedAlbum] = useState<string | null>(null);
+  const toggleAlbum = useCallback((id: string) => setExpandedAlbum((current) => current === id ? null : id), []);
   const songsByAlbum = useMemo(() => {
     const map = new Map<string, Song[]>();
     catalog.songs.forEach((song) => {
@@ -182,54 +183,43 @@ function BrowsePanel({ catalog, currentSong, onPlay }: { catalog: Catalog; curre
     });
     return map;
   }, [catalog.songs]);
-  const selectedAlbum = catalog.albums.find((a) => a.id === selectedAlbumId);
-  const selectedSongs = selectedAlbumId ? songsByAlbum.get(selectedAlbumId) || [] : [];
 
   return <>
     <button className="browse-fab" onClick={() => setOpen(true)} aria-label="שמיעת השירים המתמודדים">
       <span className="browse-fab-icon">♫</span>
       <span className="browse-fab-label">שמיעת השירים</span>
     </button>
-    {open && <div className="browse-backdrop" onClick={() => { setOpen(false); setSelectedAlbumId(null); }} />}
-    <div className={`browse-wrap ${open ? "open" : ""} ${selectedAlbumId ? "with-songs" : ""}`}>
-      <aside className="browse-panel">
-        <header className="browse-header">
-          <h3>השירים המתמודדים</h3>
-          <button className="browse-close" onClick={() => { setOpen(false); setSelectedAlbumId(null); }}>✕</button>
-        </header>
-        <div className="browse-body">
-          {catalog.albums.map((album) => {
-            const albumSongs = songsByAlbum.get(album.id) || [];
-            const isSelected = selectedAlbumId === album.id;
-            return <button key={album.id} className={`browse-album-header ${isSelected ? "expanded" : ""}`} onClick={() => setSelectedAlbumId(isSelected ? null : album.id)}>
+    {open && <div className="browse-backdrop" onClick={() => setOpen(false)} />}
+    <aside className={`browse-panel ${open ? "open" : ""}`}>
+      <header className="browse-header">
+        <h3>השירים המתמודדים</h3>
+        <button className="browse-close" onClick={() => setOpen(false)}>✕</button>
+      </header>
+      <div className="browse-body">
+        {catalog.albums.map((album) => {
+          const albumSongs = songsByAlbum.get(album.id) || [];
+          const isExpanded = expandedAlbum === album.id;
+          return <div key={album.id} className="browse-album">
+            <button className={`browse-album-header ${isExpanded ? "expanded" : ""}`} onClick={() => toggleAlbum(album.id)}>
               {album.coverUrl ? <img className="browse-album-cover" src={album.coverUrl} alt="" /> : <span className="browse-album-cover browse-cover-fallback">♫</span>}
               <div className="browse-album-info"><b>{album.title}</b><small>{album.artistName} · {albumSongs.length} שירים</small></div>
-              <span className="browse-album-arrow">{isSelected ? "◂" : "◂"}</span>
-            </button>;
-          })}
-        </div>
-      </aside>
-      {selectedAlbumId && <aside className="browse-songs-panel">
-        <header className="browse-header browse-songs-header">
-          <button className="browse-back" onClick={() => setSelectedAlbumId(null)}>▸</button>
-          <div className="browse-songs-title">
-            {selectedAlbum?.coverUrl && <img className="browse-album-cover" src={selectedAlbum.coverUrl} alt="" />}
-            <div><b>{selectedAlbum?.title}</b><small>{selectedAlbum?.artistName}</small></div>
-          </div>
-        </header>
-        <div className="browse-body">
-          {selectedSongs.map((song) => {
-            const isPlaying = currentSong?.id === song.id;
-            return <button key={song.id} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => onPlay(song)}>
-              {song.coverUrl && <img className="browse-song-cover" src={song.coverUrl} alt="" />}
-              <span className="browse-song-title">{song.title}</span>
-              <span className="browse-song-action">{isPlaying ? "■" : "▶"}</span>
-            </button>;
-          })}
-          {selectedSongs.length === 0 && <p className="browse-empty">אין שירים באלבום זה</p>}
-        </div>
-      </aside>}
-    </div>
+              <span className="browse-album-arrow">{isExpanded ? "▴" : "▾"}</span>
+            </button>
+            {isExpanded && <div className="browse-songs">
+              {albumSongs.map((song) => {
+                const isPlaying = currentSong?.id === song.id;
+                return <button key={song.id} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => onPlay(song)}>
+                  {song.coverUrl && <img className="browse-song-cover" src={song.coverUrl} alt="" />}
+                  <span className="browse-song-title">{song.title}</span>
+                  <span className="browse-song-action">{isPlaying ? "■" : "▶"}</span>
+                </button>;
+              })}
+              {albumSongs.length === 0 && <p className="browse-empty">אין שירים באלבום זה</p>}
+            </div>}
+          </div>;
+        })}
+      </div>
+    </aside>
   </>;
 }
 
