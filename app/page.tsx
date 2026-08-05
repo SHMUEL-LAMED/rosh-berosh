@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoginScreen, logout, useCurrentUser } from "./auth-ui";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string | null };
@@ -159,11 +159,65 @@ export default function Home() {
         {catalog && catalog.albums.length > 0 && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
       </section>
     </>}
+    {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} currentSong={player} onPlay={(song) => setPlayer((current) => current?.id === song.id ? null : song)} />}
     {player && <AudioPlayer song={player} onClose={() => setPlayer(null)} />}
   </main>;
 }
 
 function Title({ kicker, title, count }: { kicker: string; title: string; count?: string }) { return <div className="section-title"><div><p className="kicker">{kicker}</p><h2>{title}</h2></div>{count && <strong>{count}</strong>}</div>; }
+
+function BrowsePanel({ catalog, currentSong, onPlay }: { catalog: Catalog; currentSong: Song | null; onPlay(song: Song): void }) {
+  const [open, setOpen] = useState(false);
+  const [expandedAlbum, setExpandedAlbum] = useState<string | null>(null);
+  const toggleAlbum = useCallback((id: string) => setExpandedAlbum((current) => current === id ? null : id), []);
+  const songsByAlbum = useMemo(() => {
+    const map = new Map<string, Song[]>();
+    catalog.songs.forEach((song) => {
+      const list = map.get(song.albumId) || [];
+      list.push(song);
+      map.set(song.albumId, list);
+    });
+    return map;
+  }, [catalog.songs]);
+
+  return <>
+    <button className="browse-fab" onClick={() => setOpen(true)} aria-label="שמיעת השירים המתמודדים">
+      <span className="browse-fab-icon">♫</span>
+      <span className="browse-fab-label">שמיעת השירים</span>
+    </button>
+    {open && <div className="browse-backdrop" onClick={() => setOpen(false)} />}
+    <aside className={`browse-panel ${open ? "open" : ""}`}>
+      <header className="browse-header">
+        <h3>השירים המתמודדים</h3>
+        <button className="browse-close" onClick={() => setOpen(false)}>✕</button>
+      </header>
+      <div className="browse-body">
+        {catalog.albums.filter((a) => a.active !== 0).map((album) => {
+          const albumSongs = songsByAlbum.get(album.id) || [];
+          const isExpanded = expandedAlbum === album.id;
+          return <div key={album.id} className="browse-album">
+            <button className={`browse-album-header ${isExpanded ? "expanded" : ""}`} onClick={() => toggleAlbum(album.id)}>
+              {album.coverUrl ? <img className="browse-album-cover" src={album.coverUrl} alt="" /> : <span className="browse-album-cover browse-cover-fallback">♫</span>}
+              <div className="browse-album-info"><b>{album.title}</b><small>{album.artistName} · {albumSongs.length} שירים</small></div>
+              <span className="browse-album-arrow">{isExpanded ? "▴" : "▾"}</span>
+            </button>
+            {isExpanded && <div className="browse-songs">
+              {albumSongs.map((song) => {
+                const isPlaying = currentSong?.id === song.id;
+                return <button key={song.id} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => onPlay(song)}>
+                  {song.coverUrl && <img className="browse-song-cover" src={song.coverUrl} alt="" />}
+                  <span className="browse-song-title">{song.title}</span>
+                  <span className="browse-song-action">{isPlaying ? "■" : "▶"}</span>
+                </button>;
+              })}
+              {albumSongs.length === 0 && <p className="browse-empty">אין שירים באלבום זה</p>}
+            </div>}
+          </div>;
+        })}
+      </div>
+    </aside>
+  </>;
+}
 
 function AudioPlayer({ song, onClose }: { song: Song; onClose(): void }) {
   const audio = useRef<HTMLAudioElement>(null);
