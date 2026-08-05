@@ -45,8 +45,9 @@ function prompt(prompts, key, fallback) {
   return item?.yemotPath ? [file(item.yemotPath)] : [text(fallback)];
 }
 function itemPrompt(prompts, kind, item, label) {
-  const recorded = prompts.get(`${kind}:${item.id}`);
-  return recorded?.yemotPath ? [file(recorded.yemotPath)] : [text(`${label} ${item.title || item.name}`)];
+  const nameOnly = prompts.get(`${kind}-name:${item.id}`);
+  if (nameOnly?.yemotPath) return [file(nameOnly.yemotPath)];
+  return [text(`${label} ${item.title || item.name}`)];
 }
 
 async function chooseOne(call, messages, items, label, kind, prompts) {
