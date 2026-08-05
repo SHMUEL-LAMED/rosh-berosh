@@ -542,9 +542,13 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
 
   if (request.method === "POST" && url.pathname === "/api/admin/reorder") {
     const body = await request.json<{ kind?: string; ids?: string[] }>();
-    if (!Array.isArray(body.ids) || !body.ids.length || !["album", "artist"].includes(body.kind ?? "")) return json({ error: "בקשה לא תקינה." }, 400);
-    const table = body.kind === "album" ? "albums" : "artists";
-    await env.DB.batch(body.ids.map((id, index) => env.DB.prepare(`UPDATE ${table} SET position=? WHERE id=? AND survey_id=?`).bind(index, id, surveyId)));
+    if (!Array.isArray(body.ids) || !body.ids.length || !["album", "artist", "song"].includes(body.kind ?? "")) return json({ error: "בקשה לא תקינה." }, 400);
+    if (body.kind === "song") {
+      await env.DB.batch(body.ids.map((id, index) => env.DB.prepare("UPDATE songs SET position=? WHERE id=?").bind(index, id)));
+    } else {
+      const table = body.kind === "album" ? "albums" : "artists";
+      await env.DB.batch(body.ids.map((id, index) => env.DB.prepare(`UPDATE ${table} SET position=? WHERE id=? AND survey_id=?`).bind(index, id, surveyId)));
+    }
     return json({ ok: true });
   }
 
