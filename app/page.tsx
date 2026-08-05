@@ -138,8 +138,8 @@ export default function Home() {
   if (done) return <main className="voting-shell"><section className="success-card"><span>✓</span><p className="kicker">ההצבעה נקלטה</p><h1>תודה שהשתתפתם!</h1><p>הבחירות שלכם נשמרו בהצלחה.</p></section></main>;
 
   return <main className={`voting-shell ${player ? "with-player" : ""}`} dir="rtl">
-    <header className="vote-header"><img className="logo-mark" src="/badge.png" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>יציאה</button></nav></header>
-    <section className="hero"><img className="hero-logo" src="/badge.png" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">הקול שלכם קובע</p><h1>מצעד האלבומים | 25 שנות מוזיקה</h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
+    <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>יציאה</button></nav></header>
+    <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">הקול שלכם קובע</p><h1>מצעד האלבומים | 25 שנות מוזיקה</h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
     {catalog && !catalog.rules.votingOpen ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
