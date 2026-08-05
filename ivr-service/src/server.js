@@ -4,6 +4,7 @@ const { YemotRouter } = require("yemot-router2");
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
 const IVR_SECRET = process.env.IVR_SECRET;
 const PORT = process.env.PORT || 3000;
+const POST_VOTE_TRANSFER = "0796077075";
 const REQUEST_TIMEOUT_MS = 8000;
 if (!SITE_API_BASE_URL) { console.error("חסר SITE_API_BASE_URL"); process.exit(1); }
 if (!IVR_SECRET) { console.error("חסר IVR_SECRET"); process.exit(1); }
@@ -104,7 +105,10 @@ router.get("/", async (call) => {
   const voterPhone = phone(call);
   try {
     const { result: check } = await api(`/api/ballots/check?voterKey=${encodeURIComponent(voterPhone)}`);
-    if (check.voted) return call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"));
+    if (check.voted) {
+      call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"), { prependToNextAction: true });
+      return call.routing_yemot(POST_VOTE_TRANSFER);
+    }
   } catch {}
 
 
@@ -145,9 +149,13 @@ router.get("/", async (call) => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ voterKey: phone(call), albumIds: selectedAlbums.map((item) => item.id), songIdsByAlbum, artistIds: selectedArtists.map((item) => item.id), channel: "phone" }),
   });
-  if (submission.response.status === 409) return call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"));
+  if (submission.response.status === 409) {
+    call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"), { prependToNextAction: true });
+    return call.routing_yemot(POST_VOTE_TRANSFER);
+  }
   if (!submission.response.ok) return call.id_list_message(prompt(prompts, "system:error", "שמירת ההצבעה נכשלה נא לנסות שוב מאוחר יותר"));
-  return call.id_list_message(prompt(prompts, "system:success", "תודה הצבעתכם נקלטה בהצלחה"));
+  call.id_list_message(prompt(prompts, "system:success", "תודה הצבעתכם נקלטה בהצלחה"), { prependToNextAction: true });
+  return call.routing_yemot(POST_VOTE_TRANSFER);
 });
 
 const app = express();
