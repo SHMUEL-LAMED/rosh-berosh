@@ -718,5 +718,22 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     return json({ ok: true });
   }
 
+  if (request.method === "GET" && url.pathname === "/api/admin/export") {
+    const kind = url.searchParams.get("kind") || "albums";
+    const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+    const pageSize = 500;
+    const offset = (page - 1) * pageSize;
+    let query: string;
+    if (kind === "songs") {
+      query = `SELECT s.title, a.title AS albumTitle, COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id WHERE a.survey_id=? GROUP BY s.id ORDER BY votes DESC, s.title LIMIT ${pageSize} OFFSET ${offset}`;
+    } else if (kind === "artists") {
+      query = `SELECT a.name AS title, '' AS albumTitle, COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC, a.name LIMIT ${pageSize} OFFSET ${offset}`;
+    } else {
+      query = `SELECT a.title, a.artist_name AS albumTitle, COUNT(v.album_id) AS votes FROM albums a LEFT JOIN album_votes v ON v.album_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC, a.title LIMIT ${pageSize} OFFSET ${offset}`;
+    }
+    const rows = await env.DB.prepare(query).bind(surveyId).all();
+    return json({ rows: rows.results, page, hasMore: rows.results.length === pageSize });
+  }
+
   return json({ error: "Not Found" }, 404);
 }

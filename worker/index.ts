@@ -22,6 +22,19 @@ const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
 const placeholders = (count: number) => Array(count).fill("?").join(",");
 
+const BALLOT_RATE_WINDOW = 60;
+const BALLOT_RATE_LIMIT = 5;
+const rateBuckets = new Map<string, { count: number; reset: number }>();
+
+function checkBallotRate(ip: string): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const bucket = rateBuckets.get(ip);
+  if (!bucket || now >= bucket.reset) { rateBuckets.set(ip, { count: 1, reset: now + BALLOT_RATE_WINDOW }); return true; }
+  if (bucket.count >= BALLOT_RATE_LIMIT) return false;
+  bucket.count++;
+  return true;
+}
+
 async function activeSurveyId(env: Env): Promise<string> {
   try {
     const row = await env.DB.prepare("SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1").first<{ id: string }>();
@@ -166,6 +179,8 @@ const worker = {
       return json({ voted: !!existing });
     }
     if (url.pathname === "/api/ballots" && request.method === "POST") {
+      const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+      if (!checkBallotRate(clientIp)) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
       const original = await request.json<Submission>();
       if (original.channel === "phone") return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
       const user = await readSession(request, env);

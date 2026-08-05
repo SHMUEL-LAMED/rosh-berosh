@@ -6,16 +6,29 @@ const PORT = process.env.PORT || 3000;
 const REQUEST_TIMEOUT_MS = 8000;
 if (!SITE_API_BASE_URL) { console.error("חסר SITE_API_BASE_URL"); process.exit(1); }
 
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+
 async function api(path, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${SITE_API_BASE_URL}${path}`, { ...options, signal: controller.signal });
-    const raw = await response.text();
-    let result;
-    try { result = JSON.parse(raw); } catch { throw new Error(`site api returned ${response.status} instead of json`); }
-    return { response, result };
-  } finally { clearTimeout(timer); }
+  let lastError;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${SITE_API_BASE_URL}${path}`, { ...options, signal: controller.signal });
+      const raw = await response.text();
+      let result;
+      try { result = JSON.parse(raw); } catch { throw new Error(`site api returned ${response.status} instead of json`); }
+      return { response, result };
+    } catch (error) {
+      lastError = error;
+      clearTimeout(timer);
+      if (options.method === "POST" && attempt < MAX_RETRIES) { console.error(`IVR api retry ${attempt + 1} for ${path}:`, error.message); continue; }
+      if (attempt < MAX_RETRIES) { console.error(`IVR api retry ${attempt + 1} for ${path}:`, error.message); continue; }
+    } finally { clearTimeout(timer); }
+  }
+  throw lastError;
 }
 
 function phone(call) { return call.phone || call.ApiPhone || call.values?.ApiPhone || call.values?.Phone || call.callId || "unknown"; }

@@ -14,5 +14,12 @@ export async function ensureRuntimeSchema(env: SchemaEnv): Promise<void> {
     if (!ballotCols.results.some((c) => c.name === "fingerprint")) {
       await env.DB.exec("ALTER TABLE ballots ADD COLUMN fingerprint TEXT");
     }
+    await env.DB.exec(`
+      CREATE INDEX IF NOT EXISTS ballots_survey_created_idx ON ballots(survey_id, created_at);
+      CREATE INDEX IF NOT EXISTS ballots_fingerprint_idx ON ballots(fingerprint) WHERE fingerprint IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS album_votes_album_idx ON album_votes(album_id);
+      CREATE INDEX IF NOT EXISTS song_votes_song_idx ON song_votes(song_id);
+      CREATE INDEX IF NOT EXISTS artist_votes_artist_idx ON artist_votes(artist_id);
+    `);
   } catch { /* ignore if already exists */ }
 }

@@ -303,7 +303,29 @@ function ManagersPanel({ managers, currentEmail, onSaved, onMessage }: { manager
 
 function formatTime(value: number) { if (!Number.isFinite(value) || value < 0) return "0:00"; const minutes = Math.floor(value / 60), seconds = Math.floor(value % 60); return `${minutes}:${String(seconds).padStart(2, "0")}`; }
 
-function Results({ data }: { data: Overview["results"] }) { const [kind, setKind] = useState<keyof Overview["results"]>("albums"); const list = data[kind]; const download = () => { const heading = kind === "albums" ? "אלבומים" : kind === "songs" ? "שירים" : "זמרים"; downloadResultsXlsx(list.map((item, index) => ({ place: index + 1, title: item.title || item.name || "", album: item.albumTitle || "", votes: Number(item.votes) })), heading, `rosh-berosh-${kind}.xlsx`); }; return <AdminSection title="תוצאות בזמן אמת"><div className="result-tabs"><button onClick={() => setKind("albums")}>אלבומים</button><button onClick={() => setKind("songs")}>שירים</button><button onClick={() => setKind("artists")}>זמרים</button><button className="export-results" onClick={download}>הורדת Excel אמיתי</button></div><p className="panel-help">קובץ ‎.xlsx מסודר עם הדירוג והקולות.</p><div className="results-table">{list.map((item, index) => <div key={item.id}><b>{index + 1}</b><span>{item.title || item.name}<small>{item.albumTitle}</small></span><strong>{item.votes} קולות</strong></div>)}</div></AdminSection>; }
+function Results({ data }: { data: Overview["results"] }) {
+  const [kind, setKind] = useState<keyof Overview["results"]>("albums");
+  const [exporting, setExporting] = useState(false);
+  const list = data[kind];
+  const download = async () => {
+    setExporting(true);
+    try {
+      const allRows: { title: string; albumTitle: string; votes: number }[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const response = await fetch(`/api/admin/export?kind=${kind}&page=${page}`, { cache: "no-store" });
+        const result = await response.json() as { rows: { title: string; albumTitle: string; votes: number }[]; hasMore: boolean };
+        allRows.push(...result.rows);
+        hasMore = result.hasMore;
+        page++;
+      }
+      const heading = kind === "albums" ? "אלבומים" : kind === "songs" ? "שירים" : "זמרים";
+      downloadResultsXlsx(allRows.map((item, index) => ({ place: index + 1, title: item.title || "", album: item.albumTitle || "", votes: Number(item.votes) })), heading, `rosh-berosh-${kind}.xlsx`);
+    } finally { setExporting(false); }
+  };
+  return <AdminSection title="תוצאות בזמן אמת"><div className="result-tabs"><button onClick={() => setKind("albums")}>אלבומים</button><button onClick={() => setKind("songs")}>שירים</button><button onClick={() => setKind("artists")}>זמרים</button><button className="export-results" onClick={download} disabled={exporting}>{exporting ? "מייצא…" : "הורדת Excel אמיתי"}</button></div><p className="panel-help">קובץ ‎.xlsx מסודר עם הדירוג והקולות.</p><div className="results-table">{list.map((item, index) => <div key={item.id}><b>{index + 1}</b><span>{item.title || item.name}<small>{item.albumTitle}</small></span><strong>{item.votes} קולות</strong></div>)}</div></AdminSection>;
+}
 
 function ArchivesPanel({ onChanged, onMessage }: { onChanged(): Promise<void> | void; onMessage(message: string): void }) {
   const [archives, setArchives] = useState<PollArchive[]>([]), [loading, setLoading] = useState(true);
