@@ -267,13 +267,12 @@ function RuleRow({ title, prefix, enabled, min, max }: { title: string; prefix: 
 function AlbumEditor({ album, songs, onSave, onToggle, onDelete, onFiles, onUploadCover, onRemoveCover }: { album: Album; songs: Song[]; onSave(event: FormEvent<HTMLFormElement>, kind: "album" | "song" | "artist"): void; onToggle(kind: "album" | "song" | "artist", id: string, active: boolean): void; onDelete(kind: "album" | "song" | "artist", id: string): void; onFiles(files: FileList | null): void; onUploadCover(albumId: string, file: File): Promise<void> | void; onRemoveCover(albumId: string): Promise<void> | void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [songOrderOverride, setSongOrderOverride] = useState<Song[] | null>(null);
-  const songOrder = songOrderOverride ?? songs;
-  useEffect(() => setSongOrderOverride(null), [songs]);
+  const [songOverride, setSongOverride] = useState<{ ref: Song[]; order: Song[] } | null>(null);
+  const songOrder = songOverride && songOverride.ref === songs ? songOverride.order : songs;
   const moveSong = async (index: number, direction: -1 | 1) => {
     const target = index + direction;
     if (target < 0 || target >= songOrder.length) return;
-    const next = [...songOrder]; [next[index], next[target]] = [next[target], next[index]]; setSongOrderOverride(next);
+    const next = [...songOrder]; [next[index], next[target]] = [next[target], next[index]]; setSongOverride({ ref: songs, order: next });
     await fetch("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "song", ids: next.map((s) => s.id) }) }).catch(() => {});
   };
   const uniqueCovers = [...new Set(songs.map((s) => s.coverUrl).filter(Boolean))];
