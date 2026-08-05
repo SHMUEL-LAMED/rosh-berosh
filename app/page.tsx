@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LoginScreen, logout, useCurrentUser } from "./auth-ui";
+import { usePlayer } from "./player-context";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string | null };
 type Song = { id: string; albumId: string; title: string; audioUrl?: string | null; coverUrl?: string | null; previewStart?: number; previewEnd?: number };
@@ -51,7 +52,7 @@ export default function Home() {
   const [albums, setAlbums] = useState<string[]>([]);
   const [songs, setSongs] = useState<Record<string, string[]>>({});
   const [artists, setArtists] = useState<string[]>([]);
-  const [player, setPlayer] = useState<Song | null>(null);
+  const { song: player, play, stop, setSiblings } = usePlayer();
   const [user] = useCurrentUser();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -128,7 +129,7 @@ export default function Home() {
       const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site", fingerprint: fp }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
-      setDone(true); setPlayer(null);
+      setDone(true); stop();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "שמירת ההצבעה נכשלה."); } finally { setBusy(false); }
   };
 
@@ -151,7 +152,7 @@ export default function Home() {
           const chosen = songs[album.id]?.length ?? 0;
           return <><Title kicker={`שלב שני · אלבום ${songAlbumIndex + 1} מתוך ${selectedAlbums.length}`} title={`בחרו ${rangeText(catalog.rules.songsMin, catalog.rules.songsMax, "שירים")} מ״${album.title}״`} count={`${chosen}/${catalog.rules.songsMax}`} />
             <div className="song-progress"><span>{album.artistName}</span><div className="dots">{selectedAlbums.map((item, index) => <i key={item.id} className={index === songAlbumIndex ? "on" : index < songAlbumIndex ? "done" : ""} />)}</div></div>
-            <div className="song-groups"><fieldset><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button className="song-select" onClick={() => toggleSong(album.id, song.id)}><i>{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => setPlayer((current) => current?.id === song.id ? null : song)}>{player?.id === song.id ? "■" : "▶"}</button>}</div>)}</fieldset></div></>;
+            <div className="song-groups"><fieldset><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button className="song-select" onClick={() => toggleSong(album.id, song.id)}><i>{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => { setSiblings(songsByAlbum(album.id).filter(s => s.audioUrl)); play(song); }}>{player?.id === song.id ? "■" : "▶"}</button>}</div>)}</fieldset></div></>;
         })()}
         {catalog && stage === "artists" && <><Title kicker="שלב שלישי" title={`בחרו ${rangeText(catalog.rules.artistsMin, catalog.rules.artistsMax, "זמרים")}`} count={`${artists.length}/${catalog.rules.artistsMax}`} /><div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b><i>{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "summary" && <><Title kicker="כמעט סיימנו" title="אישור ההצבעה" /><div className="summary">{catalog.rules.albumsEnabled ? <><h3>האלבומים והשירים שבחרתם</h3><div className="summary-albums">{selectedAlbums.map((album) => <div key={album.id} className="summary-album">{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><div><b>{album.title}</b><small>{album.artistName}</small><span>{selectedSongNames(album.id)}</span></div></div>)}</div></> : null}{catalog.rules.artistsEnabled ? <><h3>הזמרים שבחרתם</h3><div className="summary-artists">{selectedArtists.map((artist) => <div key={artist.id} className="summary-artist">{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b></div>)}</div></> : null}</div><div className="signed-voter"><span>ההצבעה תישמר עבור</span><b>{user.email}</b></div></>}
@@ -159,18 +160,14 @@ export default function Home() {
         {catalog && catalog.albums.length > 0 && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
       </section>
     </>}
-    {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} currentSong={player} onPlay={(song) => setPlayer((current) => current?.id === song.id ? null : song)} />}
-    {player && (() => {
-      const albumSongs = catalog?.songs.filter((s) => s.albumId === player.albumId && s.audioUrl) ?? [];
-      const idx = albumSongs.findIndex((s) => s.id === player.id);
-      return <AudioPlayer song={player} onClose={() => setPlayer(null)} onPrev={idx > 0 ? () => setPlayer(albumSongs[idx - 1]) : undefined} onNext={idx < albumSongs.length - 1 ? () => setPlayer(albumSongs[idx + 1]) : undefined} />;
-    })()}
+    {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} />}
   </main>;
 }
 
 function Title({ kicker, title, count }: { kicker: string; title: string; count?: string }) { return <div className="section-title"><div><p className="kicker">{kicker}</p><h2>{title}</h2></div>{count && <strong>{count}</strong>}</div>; }
 
-function BrowsePanel({ catalog, currentSong, onPlay }: { catalog: Catalog; currentSong: Song | null; onPlay(song: Song): void }) {
+function BrowsePanel({ catalog }: { catalog: Catalog }) {
+  const { song: currentSong, play, setSiblings } = usePlayer();
   const [open, setOpen] = useState(false);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const songsByAlbum = useMemo(() => {
@@ -220,7 +217,7 @@ function BrowsePanel({ catalog, currentSong, onPlay }: { catalog: Catalog; curre
         <div className="browse-body">
           {selectedSongs.map((song) => {
             const isPlaying = currentSong?.id === song.id;
-            return <button key={song.id} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => onPlay(song)}>
+            return <button key={song.id} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => { setSiblings(selectedSongs.filter(s => s.audioUrl)); play(song); }}>
               {song.coverUrl && <img className="browse-song-cover" src={song.coverUrl} alt="" />}
               <span className="browse-song-title">{song.title}</span>
               <span className="browse-song-action">{isPlaying ? "■" : "▶"}</span>
@@ -233,27 +230,3 @@ function BrowsePanel({ catalog, currentSong, onPlay }: { catalog: Catalog; curre
   </>;
 }
 
-function AudioPlayer({ song, onClose, onPrev, onNext }: { song: Song; onClose(): void; onPrev?(): void; onNext?(): void }) {
-  const audio = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [current, setCurrent] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const start = Math.max(0, song.previewStart ?? 0);
-  const configuredEnd = Math.max(start, song.previewEnd ?? 0);
-  const end = configuredEnd > start ? configuredEnd : duration;
-  useEffect(() => {
-    const element = audio.current;
-    if (!element) return;
-    setCurrent(start); setPlaying(false);
-    const begin = () => { setDuration(element.duration || 0); element.currentTime = start; setCurrent(start); element.play().then(() => setPlaying(true)).catch(() => undefined); };
-    element.addEventListener("loadedmetadata", begin, { once: true });
-    return () => { element.pause(); };
-  }, [song, start]);
-  const toggle = () => { const element = audio.current; if (!element) return; if (element.paused) { if (element.currentTime >= end) element.currentTime = start; element.play().then(() => setPlaying(true)).catch(() => undefined); } else { element.pause(); setPlaying(false); } };
-  const seek = (value: number) => { if (!audio.current) return; audio.current.currentTime = value; setCurrent(value); };
-  const changeVolume = (value: number) => { if (audio.current) audio.current.volume = value; setVolume(value); };
-  return <div className="audio-dock"><audio ref={audio} key={song.id} src={song.audioUrl ?? ""} preload="metadata" onDurationChange={(event) => setDuration(event.currentTarget.duration || 0)} onTimeUpdate={(event) => { const value = event.currentTarget.currentTime; setCurrent(value); if (configuredEnd > start && value >= configuredEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = start; setCurrent(start); setPlaying(false); } }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} /><button className="player-close" onClick={onClose} aria-label="סגירת הנגן">×</button>{song.coverUrl && <img className="player-cover" src={song.coverUrl} alt="" />}<div className="player-controls"><button className="player-skip" disabled={!onPrev} onClick={onPrev} aria-label="שיר קודם">⏮</button><button className="player-main" onClick={toggle} aria-label={playing ? "השהיה" : "נגינה"}>{playing ? "❚❚" : "▶"}</button><button className="player-skip" disabled={!onNext} onClick={onNext} aria-label="שיר הבא">⏭</button></div><div className="player-copy"><small>{configuredEnd > start ? "קטע נבחר" : "השיר המלא"}</small><b>{song.title}</b></div><div className="player-progress"><input aria-label="מיקום בשיר" type="range" min={start} max={Math.max(start + 1, end || duration || 1)} step="0.1" value={Math.min(current, Math.max(start + 1, end || duration || 1))} onChange={(event) => seek(Number(event.target.value))} /><span>{formatPlayerTime(current - start)} / {formatPlayerTime(Math.max(0, end - start))}</span></div><label className="player-volume" aria-label="עוצמת שמע">🔊<input type="range" min="0" max="1" step="0.05" value={volume} onChange={(event) => changeVolume(Number(event.target.value))} /></label></div>;
-}
-
-function formatPlayerTime(value: number) { if (!Number.isFinite(value) || value < 0) return "0:00"; return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`; }

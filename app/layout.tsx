@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { PlayerProvider } from "./player-context";
 
 export const metadata: Metadata = {
   title: "ראש בראש | מצעד 25 שנות מוזיקה",
@@ -25,7 +26,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="he" dir="rtl">
-      <body>{children}</body>
+      <body><PlayerProvider>{children}</PlayerProvider></body>
     </html>
   );
 }

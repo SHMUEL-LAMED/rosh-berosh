@@ -85,7 +85,7 @@ body{background:radial-gradient(circle at 85% 2%,rgba(222,190,244,.42),transpare
 .browse-fab{position:fixed;z-index:20;right:0;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:8px;padding:14px 14px 14px 18px;border:0;border-radius:16px 0 0 16px;color:#fff;background:linear-gradient(135deg,#7656d7,#9b7be8);box-shadow:0 8px 28px rgba(118,86,215,.35);cursor:pointer;font-weight:700;font-size:13px;transition:transform .2s,box-shadow .2s}.browse-fab:hover{transform:translateY(-50%) translateX(-3px);box-shadow:0 10px 35px rgba(118,86,215,.45)}.browse-fab-icon{font-size:20px;font-style:normal;line-height:1}.browse-fab-label{white-space:nowrap}
 .browse-backdrop{position:fixed;z-index:40;inset:0;background:rgba(0,0,0,.35);backdrop-filter:blur(3px)}
 .browse-wrap{position:fixed;z-index:50;top:0;right:0;height:100vh;display:flex;flex-direction:row;transform:translateX(100%);transition:transform .3s cubic-bezier(.4,0,.2,1)}.browse-wrap.open{transform:translateX(0)}
-main:has(.browse-wrap.open) .audio-dock{display:none}
+body:has(.browse-wrap.open) .audio-dock{display:none}
 .browse-panel{width:min(370px,85vw);height:100%;display:flex;flex-direction:column;background:#fff;box-shadow:-6px 0 35px rgba(45,28,68,.15)}
 .browse-songs-panel{width:min(370px,85vw);height:100%;display:flex;flex-direction:column;background:#fff;border-inline-end:1px solid #ece5f0;box-shadow:-6px 0 30px rgba(45,28,68,.1);animation:browseSlideIn .25s ease}
 @keyframes browseSlideIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:translateX(0)}}
