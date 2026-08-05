@@ -171,6 +171,8 @@ function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: {
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false), [elapsed, setElapsed] = useState(0), [recorded, setRecorded] = useState<{ file: File; url: string } | null>(null);
   const [ttsPreview, setTtsPreview] = useState<{ file: File; url: string } | null>(null);
+  const [ttsText, setTtsText] = useState(item.label);
+  const [ttsEditing, setTtsEditing] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null), chunksRef = useRef<Blob[]>([]), timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const submitFile = async (file: File) => {
@@ -220,10 +222,12 @@ function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: {
     const response = await fetch("/api/admin/ivr-prompt", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key }) });
     if (response.ok) { onMessage("הקריינות הוסרה. הקו יחזור להקראה אוטומטית."); await onSaved(); }
   };
-  const previewTts = async () => {
+  const previewTts = async (text?: string) => {
+    const label = (text ?? ttsText).trim();
+    if (!label) { onMessage("יש להזין טקסט לקריינות."); return; }
     setBusy(true); clearTtsPreview(); onMessage("יוצרים תצוגה מקדימה…");
     try {
-      const response = await fetch("/api/admin/ivr-tts-preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: item.label }) });
+      const response = await fetch("/api/admin/ivr-tts-preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label }) });
       if (!response.ok) { const result = await response.json().catch(() => ({})); throw new Error((result as { error?: string }).error || "יצירת הקריינות נכשלה."); }
       const blob = await response.blob();
       const file = new File([blob], "tts-preview.mp3", { type: "audio/mpeg" });
@@ -240,7 +244,10 @@ function PromptRow({ item, prompt, ttsAvailable, onSaved, onMessage }: { item: {
           : <button type="button" className="rec-start" onClick={startRecording} disabled={busy}>🎙 הקלטה ישירה</button>}
         {recorded && !recording && <><audio controls preload="metadata" src={recorded.url} /><button type="button" onClick={saveRecording} disabled={busy}>{busy ? "שומר…" : "שמירת ההקלטה לקו"}</button><button type="button" className="danger" onClick={clearRecording}>ביטול</button></>}
       </div>
-      {ttsAvailable && !recording && !recorded && !ttsPreview && <button type="button" className="tts-btn" onClick={previewTts} disabled={busy}>{busy ? "יוצר..." : "🔊 קריינות AI"}</button>}
+      {ttsAvailable && !recording && !recorded && !ttsPreview && <div className="tts-create">
+        {ttsEditing ? <div className="tts-edit-row"><input className="tts-text-input" type="text" value={ttsText} onChange={(event) => setTtsText(event.target.value)} placeholder="הזינו טקסט לקריינות…" /><button type="button" className="tts-generate-btn" onClick={() => previewTts()} disabled={busy || !ttsText.trim()}>{busy ? "יוצר…" : "צור קריינות AI"}</button><button type="button" className="tts-cancel-btn" onClick={() => setTtsEditing(false)}>✕</button></div>
+          : <button type="button" className="tts-generate-btn" onClick={() => setTtsEditing(true)} disabled={busy}>✎ צור קריינות AI</button>}
+      </div>}
       {ttsPreview && <div className="tts-preview"><audio controls autoPlay preload="metadata" src={ttsPreview.url} /><button type="button" onClick={saveTtsPreview} disabled={busy}>{busy ? "שומר…" : "שמירה לקו"}</button><button type="button" className="danger" onClick={clearTtsPreview}>ביטול</button></div>}
       <form onSubmit={upload}><input name="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg" /><button disabled={busy}>{busy ? "מעלה…" : prompt ? "החלפה" : "העלאה"}</button>{prompt && <button type="button" className="danger" onClick={removePrompt}>הסרה</button>}</form>
     </div>
