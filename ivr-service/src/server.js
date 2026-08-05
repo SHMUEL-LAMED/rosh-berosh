@@ -2,9 +2,11 @@ const express = require("express");
 const { YemotRouter } = require("yemot-router2");
 
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
+const IVR_SECRET = process.env.IVR_SECRET;
 const PORT = process.env.PORT || 3000;
 const REQUEST_TIMEOUT_MS = 8000;
 if (!SITE_API_BASE_URL) { console.error("חסר SITE_API_BASE_URL"); process.exit(1); }
+if (!IVR_SECRET) { console.error("חסר IVR_SECRET"); process.exit(1); }
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
@@ -16,7 +18,8 @@ async function api(path, options = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch(`${SITE_API_BASE_URL}${path}`, { ...options, signal: controller.signal });
+      const headers = { "x-ivr-secret": IVR_SECRET, ...options.headers };
+      const response = await fetch(`${SITE_API_BASE_URL}${path}`, { ...options, headers, signal: controller.signal });
       const raw = await response.text();
       let result;
       try { result = JSON.parse(raw); } catch { throw new Error(`site api returned ${response.status} instead of json`); }

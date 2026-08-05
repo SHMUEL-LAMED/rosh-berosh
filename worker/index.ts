@@ -12,6 +12,7 @@ interface Env {
   MEDIA: R2Bucket;
   YEMOT_TOKEN?: string;
   YEMOT_API_BASE?: string;
+  IVR_SECRET?: string;
   IMAGES: { input(stream: ReadableStream): { transform(options: Record<string, unknown>): { output(options: { format: string; quality: number }): Promise<{ response(): Response }> } } };
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
@@ -21,6 +22,12 @@ type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; alb
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
 const placeholders = (count: number) => Array(count).fill("?").join(",");
+
+function verifyIvrSecret(request: Request, env: Env): boolean {
+  if (!env.IVR_SECRET) return false;
+  const header = request.headers.get("x-ivr-secret");
+  return header === env.IVR_SECRET;
+}
 
 const BALLOT_RATE_WINDOW = 60;
 const BALLOT_RATE_LIMIT = 5;
@@ -46,7 +53,7 @@ async function activeSurveyId(env: Env): Promise<string> {
 
 async function readRules(env: Env, surveyId: string): Promise<Rules> {
   await ensureRuntimeSchema(env);
-  const defaults = { votingOpen: 1, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
+  const defaults = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
   try {
     return await env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id=?").bind(surveyId).first<Rules>() ?? defaults;
   } catch {
@@ -143,8 +150,12 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
-  headers.set("accept-ranges", "bytes");
   headers.set("cache-control", headers.get("cache-control") || "public, max-age=31536000, immutable");
+  headers.set("x-content-type-options", "nosniff");
+  const ct = headers.get("content-type") || "";
+  if (ct.includes("svg") || ct.includes("html") || ct.includes("xml")) {
+    headers.set("content-type", "application/octet-stream");
+  }
   return new Response(request.method === "HEAD" ? null : object.body, { headers });
 }
 
@@ -172,6 +183,11 @@ const worker = {
     if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
     if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
     if (url.pathname === "/api/ballots/check" && request.method === "GET") {
+      const isIvr = verifyIvrSecret(request, env);
+      if (!isIvr) {
+        const user = await readSession(request, env);
+        if (!user) return json({ error: "אין הרשאה." }, 401);
+      }
       const voterKey = url.searchParams.get("voterKey")?.trim().toLowerCase();
       if (!voterKey) return json({ voted: false });
       const surveyId = await activeSurveyId(env);
@@ -182,7 +198,10 @@ const worker = {
       const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
       if (!checkBallotRate(clientIp)) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
       const original = await request.json<Submission>();
-      if (original.channel === "phone") return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
+      if (original.channel === "phone") {
+        if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה לערוץ טלפוני." }, 403);
+        return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
+      }
       const user = await readSession(request, env);
       if (!user) return json({ error: "יש להתחבר באמצעות Google." }, 401);
       return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub }) }), env);

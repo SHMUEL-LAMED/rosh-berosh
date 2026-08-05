@@ -4,7 +4,6 @@ let migrated = false;
 
 export async function ensureRuntimeSchema(env: SchemaEnv): Promise<void> {
   if (migrated) return;
-  migrated = true;
   try {
     const songCols = await env.DB.prepare("PRAGMA table_info(songs)").all<{ name: string }>();
     if (!songCols.results.some((c) => c.name === "cover_url")) {
@@ -21,5 +20,8 @@ export async function ensureRuntimeSchema(env: SchemaEnv): Promise<void> {
       CREATE INDEX IF NOT EXISTS song_votes_song_idx ON song_votes(song_id);
       CREATE INDEX IF NOT EXISTS artist_votes_artist_idx ON artist_votes(artist_id);
     `);
-  } catch { /* ignore if already exists */ }
+    migrated = true;
+  } catch (error) {
+    console.error("schema migration error", error);
+  }
 }

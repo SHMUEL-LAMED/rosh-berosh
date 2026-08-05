@@ -418,20 +418,39 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     if (!body.restoreKey) return json({ ok: true, archive: await createPollSnapshot(env, text(body.name), surveyId) });
     const snapshot = await readPollSnapshot(env, body.restoreKey);
     if (!snapshot) return json({ error: "הסקר שבארכיון לא נמצא." }, 404);
-    await createPollSnapshot(env, "גיבוי אוטומטי לפני שחזור", surveyId);
+    const autoBackup = await createPollSnapshot(env, "גיבוי אוטומטי לפני שחזור", surveyId);
     await clearCurrentPoll(env, surveyId);
-    const statements = [
-      ...snapshot.albums.map((row) => env.DB.prepare("INSERT INTO albums (id,survey_id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,?,?)").bind(row.id, surveyId, row.title, row.artist_name, row.cover_url, row.position, row.active)),
-      ...snapshot.songs.map((row) => env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,?,?,?)").bind(row.id, row.album_id, row.title, row.audio_url, row.preview_start || 0, row.preview_end || 0, row.position, row.active)),
-      ...snapshot.artists.map((row) => env.DB.prepare("INSERT INTO artists (id,survey_id,name,image_url,position,active) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.name, row.image_url, row.position, row.active)),
-      ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES (?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.channel, row.created_at)),
-      ...snapshot.albumVotes.map((row) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(row.ballot_id, row.album_id)),
-      ...snapshot.songVotes.map((row) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(row.ballot_id, row.album_id, row.song_id)),
-      ...snapshot.artistVotes.map((row) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(row.ballot_id, row.artist_id)),
-    ];
-    for (let index = 0; index < statements.length; index += 80) await env.DB.batch(statements.slice(index, index + 80));
-    const settings = snapshot.settings;
-    if (settings) await env.DB.prepare("UPDATE poll_settings SET voting_open=0,albums_enabled=?,albums_min=?,albums_max=?,songs_enabled=?,songs_min=?,songs_max=?,artists_enabled=?,artists_min=?,artists_max=? WHERE id=?").bind(settings.albums_enabled, settings.albums_min, settings.albums_max, settings.songs_enabled, settings.songs_min, settings.songs_max, settings.artists_enabled, settings.artists_min, settings.artists_max, surveyId).run();
+    try {
+      const statements = [
+        ...snapshot.albums.map((row) => env.DB.prepare("INSERT INTO albums (id,survey_id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,?,?)").bind(row.id, surveyId, row.title, row.artist_name, row.cover_url, row.position, row.active)),
+        ...snapshot.songs.map((row) => env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,cover_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,?,?,?,?)").bind(row.id, row.album_id, row.title, row.audio_url, row.cover_url || null, row.preview_start || 0, row.preview_end || 0, row.position, row.active)),
+        ...snapshot.artists.map((row) => env.DB.prepare("INSERT INTO artists (id,survey_id,name,image_url,position,active) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.name, row.image_url, row.position, row.active)),
+        ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,fingerprint,created_at) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.channel, row.fingerprint || null, row.created_at)),
+        ...snapshot.albumVotes.map((row) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(row.ballot_id, row.album_id)),
+        ...snapshot.songVotes.map((row) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(row.ballot_id, row.album_id, row.song_id)),
+        ...snapshot.artistVotes.map((row) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(row.ballot_id, row.artist_id)),
+      ];
+      for (let index = 0; index < statements.length; index += 80) await env.DB.batch(statements.slice(index, index + 80));
+      const settings = snapshot.settings;
+      if (settings) await env.DB.prepare("UPDATE poll_settings SET voting_open=0,albums_enabled=?,albums_min=?,albums_max=?,songs_enabled=?,songs_min=?,songs_max=?,artists_enabled=?,artists_min=?,artists_max=? WHERE id=?").bind(settings.albums_enabled, settings.albums_min, settings.albums_max, settings.songs_enabled, settings.songs_min, settings.songs_max, settings.artists_enabled, settings.artists_min, settings.artists_max, surveyId).run();
+    } catch (error) {
+      console.error("restore failed, rolling back from auto-backup", error);
+      await clearCurrentPoll(env, surveyId);
+      const rollback = autoBackup.snapshot;
+      const rbStatements = [
+        ...rollback.albums.map((row) => env.DB.prepare("INSERT INTO albums (id,survey_id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,?,?)").bind(row.id, surveyId, row.title, row.artist_name, row.cover_url, row.position, row.active)),
+        ...rollback.songs.map((row) => env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,cover_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,?,?,?,?)").bind(row.id, row.album_id, row.title, row.audio_url, row.cover_url || null, row.preview_start || 0, row.preview_end || 0, row.position, row.active)),
+        ...rollback.artists.map((row) => env.DB.prepare("INSERT INTO artists (id,survey_id,name,image_url,position,active) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.name, row.image_url, row.position, row.active)),
+        ...rollback.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,fingerprint,created_at) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.channel, row.fingerprint || null, row.created_at)),
+        ...rollback.albumVotes.map((row) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(row.ballot_id, row.album_id)),
+        ...rollback.songVotes.map((row) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(row.ballot_id, row.album_id, row.song_id)),
+        ...rollback.artistVotes.map((row) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(row.ballot_id, row.artist_id)),
+      ];
+      for (let index = 0; index < rbStatements.length; index += 80) await env.DB.batch(rbStatements.slice(index, index + 80));
+      const rbSettings = rollback.settings;
+      if (rbSettings) await env.DB.prepare("UPDATE poll_settings SET voting_open=?,albums_enabled=?,albums_min=?,albums_max=?,songs_enabled=?,songs_min=?,songs_max=?,artists_enabled=?,artists_min=?,artists_max=? WHERE id=?").bind(rbSettings.voting_open, rbSettings.albums_enabled, rbSettings.albums_min, rbSettings.albums_max, rbSettings.songs_enabled, rbSettings.songs_min, rbSettings.songs_max, rbSettings.artists_enabled, rbSettings.artists_min, rbSettings.artists_max, surveyId).run();
+      return json({ error: "השחזור נכשל — המצב הקודם שוחזר מגיבוי אוטומטי." }, 500);
+    }
     return json({ ok: true });
   }
 
@@ -537,6 +556,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       ["artists", number(body.artistsMin, 1), number(body.artistsMax, 3)],
     ] as const;
     if (pairs.some(([, min, max]) => min < 0 || max < min || max > 50)) return json({ error: "טווחי הבחירה אינם תקינים." }, 400);
+    if (flag(body.songsEnabled) && !flag(body.albumsEnabled)) return json({ error: "אי אפשר לבחור שירים בלי לבחור אלבומים." }, 400);
     if (flag(body.votingOpen)) {
       const readiness = await pollReadiness(env, surveyId);
       if (!readiness.ready) return json({ error: `אי אפשר לפרסם עדיין: ${readiness.warnings.join(", ")}.`, readiness }, 400);
@@ -612,7 +632,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const artistId = text(form.get("artistId"));
     if (kind === "artist" || artistId) {
       if (!artistId) return json({ error: "לא נבחר זמר." }, 400);
-      if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif)$/i.test(file.name)) return json({ error: "יש לבחור קובץ תמונה." }, 415);
+      if ((!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif)$/i.test(file.name)) || file.type.includes("svg")) return json({ error: "יש לבחור קובץ תמונה (לא SVG)." }, 415);
       if (file.size > 15 * 1024 * 1024) return json({ error: "התמונה גדולה מ־15MB." }, 413);
       const artist = await env.DB.prepare("SELECT image_url AS imageUrl FROM artists WHERE id=?").bind(artistId).first<{ imageUrl?: string }>();
       if (!artist) return json({ error: "הזמר לא נמצא." }, 404);
@@ -626,7 +646,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const albumId = text(form.get("albumId"));
     if (kind === "cover") {
       if (!albumId) return json({ error: "לא נבחר אלבום." }, 400);
-      if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif)$/i.test(file.name)) return json({ error: "יש לבחור קובץ תמונה." }, 415);
+      if ((!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif)$/i.test(file.name)) || file.type.includes("svg")) return json({ error: "יש לבחור קובץ תמונה (לא SVG)." }, 415);
       if (file.size > 15 * 1024 * 1024) return json({ error: "התמונה גדולה מ־15MB." }, 413);
       const album = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(albumId).first<{ coverUrl?: string }>();
       if (!album) return json({ error: "האלבום לא נמצא." }, 404);
@@ -638,6 +658,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       return json({ ok: true, url: coverUrl });
     }
     if (!albumId || kind !== "audio") return json({ error: "קובץ או אלבום חסרים." }, 400);
+    if (!file.type.startsWith("audio/") && !/\.(mp3|m4a|wav|ogg|flac|aac|wma)$/i.test(file.name)) return json({ error: "יש לבחור קובץ שמע." }, 415);
     if (file.size > 75 * 1024 * 1024) return json({ error: "הקובץ גדול מ־75MB." }, 413);
     const audioBuffer = await file.arrayBuffer();
     const key = `albums/${albumId}/audio-${crypto.randomUUID()}-${safeName(file.name)}`;
@@ -689,7 +710,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     if (!body.id || !["album", "song", "artist"].includes(body.kind ?? "")) return json({ error: "בקשה לא תקינה." }, 400);
     if (body.kind === "album") {
       const album = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(body.id).first<{ coverUrl?: string }>();
-      const songs = await env.DB.prepare("SELECT audio_url AS audioUrl FROM songs WHERE album_id=?").bind(body.id).all<{ audioUrl?: string }>();
+      const songs = await env.DB.prepare("SELECT audio_url AS audioUrl, cover_url AS coverUrl FROM songs WHERE album_id=?").bind(body.id).all<{ audioUrl?: string; coverUrl?: string }>();
       if (!album) return json({ error: "האלבום כבר אינו קיים." }, 404);
       await env.DB.batch([
         env.DB.prepare("DELETE FROM song_votes WHERE album_id=?").bind(body.id),
@@ -697,15 +718,15 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
         env.DB.prepare("DELETE FROM songs WHERE album_id=?").bind(body.id),
         env.DB.prepare("DELETE FROM albums WHERE id=?").bind(body.id),
       ]);
-      await deleteMediaUrls(env, [album.coverUrl, ...songs.results.map((song) => song.audioUrl)]);
+      await deleteMediaUrls(env, [album.coverUrl, ...songs.results.flatMap((song) => [song.audioUrl, song.coverUrl])]);
     } else if (body.kind === "song") {
-      const song = await env.DB.prepare("SELECT audio_url AS audioUrl FROM songs WHERE id=?").bind(body.id).first<{ audioUrl?: string }>();
+      const song = await env.DB.prepare("SELECT audio_url AS audioUrl, cover_url AS coverUrl FROM songs WHERE id=?").bind(body.id).first<{ audioUrl?: string; coverUrl?: string }>();
       if (!song) return json({ error: "השיר כבר אינו קיים." }, 404);
       await env.DB.batch([
         env.DB.prepare("DELETE FROM song_votes WHERE song_id=?").bind(body.id),
         env.DB.prepare("DELETE FROM songs WHERE id=?").bind(body.id),
       ]);
-      await deleteMediaUrls(env, [song.audioUrl]);
+      await deleteMediaUrls(env, [song.audioUrl, song.coverUrl]);
     } else {
       const artist = await env.DB.prepare("SELECT image_url AS imageUrl FROM artists WHERE id=?").bind(body.id).first<{ imageUrl?: string }>();
       if (!artist) return json({ error: "הזמר כבר אינו קיים." }, 404);
