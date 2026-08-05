@@ -145,18 +145,28 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
   const key = pathname.slice(7).split("/").map(decodeURIComponent).join("/");
   const privateObject = key.startsWith("settings/") || key.startsWith("poll-archives/") || key === "ivr-prompts/config.json";
   if (!key || key.includes("..") || privateObject) return new Response("Not Found", { status: 404 });
-  const object = await env.MEDIA.get(key);
+  const rangeHeader = request.headers.get("range");
+  const object = rangeHeader
+    ? await env.MEDIA.get(key, { range: request.headers })
+    : await env.MEDIA.get(key);
   if (!object) return new Response("Not Found", { status: 404 });
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
   headers.set("cache-control", headers.get("cache-control") || "public, max-age=31536000, immutable");
   headers.set("x-content-type-options", "nosniff");
+  headers.set("accept-ranges", "bytes");
+  if ("range" in object && object.range) {
+    const r = object.range as { offset: number; length: number };
+    headers.set("content-range", `bytes ${r.offset}-${r.offset + r.length - 1}/${object.size}`);
+    headers.set("content-length", String(r.length));
+  }
   const ct = headers.get("content-type") || "";
   if (ct.includes("svg") || ct.includes("html") || ct.includes("xml")) {
     headers.set("content-type", "application/octet-stream");
   }
-  return new Response(request.method === "HEAD" ? null : object.body, { headers });
+  const status = rangeHeader && "range" in object ? 206 : 200;
+  return new Response(request.method === "HEAD" ? null : object.body, { status, headers });
 }
 
 const worker = {
