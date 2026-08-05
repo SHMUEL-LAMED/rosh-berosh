@@ -76,13 +76,13 @@ async function catalog(env: Env): Promise<Response> {
       songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, NULL AS coverUrl, 0 AS previewStart, 0 AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
     }
     const songsMap = new Map<string, Array<{ coverUrl?: string }>>();
-    (songs.results || []).forEach((song: any) => {
-      const covers = songsMap.get(song.albumId) || [];
-      if (song.coverUrl) covers.push({ coverUrl: song.coverUrl });
-      songsMap.set(song.albumId, covers);
+    (songs.results || []).forEach((song: Record<string, unknown>) => {
+      const covers = songsMap.get(song.albumId as string) || [];
+      if (song.coverUrl) covers.push({ coverUrl: song.coverUrl as string });
+      songsMap.set(song.albumId as string, covers);
     });
-    const albumsWithCovers = albums.results.map((album: any) => {
-      const albumSongs = songsMap.get(album.id) || [];
+    const albumsWithCovers = albums.results.map((album: Record<string, unknown>) => {
+      const albumSongs = songsMap.get(album.id as string) || [];
       if (!album.coverUrl && albumSongs.length > 0) {
         const uniqueCovers = [...new Set(albumSongs.map((s) => s.coverUrl).filter(Boolean))];
         if (uniqueCovers.length === 1) album.coverUrl = uniqueCovers[0];

@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { LoginScreen, logout, useCurrentUser } from "../auth-ui";
 import { blobToWav, fromDirectory, fromZip, splitAlbumFiles, suggestChorus, type UploadFile } from "./upload-utils";
@@ -35,12 +35,12 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [albumOrder, setAlbumOrder] = useState<Album[]>([]);
-  const [artistOrder, setArtistOrder] = useState<Artist[]>([]);
-  const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); setData(await response.json()); }).catch(() => setMessage("לא הצלחנו לטעון את נתוני הניהול.")), []);
+  const [albumOrderOverride, setAlbumOrder] = useState<Album[] | null>(null);
+  const [artistOrderOverride, setArtistOrder] = useState<Artist[] | null>(null);
+  const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); setAlbumOrder(null); setArtistOrder(null); setData(await response.json()); }).catch(() => setMessage("לא הצלחנו לטעון את נתוני הניהול.")), []);
   useEffect(() => { if (user?.isAdmin) load(); }, [user, load]);
-  useEffect(() => { if (data?.albums) setAlbumOrder(data.albums); }, [data]);
-  useEffect(() => { if (data?.artists) setArtistOrder(data.artists); }, [data]);
+  const albumOrder = useMemo(() => albumOrderOverride ?? data?.albums ?? [], [albumOrderOverride, data]);
+  const artistOrder = useMemo(() => artistOrderOverride ?? data?.artists ?? [], [artistOrderOverride, data]);
 
   if (user === undefined) return <main className="login-shell"><div className="loading">בודקים הרשאות…</div></main>;
   if (!user) return <LoginScreen />;
