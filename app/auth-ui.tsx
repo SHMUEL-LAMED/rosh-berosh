@@ -51,7 +51,7 @@ export function LoginScreen() {
     }).catch(() => setError("ההתחברות עדיין אינה מוגדרת. מנהל המערכת מטפל בכך."));
     return () => { active = false; };
   }, []);
-  return <main className="login-shell" dir="rtl"><section className="login-card"><img className="login-logo" src="/logo.svg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">ראש בראש</p><h1>מתחברים ומצביעים</h1><p>כדי לשמור על הצבעה הוגנת, הכניסה מתבצעת באמצעות חשבון Google.</p><div ref={button} className="google-button" />{error && <p className="vote-error">{error}</p>}<small>לא נפרסם דבר בחשבון שלכם ולא נקבל את הסיסמה שלכם.</small></section></main>;
+  return <main className="login-shell" dir="rtl"><section className="login-card"><img className="login-logo" src="/badge.png" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">ראש בראש</p><h1>מתחברים ומצביעים</h1><p>כדי לשמור על הצבעה הוגנת, הכניסה מתבצעת באמצעות חשבון Google.</p><div ref={button} className="google-button" />{error && <p className="vote-error">{error}</p>}<small>לא נפרסם דבר בחשבון שלכם ולא נקבל את הסיסמה שלכם.</small></section></main>;
 }
 
 export async function logout() {
