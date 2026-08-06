@@ -18,7 +18,8 @@ type PollArchive = { key: string; name: string; createdAt: number; votes: number
 type Survey = { id: string; name: string; active: number; createdAt: number; votingOpen: number; albums: number; songs: number; artists: number; votes: number };
 type SuspiciousVote = { fingerprint: string; count: number; voters: string[] };
 type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
-type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "managers" | "results" | "archives";
+type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "managers" | "results" | "archives" | "voters";
+type Voter = { id: string; voterKey: string; channel: string; fingerprint?: string; createdAt: string; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
 const SYSTEM_PROMPTS = [
   ["system:main_menu", "תפריט ראשי — אלבומים 1, שירים 2, זמרים 3"], ["system:albums_intro", "פתיח לבחירת אלבומים"],
@@ -133,9 +134,9 @@ export default function AdminPage() {
 
   return <main className="admin-shell" dir="rtl">
     <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
-      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "managers"} onClick={() => setTab("managers")}>מנהלי המערכת</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Link href="/">מעבר לאתר</Link>
+      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "managers"} onClick={() => setTab("managers")}>מנהלי המערכת</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Nav active={tab === "voters"} onClick={() => setTab("voters")}>מצביעים</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
-    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", managers: "מנהלי המערכת", results: "תוצאות" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
+    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", managers: "מנהלי המערכת", results: "תוצאות", voters: "מצביעים" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
       <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>
       {message && <p className="admin-message">{message}</p>}
       {tab === "dashboard" && <Dashboard data={data} onNavigate={setTab} />}
@@ -147,6 +148,7 @@ export default function AdminPage() {
       {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{artistOrder.map((item, index) => <div key={item.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("artist", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === artistOrder.length - 1} onClick={() => moveItem("artist", index, 1)} aria-label="הזז למטה">▼</button></div><ArtistRow item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} /></div>)}</div></AdminSection>}
       {tab === "managers" && data && <ManagersPanel managers={data.managers} currentEmail={user.email} onSaved={load} onMessage={setMessage} />}
       {tab === "results" && data && <Results data={data.results} />}
+      {tab === "voters" && <VotersPanel />}
     </section>
   </main>;
 }
@@ -412,6 +414,43 @@ function SurveysPanel({ data, onChanged, onMessage }: { data: Overview; onChange
       <div><b>{survey.name} {survey.active ? <span className="survey-badge">פעיל</span> : survey.votingOpen ? <span className="survey-badge draft">פורסם</span> : <span className="survey-badge draft">טיוטה</span>}</b><small>{new Date(survey.createdAt * 1000).toLocaleDateString("he-IL")} · {survey.votes} הצבעות</small><span>{survey.albums} אלבומים · {survey.songs} שירים · {survey.artists} זמרים</span></div>
       <div>{survey.active ? <button className="toggle on" disabled>הסקר הפעיל</button> : <button onClick={() => activate(survey)}>הפעלה</button>}<button onClick={() => rename(survey)}>שינוי שם</button><button className="danger" disabled={!!survey.active} onClick={() => remove(survey)}>מחיקה</button></div>
     </article>)}</div>
+  </AdminSection>;
+}
+function VotersPanel() {
+  const [voters, setVoters] = useState<Voter[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const fetchPage = useCallback(async (p: number) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/admin/voters?page=${p}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      setVoters(data.voters); setPage(data.page); setHasMore(data.hasMore);
+    } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { fetchPage(1); }, [fetchPage]);
+  const channelLabel = (ch: string) => ch === "phone" ? "טלפון" : ch === "site" ? "אתר" : ch;
+  return <AdminSection title="מצביעים">
+    <p className="panel-help">כל ההצבעות שנקלטו בסקר הנוכחי, מהחדשה לישנה.</p>
+    {loading ? <p className="loading">טוען…</p> : !voters.length ? <p className="panel-help">אין הצבעות עדיין.</p> : <>
+      <div className="voters-list">{voters.map((v) => <article key={v.id} className="voter-card">
+        <div className="voter-header">
+          <span className="voter-key">{v.voterKey}</span>
+          <span className={`voter-channel ${v.channel}`}>{channelLabel(v.channel)}</span>
+          <time>{new Date(v.createdAt).toLocaleString("he-IL")}</time>
+        </div>
+        {v.albums.length > 0 && <div className="voter-section"><strong>אלבומים:</strong> {v.albums.join(", ")}</div>}
+        {v.songs.length > 0 && <div className="voter-section"><strong>שירים:</strong> {v.songs.map((s) => `${s.title} (${s.albumTitle})`).join(", ")}</div>}
+        {v.artists.length > 0 && <div className="voter-section"><strong>זמרים:</strong> {v.artists.join(", ")}</div>}
+      </article>)}</div>
+      <div className="voters-pagination">
+        <button disabled={page <= 1} onClick={() => fetchPage(page - 1)}>הקודם</button>
+        <span>עמוד {page}</span>
+        <button disabled={!hasMore} onClick={() => fetchPage(page + 1)}>הבא</button>
+      </div>
+    </>}
   </AdminSection>;
 }
 function AdminSection({ title, children }: { title: string; children: ReactNode }) { return <section className="admin-panel"><h2>{title}</h2>{children}</section>; }
