@@ -336,8 +336,9 @@ function Results({ data }: { data: Overview["results"] }) {
     let page = 1, hasMore = true;
     while (hasMore) {
       const response = await fetch(`/api/admin/export?kind=${k}&page=${page}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`שגיאה בטעינת ${k}`);
       const result = await response.json() as { rows: { title: string; albumTitle: string; votes: number }[]; hasMore: boolean };
-      allRows.push(...result.rows);
+      allRows.push(...(result.rows || []));
       hasMore = result.hasMore;
       page++;
     }
@@ -350,20 +351,21 @@ function Results({ data }: { data: Overview["results"] }) {
       const rows = await fetchKind(kind);
       const heading = kind === "albums" ? "אלבומים" : kind === "songs" ? "שירים" : "זמרים";
       downloadResultsXlsx(rows.map((item, index) => ({ place: index + 1, title: item.title || "", album: item.albumTitle || "", votes: Number(item.votes) })), heading, `rosh-berosh-${kind}.xlsx`);
-    } finally { setExporting(false); }
+    } catch (err) { alert(err instanceof Error ? err.message : "הייצוא נכשל."); } finally { setExporting(false); }
   };
   const downloadAll = async () => {
     setMenuOpen(false);
     setExporting(true);
     try {
-      const kinds = ["albums", "songs", "artists"] as const;
+      const kindsList = ["albums", "songs", "artists"] as const;
       const headings = { albums: "אלבומים", songs: "שירים", artists: "זמרים" };
-      const sheets = await Promise.all(kinds.map(async (k) => {
+      const sheets: { rows: { place: number; title: string; album: string; votes: number }[]; heading: string }[] = [];
+      for (const k of kindsList) {
         const rows = await fetchKind(k);
-        return { rows: rows.map((item, index) => ({ place: index + 1, title: item.title || "", album: item.albumTitle || "", votes: Number(item.votes) })), heading: headings[k] };
-      }));
+        sheets.push({ rows: rows.map((item, index) => ({ place: index + 1, title: item.title || "", album: item.albumTitle || "", votes: Number(item.votes) })), heading: headings[k] });
+      }
       downloadAllResultsXlsx(sheets, "rosh-berosh-all.xlsx");
-    } finally { setExporting(false); }
+    } catch (err) { alert(err instanceof Error ? err.message : "הייצוא נכשל."); } finally { setExporting(false); }
   };
   const kindLabel = kind === "albums" ? "אלבומים" : kind === "songs" ? "שירים" : "זמרים";
   return <AdminSection title="תוצאות בזמן אמת"><div className="result-tabs"><button onClick={() => setKind("albums")}>אלבומים</button><button onClick={() => setKind("songs")}>שירים</button><button onClick={() => setKind("artists")}>זמרים</button><div className="export-wrapper" ref={menuRef}><button className="export-results" onClick={() => setMenuOpen(!menuOpen)} disabled={exporting}>{exporting ? "מייצא…" : "הורדת Excel"}</button>{menuOpen && <div className="export-menu"><button onClick={downloadAll}>הורדת כל הנתונים</button><button onClick={downloadCurrent}>הורדת {kindLabel} בלבד</button></div>}</div></div><p className="panel-help">קובץ ‎.xlsx מסודר עם הדירוג והקולות.</p><div className="results-table">{list.map((item, index) => <div key={item.id}><b>{index + 1}</b><span>{item.title || item.name}<small>{item.albumTitle}</small></span><strong>{item.votes} קולות</strong></div>)}</div></AdminSection>;
