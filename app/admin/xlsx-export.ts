@@ -12,21 +12,31 @@ function crc32(bytes: Uint8Array) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function u16(value: number) { return [value & 255, (value >>> 8) & 255]; }
-function u32(value: number) { return [value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255]; }
+function u16le(buf: Uint8Array, off: number, v: number) { buf[off] = v & 255; buf[off + 1] = (v >>> 8) & 255; }
+function u32le(buf: Uint8Array, off: number, v: number) { buf[off] = v & 255; buf[off + 1] = (v >>> 8) & 255; buf[off + 2] = (v >>> 16) & 255; buf[off + 3] = (v >>> 24) & 255; }
 
 function zip(files: Array<{ name: string; content: string }>) {
-  const local: number[] = [], central: number[] = [];
-  let offset = 0;
-  for (const file of files) {
-    const name = encoder.encode(file.name), data = encoder.encode(file.content), checksum = crc32(data);
-    const header = [...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(checksum), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...name];
-    local.push(...header, ...data);
-    central.push(...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(checksum), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name);
-    offset += header.length + data.length;
+  const entries = files.map((f) => ({ name: encoder.encode(f.name), data: encoder.encode(f.content) }));
+  entries.forEach((e) => Object.assign(e, { crc: crc32(e.data) }));
+  let localSize = 0, centralSize = 0;
+  for (const e of entries) { localSize += 30 + e.name.length + e.data.length; centralSize += 46 + e.name.length; }
+  const out = new Uint8Array(localSize + centralSize + 22);
+  let lo = 0, co = localSize;
+  for (const e of entries) {
+    const c = crc32(e.data);
+    u32le(out, lo, 0x04034b50); u16le(out, lo + 4, 20); u32le(out, lo + 14, c);
+    u32le(out, lo + 18, e.data.length); u32le(out, lo + 22, e.data.length); u16le(out, lo + 26, e.name.length);
+    out.set(e.name, lo + 30); out.set(e.data, lo + 30 + e.name.length);
+    u32le(out, co, 0x02014b50); u16le(out, co + 4, 20); u16le(out, co + 6, 20); u32le(out, co + 16, c);
+    u32le(out, co + 20, e.data.length); u32le(out, co + 24, e.data.length); u16le(out, co + 28, e.name.length);
+    u32le(out, co + 42, lo);
+    out.set(e.name, co + 46);
+    lo += 30 + e.name.length + e.data.length; co += 46 + e.name.length;
   }
-  const end = [...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(central.length), ...u32(local.length), ...u16(0)];
-  return new Uint8Array([...local, ...central, ...end]);
+  const eo = co;
+  u32le(out, eo, 0x06054b50); u16le(out, eo + 8, files.length); u16le(out, eo + 10, files.length);
+  u32le(out, eo + 12, centralSize); u32le(out, eo + 16, localSize);
+  return out;
 }
 
 function textCell(ref: string, value: unknown, style = 0) { return `<c r="${ref}" t="inlineStr"${style ? ` s="${style}"` : ""}><is><t>${xml(value)}</t></is></c>`; }
