@@ -768,6 +768,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   if (request.method === "POST" && url.pathname === "/api/admin/extract-covers") {
     const songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.audio_url AS audioUrl FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? AND s.audio_url IS NOT NULL AND s.audio_url<>'' AND (s.cover_url IS NULL OR s.cover_url='')").bind(surveyId).all<{ id: string; albumId: string; audioUrl: string }>();
     let extracted = 0;
+    const albumCovers = new Map<string, string>();
     for (const song of songs.results) {
       const key = keyFromMediaUrl(song.audioUrl);
       if (!key) continue;
@@ -777,9 +778,15 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       const cover = extractCoverFromAudio(buf);
       if (!cover) continue;
       const coverKey = `albums/${song.albumId}/cover-${song.id}-${crypto.randomUUID()}.jpg`;
+      const coverUrl = mediaUrl(coverKey);
       await env.MEDIA.put(coverKey, cover.data, { httpMetadata: { contentType: cover.mime, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { songId: song.id, albumId: song.albumId } });
-      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE id=?").bind(mediaUrl(coverKey), song.id).run();
+      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE id=?").bind(coverUrl, song.id).run();
+      if (!albumCovers.has(song.albumId)) albumCovers.set(song.albumId, coverUrl);
       extracted++;
+    }
+    for (const [albumId, coverUrl] of albumCovers) {
+      await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
+      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
     }
     return json({ ok: true, total: songs.results.length, extracted });
   }
