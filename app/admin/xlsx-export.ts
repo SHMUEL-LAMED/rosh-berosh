@@ -60,19 +60,24 @@ export function downloadResultsXlsx(rows: ExportRow[], heading: string, filename
 }
 
 export function downloadAllResultsXlsx(sheets: { rows: ExportRow[]; heading: string }[], filename: string) {
-  const sheetOverrides = sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
-  const sheetRefs = sheets.map((s, i) => `<sheet name="${xml(s.heading)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("");
-  const sheetRels = [
-    ...sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`),
-    `<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`,
-  ].join("");
+  const allRows: string[] = [];
+  let line = 1;
+  for (const section of sheets) {
+    if (line > 1) line++;
+    allRows.push(`<row r="${line}">${textCell(`A${line}`, "מקום", 1)}${textCell(`B${line}`, section.heading, 1)}${textCell(`C${line}`, "אלבום", 1)}${textCell(`D${line}`, "קולות", 1)}</row>`);
+    line++;
+    for (const row of section.rows) {
+      allRows.push(`<row r="${line}">${numberCell(`A${line}`, row.place)}${textCell(`B${line}`, row.title)}${textCell(`C${line}`, row.album)}${numberCell(`D${line}`, row.votes)}</row>`);
+      line++;
+    }
+  }
   const files = [
-    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheetOverrides}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
+    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
     { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
-    { name: "xl/workbook.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheetRefs}</sheets></workbook>` },
-    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheetRels}</Relationships>` },
+    { name: "xl/workbook.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="כל הנתונים" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
     { name: "xl/styles.xml", content: STYLES_XML },
-    ...sheets.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, content: SHEET_XML(buildSheet(s.rows, s.heading)) })),
+    { name: "xl/worksheets/sheet1.xml", content: SHEET_XML(allRows.join("")) },
   ];
   downloadXlsx(files, filename);
 }
