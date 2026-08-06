@@ -663,6 +663,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       await env.MEDIA.put(coverKey, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId } });
       const coverUrl = mediaUrl(coverKey);
       await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=?").bind(coverUrl, albumId).run();
+      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
       await deleteMediaUrls(env, [album.coverUrl]);
       return json({ ok: true, url: coverUrl });
     }
@@ -684,6 +685,10 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     }
     await env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,cover_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,0,0,?,1)")
       .bind(songId, albumId, title, audioUrl, coverUrl, number(form.get("position"))).run();
+    if (coverUrl) {
+      await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
+      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
+    }
     return json({ ok: true, id: songId, url: audioUrl, coverUrl });
   }
 
