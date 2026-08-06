@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { LoginScreen, logout, useCurrentUser } from "../auth-ui";
 import { blobToWav, fromDirectory, fromZip, splitAlbumFiles, suggestChorus, type UploadFile } from "./upload-utils";
-import { downloadResultsXlsx } from "./xlsx-export";
+import { downloadResultsXlsx, downloadAllResultsXlsx } from "./xlsx-export";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string; position: number; active: number };
 type Song = { id: string; albumId: string; title: string; audioUrl?: string; coverUrl?: string; previewStart: number; previewEnd: number; position: number; active: number };
@@ -322,25 +322,51 @@ function formatTime(value: number) { if (!Number.isFinite(value) || value < 0) r
 function Results({ data }: { data: Overview["results"] }) {
   const [kind, setKind] = useState<keyof Overview["results"]>("albums");
   const [exporting, setExporting] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const list = data[kind];
-  const download = async () => {
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuOpen]);
+  const fetchKind = async (k: string) => {
+    const allRows: { title: string; albumTitle: string; votes: number }[] = [];
+    let page = 1, hasMore = true;
+    while (hasMore) {
+      const response = await fetch(`/api/admin/export?kind=${k}&page=${page}`, { cache: "no-store" });
+      const result = await response.json() as { rows: { title: string; albumTitle: string; votes: number }[]; hasMore: boolean };
+      allRows.push(...result.rows);
+      hasMore = result.hasMore;
+      page++;
+    }
+    return allRows;
+  };
+  const downloadCurrent = async () => {
+    setMenuOpen(false);
     setExporting(true);
     try {
-      const allRows: { title: string; albumTitle: string; votes: number }[] = [];
-      let page = 1;
-      let hasMore = true;
-      while (hasMore) {
-        const response = await fetch(`/api/admin/export?kind=${kind}&page=${page}`, { cache: "no-store" });
-        const result = await response.json() as { rows: { title: string; albumTitle: string; votes: number }[]; hasMore: boolean };
-        allRows.push(...result.rows);
-        hasMore = result.hasMore;
-        page++;
-      }
+      const rows = await fetchKind(kind);
       const heading = kind === "albums" ? "אלבומים" : kind === "songs" ? "שירים" : "זמרים";
-      downloadResultsXlsx(allRows.map((item, index) => ({ place: index + 1, title: item.title || "", album: item.albumTitle || "", votes: Number(item.votes) })), heading, `rosh-berosh-${kind}.xlsx`);
+      downloadResultsXlsx(rows.map((item, index) => ({ place: index + 1, title: item.title || "", album: item.albumTitle || "", votes: Number(item.votes) })), heading, `rosh-berosh-${kind}.xlsx`);
     } finally { setExporting(false); }
   };
-  return <AdminSection title="תוצאות בזמן אמת"><div className="result-tabs"><button onClick={() => setKind("albums")}>אלבומים</button><button onClick={() => setKind("songs")}>שירים</button><button onClick={() => setKind("artists")}>זמרים</button><button className="export-results" onClick={download} disabled={exporting}>{exporting ? "מייצא…" : "הורדת Excel אמיתי"}</button></div><p className="panel-help">קובץ ‎.xlsx מסודר עם הדירוג והקולות.</p><div className="results-table">{list.map((item, index) => <div key={item.id}><b>{index + 1}</b><span>{item.title || item.name}<small>{item.albumTitle}</small></span><strong>{item.votes} קולות</strong></div>)}</div></AdminSection>;
+  const downloadAll = async () => {
+    setMenuOpen(false);
+    setExporting(true);
+    try {
+      const kinds = ["albums", "songs", "artists"] as const;
+      const headings = { albums: "אלבומים", songs: "שירים", artists: "זמרים" };
+      const sheets = await Promise.all(kinds.map(async (k) => {
+        const rows = await fetchKind(k);
+        return { rows: rows.map((item, index) => ({ place: index + 1, title: item.title || "", album: item.albumTitle || "", votes: Number(item.votes) })), heading: headings[k] };
+      }));
+      downloadAllResultsXlsx(sheets, "rosh-berosh-all.xlsx");
+    } finally { setExporting(false); }
+  };
+  const kindLabel = kind === "albums" ? "אלבומים" : kind === "songs" ? "שירים" : "זמרים";
+  return <AdminSection title="תוצאות בזמן אמת"><div className="result-tabs"><button onClick={() => setKind("albums")}>אלבומים</button><button onClick={() => setKind("songs")}>שירים</button><button onClick={() => setKind("artists")}>זמרים</button><div className="export-wrapper" ref={menuRef}><button className="export-results" onClick={() => setMenuOpen(!menuOpen)} disabled={exporting}>{exporting ? "מייצא…" : "הורדת Excel"}</button>{menuOpen && <div className="export-menu"><button onClick={downloadAll}>הורדת כל הנתונים</button><button onClick={downloadCurrent}>הורדת {kindLabel} בלבד</button></div>}</div></div><p className="panel-help">קובץ ‎.xlsx מסודר עם הדירוג והקולות.</p><div className="results-table">{list.map((item, index) => <div key={item.id}><b>{index + 1}</b><span>{item.title || item.name}<small>{item.albumTitle}</small></span><strong>{item.votes} קולות</strong></div>)}</div></AdminSection>;
 }
 
 function ArchivesPanel({ onChanged, onMessage }: { onChanged(): Promise<void> | void; onMessage(message: string): void }) {
