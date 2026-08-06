@@ -97,6 +97,27 @@ const router = YemotRouter({
   },
 });
 
+async function loadProgress(voterPhone) {
+  try {
+    const { result } = await api(`/api/ballots/progress?voterKey=${encodeURIComponent(voterPhone)}`);
+    return result?.progress || null;
+  } catch { return null; }
+}
+
+async function saveProgress(voterPhone, data) {
+  try {
+    await api(`/api/ballots/progress?voterKey=${encodeURIComponent(voterPhone)}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data),
+    });
+  } catch (error) { console.error("save progress error", error.message); }
+}
+
+async function clearProgress(voterPhone) {
+  try {
+    await api(`/api/ballots/progress?voterKey=${encodeURIComponent(voterPhone)}`, { method: "DELETE" });
+  } catch {}
+}
+
 router.get("/", async (call) => {
   const { response, result: catalog } = await api("/api/catalog");
   const prompts = promptMap(catalog);
@@ -111,35 +132,81 @@ router.get("/", async (call) => {
     }
   } catch {}
 
-
   const rules = catalog.rules;
   const albumAmount = rules.albumsEnabled ? rules.albumsMax : 0;
   const songsPerAlbum = rules.songsEnabled ? rules.songsMax : 0;
   const artistAmount = rules.artistsEnabled ? rules.artistsMax : 0;
   if (rules.albumsEnabled && (!catalog.albums?.length || catalog.albums.length < albumAmount)) return call.id_list_message(prompt(prompts, "system:not_ready", "רשימת האלבומים עדיין אינה מוכנה"));
 
+  const saved = await loadProgress(voterPhone);
   let selectedAlbums = [], selectedArtists = [], songIdsByAlbum = {}, menuLead = [];
-  const complete = () => (!rules.albumsEnabled || selectedAlbums.length === albumAmount) && (!rules.songsEnabled || selectedAlbums.every((album) => (songIdsByAlbum[album.id] || []).length === songsPerAlbum)) && (!rules.artistsEnabled || selectedArtists.length === artistAmount);
+
+  if (saved) {
+    if (saved.albumIds?.length) selectedAlbums = (catalog.albums || []).filter((a) => saved.albumIds.includes(a.id));
+    if (saved.songIdsByAlbum) songIdsByAlbum = saved.songIdsByAlbum;
+    if (saved.artistIds?.length) selectedArtists = (catalog.artists || []).filter((a) => saved.artistIds.includes(a.id));
+    menuLead = prompt(prompts, "system:welcome_back", "ברוכים השבים ממשיכים מאיפה שהפסקתם");
+  }
+
+  const albumsDone = () => !rules.albumsEnabled || selectedAlbums.length === albumAmount;
+  const songsDone = () => !rules.songsEnabled || selectedAlbums.every((album) => (songIdsByAlbum[album.id] || []).length === songsPerAlbum);
+  const artistsDone = () => !rules.artistsEnabled || selectedArtists.length === artistAmount;
+  const complete = () => albumsDone() && songsDone() && artistsDone();
+
   while (!complete()) {
-    const allowed = [rules.albumsEnabled && 1, rules.songsEnabled && 2, rules.artistsEnabled && 3].filter(Boolean);
+    const allowed = [];
+    if (rules.albumsEnabled && !albumsDone()) allowed.push(1);
+    if (rules.songsEnabled && albumsDone() && !songsDone()) allowed.push(2);
+    if (rules.artistsEnabled && !artistsDone()) allowed.push(3);
+    if (!allowed.length) break;
+    if (allowed.length === 1) {
+      if (allowed[0] === 1) {
+        selectedAlbums = await chooseMany(call, [...menuLead, ...prompt(prompts, "system:albums_intro", `בחרו ${albumAmount} אלבומים`)], catalog.albums || [], albumAmount, "לאלבום", "album", prompts);
+        songIdsByAlbum = {};
+        menuLead = [];
+        await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
+        menuLead = prompt(prompts, "system:section_saved", "בחירת האלבומים נשמרה");
+      } else if (allowed[0] === 2) {
+        for (const album of selectedAlbums) {
+          if ((songIdsByAlbum[album.id] || []).length === songsPerAlbum) continue;
+          const albumSongs = (catalog.songs || []).filter((song) => song.albumId === album.id);
+          const intro = [...menuLead, ...prompt(prompts, "system:songs_intro", `בחרו ${songsPerAlbum} שירים מתוך האלבום`), ...itemPrompt(prompts, "album", album, "האלבום")];
+          menuLead = [];
+          const selectedSongs = await chooseMany(call, intro, albumSongs, songsPerAlbum, "לשיר", "song", prompts);
+          songIdsByAlbum[album.id] = selectedSongs.map((song) => song.id);
+          await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
+        }
+        menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה");
+      } else {
+        selectedArtists = await chooseMany(call, [...menuLead, ...prompt(prompts, "system:artists_intro", `בחרו ${artistAmount} זמרים`)], catalog.artists || [], artistAmount, "לזמר", "artist", prompts);
+        menuLead = [];
+        await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
+        menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה");
+      }
+      continue;
+    }
     const fallback = "לבחירת אלבומים הקישו 1 לבחירת שירים מתוך האלבומים שבחרתם הקישו 2 לבחירת זמרים הקישו 3";
     const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", { min_digits: 1, max_digits: 1, digits_allowed: allowed, typing_playback_mode: "No" });
     menuLead = [];
     if (answer === "1" && rules.albumsEnabled) {
       selectedAlbums = await chooseMany(call, prompt(prompts, "system:albums_intro", `בחרו ${albumAmount} אלבומים`), catalog.albums || [], albumAmount, "לאלבום", "album", prompts);
       songIdsByAlbum = {};
+      await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       menuLead = prompt(prompts, "system:section_saved", "בחירת האלבומים נשמרה חוזרים לתפריט הראשי");
     } else if (answer === "2" && rules.songsEnabled) {
       if (!selectedAlbums.length) { menuLead = prompt(prompts, "system:need_albums", "כדי לבחור שירים יש לבחור קודם אלבומים בשלוחה 1"); continue; }
       for (const album of selectedAlbums) {
+        if ((songIdsByAlbum[album.id] || []).length === songsPerAlbum) continue;
         const albumSongs = (catalog.songs || []).filter((song) => song.albumId === album.id);
         const intro = [...prompt(prompts, "system:songs_intro", `בחרו ${songsPerAlbum} שירים מתוך האלבום`), ...itemPrompt(prompts, "album", album, "האלבום")];
         const selectedSongs = await chooseMany(call, intro, albumSongs, songsPerAlbum, "לשיר", "song", prompts);
         songIdsByAlbum[album.id] = selectedSongs.map((song) => song.id);
+        await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       }
       menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה חוזרים לתפריט הראשי");
     } else if (answer === "3" && rules.artistsEnabled) {
       selectedArtists = await chooseMany(call, prompt(prompts, "system:artists_intro", `בחרו ${artistAmount} זמרים`), catalog.artists || [], artistAmount, "לזמר", "artist", prompts);
+      await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה חוזרים לתפריט הראשי");
     }
   }
@@ -150,10 +217,12 @@ router.get("/", async (call) => {
     body: JSON.stringify({ voterKey: phone(call), albumIds: selectedAlbums.map((item) => item.id), songIdsByAlbum, artistIds: selectedArtists.map((item) => item.id), channel: "phone" }),
   });
   if (submission.response.status === 409) {
+    await clearProgress(voterPhone);
     call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"), { prependToNextAction: true });
     return call.routing_yemot(POST_VOTE_TRANSFER);
   }
   if (!submission.response.ok) return call.id_list_message(prompt(prompts, "system:error", "שמירת ההצבעה נכשלה נא לנסות שוב מאוחר יותר"));
+  await clearProgress(voterPhone);
   call.id_list_message(prompt(prompts, "system:success", "תודה הצבעתכם נקלטה בהצלחה"), { prependToNextAction: true });
   return call.routing_yemot(POST_VOTE_TRANSFER);
 });

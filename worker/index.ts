@@ -204,6 +204,26 @@ const worker = {
       const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first();
       return json({ voted: !!existing });
     }
+    if (url.pathname === "/api/ballots/progress" && verifyIvrSecret(request, env)) {
+      const surveyId = await activeSurveyId(env);
+      const voterKey = url.searchParams.get("voterKey")?.trim().toLowerCase();
+      if (!voterKey) return json({ error: "חסר מזהה מצביע." }, 400);
+      const progressKey = `ivr-progress/${surveyId}/${voterKey}.json`;
+      if (request.method === "GET") {
+        const obj = await env.MEDIA.get(progressKey);
+        if (!obj) return json({ progress: null });
+        return json({ progress: await obj.json() });
+      }
+      if (request.method === "POST") {
+        const body = await request.json<Record<string, unknown>>();
+        await env.MEDIA.put(progressKey, JSON.stringify(body), { httpMetadata: { contentType: "application/json", cacheControl: "no-store" } });
+        return json({ ok: true });
+      }
+      if (request.method === "DELETE") {
+        await env.MEDIA.delete(progressKey);
+        return json({ ok: true });
+      }
+    }
     if (url.pathname === "/api/ballots" && request.method === "POST") {
       const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
       if (!checkBallotRate(clientIp)) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
