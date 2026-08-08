@@ -139,7 +139,7 @@ export default function Home() {
 
   return <main className={`voting-shell ${player ? "with-player" : ""}`} dir="rtl">
     <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>יציאה</button></nav></header>
-    <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider">|</span><span className="hero-line2">25 שנות מוזיקה</span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
+    <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1 className="parade-title"><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider" aria-hidden="true"></span><span className="hero-line2"><b>25</b><small>שנות מוזיקה</small></span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
     {catalog && !catalog.rules.votingOpen ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
@@ -229,4 +229,3 @@ function BrowsePanel({ catalog }: { catalog: Catalog }) {
     </div>
   </>;
 }
-
