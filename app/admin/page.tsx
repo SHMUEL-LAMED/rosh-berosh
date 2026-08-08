@@ -430,7 +430,10 @@ function VotersPanel() {
       setVoters(data.voters); setPage(data.page); setHasMore(data.hasMore);
     } catch {} finally { setLoading(false); }
   }, []);
-  useEffect(() => { fetchPage(1); }, [fetchPage]);
+  useEffect(() => {
+    const request = window.setTimeout(() => { void fetchPage(1); }, 0);
+    return () => window.clearTimeout(request);
+  }, [fetchPage]);
   const channelLabel = (ch: string) => ch === "phone" ? "טלפון" : ch === "site" ? "אתר" : ch;
   return <AdminSection title="מצביעים">
     <p className="panel-help">כל ההצבעות שנקלטו בסקר הנוכחי, מהחדשה לישנה.</p>
