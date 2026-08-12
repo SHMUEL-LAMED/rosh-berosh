@@ -86,7 +86,7 @@ function AudioDock({ song, siblings, onClose, onChangeSong }: { song: PlayerSong
       <button className="player-main" onClick={toggle} aria-label={playing ? "השהיה" : "נגינה"}>{playing ? "❚❚" : "▶"}</button>
       <button className="player-skip" disabled={!onNext} onClick={onNext} aria-label="שיר הבא">⏭</button>
     </div>
-    <div className="player-copy"><small>{configuredEnd > start ? "קטע נבחר" : "השיר המלא"}</small><b>{song.title}</b></div>
+    <div className="player-copy" aria-live="polite"><small>{configuredEnd > start ? "קטע נבחר" : "מתנגן עכשיו"}</small><b title={song.title}>{song.title || "קובץ שמע"}</b></div>
     <div className="player-progress">
       <input aria-label="מיקום בשיר" type="range" min={start} max={Math.max(start + 1, end || duration || 1)} step="0.1" value={Math.min(current, Math.max(start + 1, end || duration || 1))} onChange={(e) => seek(Number(e.target.value))} />
       <span>{fmt(current - start)} / {fmt(Math.max(0, end - start))}</span>
