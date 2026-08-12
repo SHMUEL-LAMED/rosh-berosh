@@ -15,14 +15,29 @@ const Ctx = createContext<PlayerContextType>({ song: null, play() {}, stop() {},
 
 export function usePlayer() { return useContext(Ctx); }
 
+function pauseAllAudio() {
+  if (typeof document === "undefined") return;
+  document.querySelectorAll("audio").forEach((element) => element.pause());
+}
+
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [song, setSong] = useState<PlayerSong | null>(null);
   const [siblings, setSiblings] = useState<PlayerSong[]>([]);
-  const play = useCallback((s: PlayerSong) => setSong((cur) => cur?.id === s.id ? null : s), []);
-  const stop = useCallback(() => setSong(null), []);
+  const play = useCallback((s: PlayerSong) => {
+    pauseAllAudio();
+    setSong((cur) => cur?.id === s.id ? null : s);
+  }, []);
+  const changeSong = useCallback((s: PlayerSong) => {
+    pauseAllAudio();
+    setSong(s);
+  }, []);
+  const stop = useCallback(() => {
+    pauseAllAudio();
+    setSong(null);
+  }, []);
   return <Ctx.Provider value={{ song, play, stop, setSiblings }}>
     {children}
-    {song && <AudioDock song={song} siblings={siblings} onClose={stop} onChangeSong={setSong} />}
+    {song && <AudioDock key={song.id} song={song} siblings={siblings} onClose={stop} onChangeSong={changeSong} />}
   </Ctx.Provider>;
 }
 
@@ -46,7 +61,12 @@ function AudioDock({ song, siblings, onClose, onChangeSong }: { song: PlayerSong
     setCurrent(start); setPlaying(false);
     const begin = () => { setDuration(el.duration || 0); el.currentTime = start; setCurrent(start); el.play().then(() => setPlaying(true)).catch(() => undefined); };
     el.addEventListener("loadedmetadata", begin, { once: true });
-    return () => { el.pause(); };
+    return () => {
+      el.removeEventListener("loadedmetadata", begin);
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+    };
   }, [song, start]);
 
   const toggle = () => { const el = audio.current; if (!el) return; if (el.paused) { if (el.currentTime >= end) el.currentTime = start; el.play().then(() => setPlaying(true)).catch(() => undefined); } else { el.pause(); setPlaying(false); } };
