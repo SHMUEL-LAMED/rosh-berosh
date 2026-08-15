@@ -107,7 +107,11 @@ export default function Home() {
     if (stage === "songs") {
       const album = selectedAlbums[songAlbumIndex];
       const chosen = album ? (songs[album.id]?.length ?? 0) : 0;
-      if (album && (chosen < r.songsMin || chosen > r.songsMax)) return setError(`יש לבחור ${rangeText(r.songsMin, r.songsMax, "שירים")} מ״${album.title}״.`);
+      // An album may hold fewer active songs than songsMin, and then the voter
+      // could never clear this step. Ask only for what the album actually has.
+      const available = album ? songsByAlbum(album.id).length : 0;
+      const required = Math.min(r.songsMin, available);
+      if (album && (chosen < required || chosen > r.songsMax)) return setError(`יש לבחור ${rangeText(required, Math.min(r.songsMax, available), "שירים")} מ״${album.title}״.`);
       if (songAlbumIndex < selectedAlbums.length - 1) { setSongAlbumIndex(songAlbumIndex + 1); return scrollTop(); }
       return goToStage(stageIndex + 1);
     }
