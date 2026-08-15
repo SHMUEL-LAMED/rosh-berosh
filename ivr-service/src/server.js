@@ -51,12 +51,18 @@ function itemPrompt(prompts, kind, item, label) {
   return [text(`${label} ${item.title || item.name}`)];
 }
 
+// Album and artist recordings hold the whole line, digit included ("לאלבום
+// פלוני הקישו 1"), so the line adds nothing after them. Song recordings hold
+// the title alone, and the line announces the digit itself.
+const KINDS_MISSING_DIGIT = new Set(["song"]);
+
 async function chooseOne(call, messages, items, label, kind, prompts) {
   const full = [...messages];
   items.forEach((item, index) => {
     const recorded = prompts.get(`${kind}:${item.id}`);
     if (recorded?.yemotPath) {
       full.push(file(recorded.yemotPath));
+      if (KINDS_MISSING_DIGIT.has(kind)) full.push(text("הקישו"), number(index + 1));
     } else {
       full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(index + 1));
     }
