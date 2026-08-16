@@ -36,7 +36,11 @@ const rateBuckets = new Map<string, { count: number; reset: number }>();
 function checkBallotRate(ip: string): boolean {
   const now = Math.floor(Date.now() / 1000);
   const bucket = rateBuckets.get(ip);
-  if (!bucket || now >= bucket.reset) { rateBuckets.set(ip, { count: 1, reset: now + BALLOT_RATE_WINDOW }); return true; }
+  if (!bucket || now >= bucket.reset) {
+    for (const [key, expired] of rateBuckets) if (now >= expired.reset) rateBuckets.delete(key);
+    rateBuckets.set(ip, { count: 1, reset: now + BALLOT_RATE_WINDOW });
+    return true;
+  }
   if (bucket.count >= BALLOT_RATE_LIMIT) return false;
   bucket.count++;
   return true;
@@ -85,8 +89,7 @@ async function catalog(env: Env): Promise<Response> {
       const albumSongs = songsMap.get(album.id as string) || [];
       if (!album.coverUrl && albumSongs.length > 0) {
         const uniqueCovers = [...new Set(albumSongs.map((s) => s.coverUrl).filter(Boolean))];
-        if (uniqueCovers.length === 1) album.coverUrl = uniqueCovers[0];
-        else if (uniqueCovers.length > 1) album.coverUrl = uniqueCovers[0];
+        if (uniqueCovers.length) album.coverUrl = uniqueCovers[0];
       }
       return album;
     });
@@ -112,7 +115,18 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   const albumMin = rules.albumsEnabled ? rules.albumsMin : 0, albumMax = rules.albumsEnabled ? rules.albumsMax : 0;
   const songMin = rules.songsEnabled ? rules.songsMin : 0, songMax = rules.songsEnabled ? rules.songsMax : 0;
   const artistMin = rules.artistsEnabled ? rules.artistsMin : 0, artistMax = rules.artistsEnabled ? rules.artistsMax : 0;
-  if (!voterKey || albumIds.length < albumMin || albumIds.length > albumMax || artistIds.length < artistMin || artistIds.length > artistMax || albumIds.some((id) => (songMap[id]?.length ?? 0) < songMin || (songMap[id]?.length ?? 0) > songMax)) {
+  if (!voterKey || albumIds.length < albumMin || albumIds.length > albumMax || artistIds.length < artistMin || artistIds.length > artistMax || albumIds.some((id) => (songMap[id]?.length ?? 0) > songMax)) {
+    return json({ error: "הבחירות אינן תואמות להגדרות הסקר." }, 400);
+  }
+
+  // An album can end up holding fewer active songs than songsMin (a track
+  // deactivated mid-poll), and then no voter could ever satisfy the minimum.
+  // Require only what the album can actually offer.
+  const availableSongs = albumIds.length && songMin
+    ? await env.DB.prepare(`SELECT album_id AS albumId, COUNT(*) AS total FROM songs WHERE active=1 AND album_id IN (${placeholders(albumIds.length)}) GROUP BY album_id`).bind(...albumIds).all<{ albumId: string; total: number }>()
+    : { results: [] as { albumId: string; total: number }[] };
+  const availableByAlbum = new Map(availableSongs.results.map((row) => [row.albumId, Number(row.total)]));
+  if (albumIds.some((id) => (songMap[id]?.length ?? 0) < Math.min(songMin, availableByAlbum.get(id) ?? 0))) {
     return json({ error: "הבחירות אינן תואמות להגדרות הסקר." }, 400);
   }
 
@@ -143,7 +157,7 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
 
 async function serveMedia(request: Request, env: Env, pathname: string): Promise<Response> {
   const key = pathname.slice(7).split("/").map(decodeURIComponent).join("/");
-  const privateObject = key.startsWith("settings/") || key.startsWith("poll-archives/") || key === "ivr-prompts/config.json";
+  const privateObject = key.startsWith("settings/") || key.startsWith("poll-archives/") || key.startsWith("ivr-progress/") || key === "ivr-prompts/config.json";
   if (!key || key.includes("..") || privateObject) return new Response("Not Found", { status: 404 });
   const rangeHeader = request.headers.get("range");
   const object = rangeHeader
@@ -225,11 +239,16 @@ const worker = {
       }
     }
     if (url.pathname === "/api/ballots" && request.method === "POST") {
+      // Every phone ballot reaches us from the single IVR server, so the per-IP
+      // limit would reject callers past the fifth in a minute. Trust the shared
+      // secret instead; a request claiming "phone" without it is still rejected.
+      const fromIvr = verifyIvrSecret(request, env);
       const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-      if (!checkBallotRate(clientIp)) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
-      const original = await request.json<Submission>();
+      if (!fromIvr && !checkBallotRate(clientIp)) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
+      let original: Submission;
+      try { original = await request.json<Submission>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
       if (original.channel === "phone") {
-        if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה לערוץ טלפוני." }, 403);
+        if (!fromIvr) return json({ error: "אין הרשאה לערוץ טלפוני." }, 403);
         return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
       }
       const user = await readSession(request, env);

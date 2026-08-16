@@ -28,7 +28,6 @@ async function api(path, options = {}) {
     } catch (error) {
       lastError = error;
       clearTimeout(timer);
-      if (options.method === "POST" && attempt < MAX_RETRIES) { console.error(`IVR api retry ${attempt + 1} for ${path}:`, error.message); continue; }
       if (attempt < MAX_RETRIES) { console.error(`IVR api retry ${attempt + 1} for ${path}:`, error.message); continue; }
     } finally { clearTimeout(timer); }
   }
@@ -51,12 +50,18 @@ function itemPrompt(prompts, kind, item, label) {
   return [text(`${label} ${item.title || item.name}`)];
 }
 
+// Album and artist recordings hold the whole line, digit included ("לאלבום
+// פלוני הקישו 1"), so the line adds nothing after them. Song recordings hold
+// the title alone, and the line announces the digit itself.
+const KINDS_MISSING_DIGIT = new Set(["song"]);
+
 async function chooseOne(call, messages, items, label, kind, prompts) {
   const full = [...messages];
   items.forEach((item, index) => {
     const recorded = prompts.get(`${kind}:${item.id}`);
     if (recorded?.yemotPath) {
       full.push(file(recorded.yemotPath));
+      if (KINDS_MISSING_DIGIT.has(kind)) full.push(text("הקישו"), number(index + 1));
     } else {
       full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(index + 1));
     }
@@ -65,15 +70,20 @@ async function chooseOne(call, messages, items, label, kind, prompts) {
   return items[Number(answer) - 1];
 }
 
+// A list shorter than the requested amount (a song deactivated mid-poll, say)
+// used to abort the call, and the caller stayed stuck there on every callback
+// because the saved progress kept sending them back. Take whatever is there.
+function quota(amount, available) { return Math.min(amount, available); }
+
 async function chooseMany(call, intro, items, amount, label, kind, prompts) {
-  if (!amount) return [];
-  if (items.length < amount) throw new Error(`not enough ${label} choices`);
+  const target = quota(amount, items.length);
+  if (!target) return [];
   const selected = [];
   const selectedIds = new Set();
   let lead = [];
   let showIntro = true;
-  while (selected.length < amount) {
-    const messages = [...lead, ...(showIntro ? intro : []), text(`בחירה ${selected.length + 1} מתוך ${amount}`)];
+  while (selected.length < target) {
+    const messages = [...lead, ...(showIntro ? intro : []), text(`בחירה ${selected.length + 1} מתוך ${target}`)];
     lead = [];
     showIntro = false;
     const choice = await chooseOne(call, messages, items, label, kind, prompts);
@@ -148,9 +158,16 @@ router.get("/", async (call) => {
     menuLead = prompt(prompts, "system:welcome_back", "ברוכים השבים ממשיכים מאיפה שהפסקתם");
   }
 
-  const albumsDone = () => !rules.albumsEnabled || selectedAlbums.length === albumAmount;
-  const songsDone = () => !rules.songsEnabled || selectedAlbums.every((album) => (songIdsByAlbum[album.id] || []).length === songsPerAlbum);
-  const artistsDone = () => !rules.artistsEnabled || selectedArtists.length === artistAmount;
+  // These have to agree with what chooseMany can actually deliver, otherwise a
+  // short list leaves the section permanently "not done" and the menu loops.
+  const albumSongsOf = (album) => (catalog.songs || []).filter((song) => song.albumId === album.id);
+  const albumQuota = quota(albumAmount, (catalog.albums || []).length);
+  const artistQuota = quota(artistAmount, (catalog.artists || []).length);
+  const songQuotaOf = (album) => quota(songsPerAlbum, albumSongsOf(album).length);
+
+  const albumsDone = () => !rules.albumsEnabled || selectedAlbums.length >= albumQuota;
+  const songsDone = () => !rules.songsEnabled || selectedAlbums.every((album) => (songIdsByAlbum[album.id] || []).length >= songQuotaOf(album));
+  const artistsDone = () => !rules.artistsEnabled || selectedArtists.length >= artistQuota;
   const complete = () => albumsDone() && songsDone() && artistsDone();
 
   while (!complete()) {
@@ -161,16 +178,16 @@ router.get("/", async (call) => {
     if (!allowed.length) break;
     if (allowed.length === 1) {
       if (allowed[0] === 1) {
-        selectedAlbums = await chooseMany(call, [...menuLead, ...prompt(prompts, "system:albums_intro", `בחרו ${albumAmount} אלבומים`)], catalog.albums || [], albumAmount, "לאלבום", "album", prompts);
+        selectedAlbums = await chooseMany(call, [...menuLead, ...prompt(prompts, "system:albums_intro", `בחרו ${albumQuota} אלבומים`)], catalog.albums || [], albumAmount, "לאלבום", "album", prompts);
         songIdsByAlbum = {};
         menuLead = [];
         await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
         menuLead = prompt(prompts, "system:section_saved", "בחירת האלבומים נשמרה");
       } else if (allowed[0] === 2) {
         for (const album of selectedAlbums) {
-          if ((songIdsByAlbum[album.id] || []).length === songsPerAlbum) continue;
-          const albumSongs = (catalog.songs || []).filter((song) => song.albumId === album.id);
-          const intro = [...menuLead, ...prompt(prompts, "system:songs_intro", `בחרו ${songsPerAlbum} שירים מתוך האלבום`), ...itemPrompt(prompts, "album", album, "האלבום")];
+          if ((songIdsByAlbum[album.id] || []).length >= songQuotaOf(album)) continue;
+          const albumSongs = albumSongsOf(album);
+          const intro = [...menuLead, ...prompt(prompts, "system:songs_intro", `בחרו ${songQuotaOf(album)} שירים מתוך האלבום`), ...itemPrompt(prompts, "album", album, "האלבום")];
           menuLead = [];
           const selectedSongs = await chooseMany(call, intro, albumSongs, songsPerAlbum, "לשיר", "song", prompts);
           songIdsByAlbum[album.id] = selectedSongs.map((song) => song.id);
@@ -178,7 +195,7 @@ router.get("/", async (call) => {
         }
         menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה");
       } else {
-        selectedArtists = await chooseMany(call, [...menuLead, ...prompt(prompts, "system:artists_intro", `בחרו ${artistAmount} זמרים`)], catalog.artists || [], artistAmount, "לזמר", "artist", prompts);
+        selectedArtists = await chooseMany(call, [...menuLead, ...prompt(prompts, "system:artists_intro", `בחרו ${artistQuota} זמרים`)], catalog.artists || [], artistAmount, "לזמר", "artist", prompts);
         menuLead = [];
         await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
         menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה");
@@ -189,23 +206,23 @@ router.get("/", async (call) => {
     const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", { min_digits: 1, max_digits: 1, digits_allowed: allowed, typing_playback_mode: "No" });
     menuLead = [];
     if (answer === "1" && rules.albumsEnabled) {
-      selectedAlbums = await chooseMany(call, prompt(prompts, "system:albums_intro", `בחרו ${albumAmount} אלבומים`), catalog.albums || [], albumAmount, "לאלבום", "album", prompts);
+      selectedAlbums = await chooseMany(call, prompt(prompts, "system:albums_intro", `בחרו ${albumQuota} אלבומים`), catalog.albums || [], albumAmount, "לאלבום", "album", prompts);
       songIdsByAlbum = {};
       await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       menuLead = prompt(prompts, "system:section_saved", "בחירת האלבומים נשמרה חוזרים לתפריט הראשי");
     } else if (answer === "2" && rules.songsEnabled) {
       if (!selectedAlbums.length) { menuLead = prompt(prompts, "system:need_albums", "כדי לבחור שירים יש לבחור קודם אלבומים בשלוחה 1"); continue; }
       for (const album of selectedAlbums) {
-        if ((songIdsByAlbum[album.id] || []).length === songsPerAlbum) continue;
-        const albumSongs = (catalog.songs || []).filter((song) => song.albumId === album.id);
-        const intro = [...prompt(prompts, "system:songs_intro", `בחרו ${songsPerAlbum} שירים מתוך האלבום`), ...itemPrompt(prompts, "album", album, "האלבום")];
+        if ((songIdsByAlbum[album.id] || []).length >= songQuotaOf(album)) continue;
+        const albumSongs = albumSongsOf(album);
+        const intro = [...prompt(prompts, "system:songs_intro", `בחרו ${songQuotaOf(album)} שירים מתוך האלבום`), ...itemPrompt(prompts, "album", album, "האלבום")];
         const selectedSongs = await chooseMany(call, intro, albumSongs, songsPerAlbum, "לשיר", "song", prompts);
         songIdsByAlbum[album.id] = selectedSongs.map((song) => song.id);
         await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       }
       menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה חוזרים לתפריט הראשי");
     } else if (answer === "3" && rules.artistsEnabled) {
-      selectedArtists = await chooseMany(call, prompt(prompts, "system:artists_intro", `בחרו ${artistAmount} זמרים`), catalog.artists || [], artistAmount, "לזמר", "artist", prompts);
+      selectedArtists = await chooseMany(call, prompt(prompts, "system:artists_intro", `בחרו ${artistQuota} זמרים`), catalog.artists || [], artistAmount, "לזמר", "artist", prompts);
       await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה חוזרים לתפריט הראשי");
     }

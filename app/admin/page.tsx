@@ -162,10 +162,10 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
     <div className={`connection-banner ${data.yemotConnected ? "connected" : "disconnected"}`}><b>{data.yemotConnected ? "החיבור לימות המשיח מוגדר" : "החיבור לימות המשיח עדיין לא מוגדר"}</b><span>{data.yemotConnected ? "קבצים חדשים יישלחו גם לקו." : "הקבצים נשמרים באתר בלבד עד להוספת YEMOT_TOKEN בסביבת Cloudflare."}</span></div>
     <p className="panel-help">בכל שורה אפשר להעלות הקלטה משלכם. אם אין הקלטה פעילה, הקו משתמש בהקראה אוטומטית. התפריט הראשי נשאר קצר: 1 אלבומים, 2 שירים מתוך האלבומים שנבחרו, 3 זמרים.</p>
     <h3 className="prompt-heading">הודעות המערכת</h3>{rows(SYSTEM_PROMPTS.map(([key, label]) => ({ key, label })))}
-    <details className="prompt-group"><summary>שמות האלבומים (שלוחת אלבומים)</summary>{rows(data.albums.map((album) => ({ key: `album:${album.id}`, label: `${album.title} — ${album.artistName}` })))}</details>
-    <details className="prompt-group"><summary>שמות האלבומים (שלוחת שירים)</summary>{rows(data.albums.map((album) => ({ key: `album-name:${album.id}`, label: `${album.title} — ${album.artistName}` })))}</details>
-    <details className="prompt-group"><summary>שמות השירים</summary>{rows(data.songs.map((song) => ({ key: `song:${song.id}`, label: song.title })))}</details>
-    <details className="prompt-group"><summary>שמות הזמרים</summary>{rows(data.artists.map((artist) => ({ key: `artist:${artist.id}`, label: artist.name })))}</details>
+    <details className="prompt-group"><summary>שמות האלבומים (שלוחת אלבומים) — הקליטו גם את מספר ההקשה</summary>{rows(data.albums.map((album) => ({ key: `album:${album.id}`, label: `${album.title} — ${album.artistName}` })))}</details>
+    <details className="prompt-group"><summary>שמות האלבומים (שלוחת שירים) — השם בלבד</summary>{rows(data.albums.map((album) => ({ key: `album-name:${album.id}`, label: `${album.title} — ${album.artistName}` })))}</details>
+    <details className="prompt-group"><summary>שמות השירים — השם בלבד, הקו מוסיף את מספר ההקשה</summary>{rows(data.songs.map((song) => ({ key: `song:${song.id}`, label: song.title })))}</details>
+    <details className="prompt-group"><summary>שמות הזמרים — הקליטו גם את מספר ההקשה</summary>{rows(data.artists.map((artist) => ({ key: `artist:${artist.id}`, label: artist.name })))}</details>
   </AdminSection>;
 }
 
