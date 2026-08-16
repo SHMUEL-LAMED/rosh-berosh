@@ -21,12 +21,65 @@ cp .env.example .env
 npm start
 ```
 
+## פריסה ועדכון
+
+חשוב להבין: השירות הזה **אינו נפרס יחד עם האתר**. ה-workflow שב-
+`.github/workflows/deploy.yml` מריץ `wrangler deploy` ומעלה רק את ה-Cloudflare
+Worker. כל שינוי בתיקייה הזו נשאר לא פעיל בקו עד שמעדכנים בנפרד את השרת שמריץ
+אותו. אחרי כל מיזוג שנוגע ב-`ivr-service/` צריך לעדכן גם את השרת.
+
+### עדכון שרת קיים (VPS, או כל מקום שמריצים בו את התהליך ידנית)
+
+```bash
+cd /path/to/rosh-berosh
+git pull
+cd ivr-service
+npm ci --omit=dev
+# והפעלה מחדש של התהליך - לדוגמה:
+#   systemctl restart rosh-berosh-ivr
+#   pm2 restart rosh-berosh-ivr
+```
+
+### עדכון בשירות מנוהל (Render / Railway / Fly.io וכדומה)
+
+ברוב השירותים האלה יש חיבור ל-GitHub שמפעיל פריסה אוטומטית בכל דחיפה ל-`main`.
+אם החיבור קיים, מספיק למזג ל-`main` והשירות יתעדכן לבד. אם לא, יש ללחוץ
+`Manual Deploy` / `Redeploy` בממשק של הספק. חשוב שהגדרת ה-Root Directory של
+השירות תהיה `ivr-service`, כי הריפו מכיל גם את האתר.
+
+### פריסה עם Docker
+
+בתיקייה יש `Dockerfile` מוכן. הקשר הבנייה (build context) הוא התיקייה הזו:
+
+```bash
+cd ivr-service
+docker build -t rosh-berosh-ivr .
+docker run -p 3000:3000 \
+  -e SITE_API_BASE_URL=https://rosh-berosh.example.com \
+  -e IVR_SECRET=... \
+  rosh-berosh-ivr
+```
+
+### בדיקה שהעדכון תפס
+
+לשירות יש נתיב בריאות שלא דורש שום פרמטר:
+
+```bash
+curl https://ivr.example.com/healthz   # אמור להחזיר: ok
+```
+
+כדי לוודא שהקוד עצמו התעדכן ולא רק שהתהליך חי, אפשר לדמות שיחה עם `curl`
+לפי הדוגמאות שבסוף הקובץ הזה, ולבדוק שהתשובה מכילה את ההתנהגות החדשה.
+
 ## משתני סביבה
 
 - `SITE_API_BASE_URL` - כתובת הבסיס של אתר הסקרים "ראש בראש" (בלי סלאש בסוף),
   לדוגמה `https://rosh-berosh.example.com`. השירות קורא משם את
   `GET /api/catalog` ושולח את ההצבעה אל `POST /api/ballots` עם
   `channel: "phone"`.
+- `IVR_SECRET` - סוד משותף שנשלח בכותרת `x-ivr-secret` בכל פנייה לאתר, וזהה
+  לערך של `IVR_SECRET` המוגדר ב-Cloudflare Worker. בלעדיו האתר דוחה הצבעות
+  טלפוניות, והשירות עוצר מיד בהפעלה. **חובה.**
 - `PORT` - פורט מקומי (ברוב שירותי האחסון מוגדר אוטומטית).
 
 כדי שקובצי הקריינות שמועלים באתר יועברו אוטומטית גם למערכת הטלפונית, יש להוסיף
