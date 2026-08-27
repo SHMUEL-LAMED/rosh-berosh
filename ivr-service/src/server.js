@@ -57,15 +57,25 @@ const KINDS_MISSING_DIGIT = new Set(["song"]);
 
 async function chooseOne(call, messages, items, label, kind, prompts) {
   const full = [...messages];
-  items.forEach((item, index) => {
-    const recorded = prompts.get(`${kind}:${item.id}`);
-    if (recorded?.yemotPath) {
-      full.push(file(recorded.yemotPath));
-      if (KINDS_MISSING_DIGIT.has(kind)) full.push(text("הקישו"), number(index + 1));
-    } else {
-      full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(index + 1));
-    }
-  });
+  const continuousAlbumMenu = kind === "album" ? prompts.get("system:albums_menu") : null;
+  if (continuousAlbumMenu?.yemotPath) {
+    // One recording contains the complete album list and all keypad numbers.
+    // It is replayed for every requested album so callers can choose several
+    // albums without having to remember the numbers from the first selection.
+    full.push(file(continuousAlbumMenu.yemotPath));
+  } else {
+    // Keep the previous per-item recordings and automatic speech as a safe
+    // fallback until the administrator uploads the continuous recording.
+    items.forEach((item, index) => {
+      const recorded = prompts.get(`${kind}:${item.id}`);
+      if (recorded?.yemotPath) {
+        full.push(file(recorded.yemotPath));
+        if (KINDS_MISSING_DIGIT.has(kind)) full.push(text("הקישו"), number(index + 1));
+      } else {
+        full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(index + 1));
+      }
+    });
+  }
   const answer = await call.read(full, "tap", { min_digits: 1, max_digits: String(items.length).length, digits_allowed: items.map((_, index) => index + 1), typing_playback_mode: "No" });
   return items[Number(answer) - 1];
 }
