@@ -229,13 +229,14 @@ router.get("/recordings", async (call) => {
 
   let lead = [text("ברוכים הבאים לקו הקלטת הקריינויות")];
   while (true) {
-    const section = await adminChoice(call, "בחרו את סוג הקריינות", [
+    const menuIntro = [...lead.map((message) => message.data), "בחרו את סוג הקריינות"].join(" ");
+    const section = await adminChoice(call, menuIntro, [
       { digit: 1, label: "להודעות המערכת" },
       { digit: 2, label: "לתפריט האלבומים המלא" },
       { digit: 3, label: "לקריינויות השירים לפי אלבום" },
       { digit: 4, label: "לשמות הזמרים" },
       { digit: 9, label: "לסיום" },
-    ].map((item, index) => index === 0 ? { ...item, label: `${lead.map((message) => message.data).join(" ")} ${item.label}` } : item));
+    ]);
     lead = [];
     if (!section || section.digit === 9) {
       call.id_list_message([text("להתראות")], { prependToNextAction: true });
