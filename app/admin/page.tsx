@@ -17,7 +17,7 @@ type Readiness = { ready: boolean; warnings: string[]; counts: { albums: number;
 type PollArchive = { key: string; name: string; createdAt: number; votes: number; albums: number; songs: number; artists: number };
 type Survey = { id: string; name: string; active: number; createdAt: number; votingOpen: number; albums: number; songs: number; artists: number; votes: number };
 type SuspiciousVote = { fingerprint: string; count: number; voters: string[] };
-type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
+type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
 type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "managers" | "results" | "archives" | "voters";
 type Voter = { id: string; voterKey: string; channel: string; fingerprint?: string; createdAt: string; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
@@ -156,11 +156,36 @@ export default function AdminPage() {
 
 function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab: Tab): void }) { return <><div className="dashboard-grid"><button onClick={() => onNavigate("surveys")}><b>{data?.surveys.length ?? 0}</b><span>סקרים</span><small>{data?.activeSurvey ? `פעיל: ${data.activeSurvey.name}` : "בחירה והפעלה"}</small></button><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>{data?.suspicious && data.suspicious.length > 0 && <AdminSection title="הצבעות חשודות"><p className="panel-help">הצבעות שבוצעו מאותו דפדפן/מחשב עם חשבונות שונים. זה לא בהכרח הונאה — יכול להיות מחשב משותף.</p><div className="suspicious-list">{data.suspicious.map((item) => <div key={item.fingerprint} className="suspicious-row"><span className="suspicious-count">{item.count} הצבעות</span><span className="suspicious-fp">{item.fingerprint.slice(0, 12)}…</span><div className="suspicious-voters">{item.voters.map((v) => <small key={v}>{v}</small>)}</div></div>)}</div></AdminSection>}</>; }
 
+function RecorderAccessPanel({ recorders, onSaved, onMessage }: { recorders: string[]; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
+  const add = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget, phone = String(new FormData(form).get("phone") || "").trim();
+    const response = await fetch("/api/admin/ivr-recorders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ phone }) });
+    const result = await response.json();
+    if (!response.ok) return onMessage(result.error || "הוספת המספר נכשלה.");
+    form.reset(); onMessage("המספר אושר לכניסה לקו ההקלטות."); await onSaved();
+  };
+  const remove = async (phone: string) => {
+    if (!confirm(`לבטל את הגישה לקו ההקלטות עבור ${phone}?`)) return;
+    const response = await fetch("/api/admin/ivr-recorders", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ phone }) });
+    const result = await response.json();
+    if (!response.ok) return onMessage(result.error || "הסרת המספר נכשלה.");
+    onMessage("הגישה של המספר לקו ההקלטות בוטלה."); await onSaved();
+  };
+  return <div className="recorder-access">
+    <h3 className="prompt-heading">מספרים מורשים לקו ההקלטות</h3>
+    <p className="panel-help">רק מספרים שמופיעים כאן יוכלו להיכנס לקו 0772267078. הזיהוי אוטומטי לפי מספר המתקשר ואין צורך בקוד.</p>
+    <form className="archive-form" onSubmit={add}><input name="phone" type="tel" inputMode="tel" placeholder="לדוגמה 0501234567" required /><button>אישור מספר</button></form>
+    <div className="admin-list manager-list">{recorders.length ? recorders.map((phone) => <article key={phone}><div><i>☎</i><span><b>{phone}</b><small>מורשה להקלטת קריינויות</small></span></div><button type="button" className="danger" onClick={() => remove(phone)}>ביטול גישה</button></article>) : <p className="panel-help">עדיין לא אושר אף מספר.</p>}</div>
+  </div>;
+}
+
 function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const promptFor = (key: string) => data.ivrPrompts?.find((prompt) => prompt.key === key);
   const rows = (items: { key: string; label: string }[]) => <div className="prompt-list">{items.map((item) => <PromptRow key={item.key} item={item} prompt={promptFor(item.key)} ttsAvailable={data.ttsAvailable} onSaved={onSaved} onMessage={onMessage} />)}</div>;
   return <AdminSection title="קריינות הקו הטלפוני">
     <div className={`connection-banner ${data.yemotConnected ? "connected" : "disconnected"}`}><b>{data.yemotConnected ? "החיבור לימות המשיח מוגדר" : "החיבור לימות המשיח עדיין לא מוגדר"}</b><span>{data.yemotConnected ? "קבצים חדשים יישלחו גם לקו." : "הקבצים נשמרים באתר בלבד עד להוספת YEMOT_TOKEN בסביבת Cloudflare."}</span></div>
+    <RecorderAccessPanel recorders={data.ivrRecorders || []} onSaved={onSaved} onMessage={onMessage} />
     <p className="panel-help">בכל שורה אפשר להעלות הקלטה משלכם. אם אין הקלטה פעילה, הקו משתמש בהקראה אוטומטית. התפריט הראשי נשאר קצר: 1 אלבומים, 2 שירים מתוך האלבומים שנבחרו, 3 זמרים.</p>
     <h3 className="prompt-heading">תפריט האלבומים בהקלטה אחת</h3>
     <p className="panel-help">הקליטו את כל האלבומים הפעילים ברצף לפי הסדר שמופיע בניהול, כולל מספר ההקשה של כל אלבום. לדוגמה: „לאלבום פלוני הקישו 1, לאלבום אלמוני הקישו 2”. אחרי שינוי סדר האלבומים יש להחליף גם את ההקלטה.</p>
