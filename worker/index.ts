@@ -4,7 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import { adminApi } from "./admin";
 import { ensureRuntimeSchema } from "./schema";
-import { readIvrPrompts, saveIvrPrompts } from "./ivr-prompts";
+import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -22,6 +22,13 @@ type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; alb
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
 const placeholders = (count: number) => Array(count).fill("?").join(",");
+
+function normalizePhone(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (digits.startsWith("972")) return `0${digits.slice(3)}`;
+  if (/^5\d{8}$/.test(digits)) return `0${digits}`;
+  return digits;
+}
 
 function verifyIvrSecret(request: Request, env: Env): boolean {
   if (!env.IVR_SECRET) return false;
@@ -206,22 +213,38 @@ const worker = {
     if (url.pathname === "/api/auth/logout" && request.method === "POST") { const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
     if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
     if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
+    if (url.pathname === "/api/ivr/recorders/check" && request.method === "GET") {
+      if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+      const phone = normalizePhone(url.searchParams.get("phone") || "");
+      const recorders = await readIvrRecorders(env);
+      return json({ allowed: !!phone && recorders.includes(phone) });
+    }
     if (url.pathname === "/api/ivr/prompt" && request.method === "POST") {
       if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-      const body = await request.json<{ key?: string; label?: string; yemotPath?: string }>();
-      const key = body.key?.trim() || "", label = body.label?.trim() || "", yemotPath = body.yemotPath?.trim() || "";
-      if (!/^[a-z0-9:_-]+$/i.test(key) || !label || label.length > 300 || !/^\/(?:[a-z0-9]+\/)*[a-z0-9]+$/i.test(yemotPath)) {
+      const form = await request.formData();
+      const file = form.get("file"), key = String(form.get("key") || "").trim(), label = String(form.get("label") || "").trim();
+      if (!(file instanceof File) || !/^[a-z0-9:_-]+$/i.test(key) || !label || label.length > 300) {
         return json({ error: "פרטי הקריינות אינם תקינים." }, 400);
       }
+      if (!file.type.startsWith("audio/") && !/\.(wav|mp3|m4a|ogg)$/i.test(file.name)) return json({ error: "יש לשלוח קובץ שמע." }, 415);
+      if (file.size > 25 * 1024 * 1024) return json({ error: "קובץ הקריינות גדול מ־25MB." }, 413);
+      const sync = await syncPromptToYemot(env, key, file);
+      if (!sync.path) return json({ error: sync.warning || "העברת הקריינות לקו ההצבעה נכשלה." }, 502);
+      const mediaKey = `ivr-prompts/${key.replace(/[^a-z0-9_-]+/gi, "-")}-${crypto.randomUUID()}-phone.wav`;
+      await env.MEDIA.put(mediaKey, file.stream(), {
+        httpMetadata: { contentType: file.type || "audio/wav", cacheControl: "public, max-age=31536000, immutable" },
+        customMetadata: { originalName: file.name, promptKey: key, source: "phone" },
+      });
       const prompts = await readIvrPrompts(env);
       const previous = prompts.find((item) => item.key === key);
       const next = prompts.filter((item) => item.key !== key);
-      next.push({ key, label, audioUrl: "", yemotPath, updatedAt: Date.now() });
+      const audioUrl = `/media/${mediaKey.split("/").map(encodeURIComponent).join("/")}`;
+      next.push({ key, label, audioUrl, yemotPath: sync.path, updatedAt: Date.now() });
       await saveIvrPrompts(env, next);
-      if (previous?.audioUrl.startsWith("/media/")) {
+      if (previous?.audioUrl.startsWith("/media/") && previous.audioUrl !== audioUrl) {
         await env.MEDIA.delete(decodeURIComponent(previous.audioUrl.slice(7)));
       }
-      return json({ ok: true, prompt: { key, label, yemotPath } });
+      return json({ ok: true, prompt: { key, label, audioUrl, yemotPath: sync.path } });
     }
     if (url.pathname === "/api/ballots/check" && request.method === "GET") {
       const isIvr = verifyIvrSecret(request, env);
