@@ -1,6 +1,6 @@
 import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
 import { ensureRuntimeSchema } from "./schema";
-import { readIvrPrompts, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
+import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, saveIvrRecorders, syncPromptToYemot } from "./ivr-prompts";
 
 type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -41,6 +41,12 @@ const text = (value: unknown) => String(value ?? "").trim();
 const number = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const flag = (value: unknown) => value === true || value === 1 || value === "1" || value === "true" || value === "on";
 const DEFAULT_SETTINGS = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
+const normalizePhone = (value: unknown) => {
+  const digits = text(value).replace(/\D/g, "");
+  if (digits.startsWith("972")) return `0${digits.slice(3)}`;
+  if (/^5\d{8}$/.test(digits)) return `0${digits}`;
+  return digits;
+};
 const mediaUrl = (key: string) => `/media/${key.split("/").map(encodeURIComponent).join("/")}`;
 const safeName = (name: string) => name.normalize("NFKD").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 110) || "file";
 const keyFromMediaUrl = (url?: string | null) => url?.startsWith("/media/") ? decodeURIComponent(url.slice(7)) : null;
@@ -390,14 +396,14 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
         env.DB.prepare("SELECT s.id,s.title,a.title AS albumTitle,COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id WHERE a.survey_id=? GROUP BY s.id ORDER BY votes DESC,s.title").bind(surveyId),
         env.DB.prepare("SELECT a.id,a.name,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.name").bind(surveyId),
       ]);
-      const [ivrPrompts, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
+      const [ivrPrompts, ivrRecorders, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readIvrRecorders(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
       const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
       let suspicious: { fingerprint: string; count: number; voters: string[] }[] = [];
       try {
         const dupFp = await env.DB.prepare("SELECT fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(voter_key, ', ') AS voters FROM ballots WHERE survey_id=? AND fingerprint IS NOT NULL AND fingerprint != '' GROUP BY fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string }>();
         suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", ") }));
       } catch { /* fingerprint column may not exist yet */ }
-      return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
+      return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, ivrRecorders, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
     } catch (error) {
       console.error("overview error", error);
       return json({ error: `שגיאה בטעינת הנתונים: ${error instanceof Error ? error.message : String(error)}` }, 500);
@@ -484,6 +490,25 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     if (protectedEmails.has(email)) return json({ error: "זהו חשבון מנהל ראשי ואי אפשר להסירו." }, 400);
     const managers = (await readAdminEmails(env)).filter((item) => item !== email);
     return json({ ok: true, managers: await saveAdminEmails(env, managers) });
+  }
+
+  if (url.pathname === "/api/admin/ivr-recorders") {
+    if (request.method === "POST") {
+      const body = await request.json<{ phone?: string }>();
+      const phone = normalizePhone(body.phone);
+      if (!/^0\d{8,9}$/.test(phone)) return json({ error: "מספר הטלפון אינו תקין." }, 400);
+      const recorders = await readIvrRecorders(env);
+      if (!recorders.includes(phone)) recorders.push(phone);
+      await saveIvrRecorders(env, recorders);
+      return json({ ok: true, recorders: [...new Set(recorders)].sort() });
+    }
+    if (request.method === "DELETE") {
+      const body = await request.json<{ phone?: string }>();
+      const phone = normalizePhone(body.phone);
+      const recorders = (await readIvrRecorders(env)).filter((item) => item !== phone);
+      await saveIvrRecorders(env, recorders);
+      return json({ ok: true, recorders });
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/ivr-prompt") {
