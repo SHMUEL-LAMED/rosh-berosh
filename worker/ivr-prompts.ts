@@ -27,6 +27,25 @@ export const SYSTEM_PROMPTS = [
   ["system:success", "ההצבעה נקלטה בהצלחה"],
 ] as const;
 
+const RECORDERS_KEY = "ivr-prompts/recorders.json";
+
+export async function readIvrRecorders(env: Pick<PromptEnv, "MEDIA">): Promise<string[]> {
+  const object = await env.MEDIA.get(RECORDERS_KEY);
+  if (!object) return [];
+  try {
+    const value = await object.json<unknown>();
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveIvrRecorders(env: Pick<PromptEnv, "MEDIA">, recorders: string[]): Promise<void> {
+  await env.MEDIA.put(RECORDERS_KEY, JSON.stringify([...new Set(recorders)].sort()), {
+    httpMetadata: { contentType: "application/json", cacheControl: "no-store" },
+  });
+}
+
 export async function readIvrPrompts(env: Pick<PromptEnv, "MEDIA">): Promise<IvrPrompt[]> {
   const object = await env.MEDIA.get(CONFIG_KEY);
   if (!object) return [];
