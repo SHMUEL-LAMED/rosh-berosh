@@ -94,7 +94,7 @@ async function catalog(env: Env): Promise<Response> {
       return album;
     });
     const ivrPrompts = await readIvrPrompts(env);
-    return json({ albums: albumsWithCovers, songs: songs.results, artists: artists.results, rules, ivrPrompts });
+    return json({ surveyId, albums: albumsWithCovers, songs: songs.results, artists: artists.results, rules, ivrPrompts });
   } catch (error) {
     console.error("catalog error", error);
     return json({ error: "לא ניתן לטעון את רשימת המצעד." }, 500);
