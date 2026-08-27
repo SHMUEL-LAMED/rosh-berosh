@@ -4,7 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import { adminApi } from "./admin";
 import { ensureRuntimeSchema } from "./schema";
-import { readIvrPrompts } from "./ivr-prompts";
+import { readIvrPrompts, saveIvrPrompts } from "./ivr-prompts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -206,6 +206,23 @@ const worker = {
     if (url.pathname === "/api/auth/logout" && request.method === "POST") { const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
     if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
     if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
+    if (url.pathname === "/api/ivr/prompt" && request.method === "POST") {
+      if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+      const body = await request.json<{ key?: string; label?: string; yemotPath?: string }>();
+      const key = body.key?.trim() || "", label = body.label?.trim() || "", yemotPath = body.yemotPath?.trim() || "";
+      if (!/^[a-z0-9:_-]+$/i.test(key) || !label || label.length > 300 || !/^\/[a-z0-9]+$/i.test(yemotPath)) {
+        return json({ error: "פרטי הקריינות אינם תקינים." }, 400);
+      }
+      const prompts = await readIvrPrompts(env);
+      const previous = prompts.find((item) => item.key === key);
+      const next = prompts.filter((item) => item.key !== key);
+      next.push({ key, label, audioUrl: "", yemotPath, updatedAt: Date.now() });
+      await saveIvrPrompts(env, next);
+      if (previous?.audioUrl.startsWith("/media/")) {
+        await env.MEDIA.delete(decodeURIComponent(previous.audioUrl.slice(7)));
+      }
+      return json({ ok: true, prompt: { key, label, yemotPath } });
+    }
     if (url.pathname === "/api/ballots/check" && request.method === "GET") {
       const isIvr = verifyIvrSecret(request, env);
       if (!isIvr) {
