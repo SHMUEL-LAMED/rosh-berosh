@@ -129,7 +129,7 @@ async function clearCurrentPoll(env: AdminEnv, surveyId?: string) {
   ]);
 }
 
-async function pollReadiness(env: AdminEnv, surveyId?: string) {
+async function pollReadiness(env: AdminEnv, surveyId?: string, settingsOverride?: Record<string, unknown>) {
   const survey = surveyId ?? await activeSurveyId(env);
   const [albums, songs, artists, settingsResult] = await env.DB.batch([
     env.DB.prepare("SELECT id,title,cover_url AS coverUrl FROM albums WHERE active=1 AND survey_id=?").bind(survey),
@@ -137,15 +137,15 @@ async function pollReadiness(env: AdminEnv, surveyId?: string) {
     env.DB.prepare("SELECT COUNT(*) AS total FROM artists WHERE active=1 AND survey_id=?").bind(survey),
     env.DB.prepare("SELECT * FROM poll_settings WHERE id=?").bind(survey),
   ]);
-  const settings = settingsResult.results[0] || {};
+  const settings = settingsOverride || settingsResult.results[0] || {};
   const songMap = new Map(songs.results.map((row) => [String(row.albumId), Number(row.total || 0)]));
-  const requiredSongs = Number(settings.songs_enabled) ? Number(settings.songs_max || 1) : 0;
+  const requiredSongs = Number(settings.songs_enabled) ? Number(settings.songs_min || 1) : 0;
   const missingSongs = albums.results.filter((album) => (songMap.get(String(album.id)) || 0) < requiredSongs).map((album) => String(album.title));
   const artistCount = Number(artists.results[0]?.total || 0);
   const warnings: string[] = [];
-  if (Number(settings.albums_enabled) && albums.results.length < Number(settings.albums_max || 1)) warnings.push(`צריך לפחות ${settings.albums_max} אלבומים פעילים`);
-  if (Number(settings.songs_enabled) && missingSongs.length) warnings.push(`${missingSongs.length} אלבומים בלי מספיק שירים לבחירה`);
-  if (Number(settings.artists_enabled) && artistCount < Number(settings.artists_max || 1)) warnings.push(`צריך לפחות ${settings.artists_max} זמרים פעילים`);
+  if (Number(settings.albums_enabled) && albums.results.length < Number(settings.albums_min || 1)) warnings.push(`צריך לפחות ${settings.albums_min} אלבומים פעילים`);
+  if (Number(settings.songs_enabled) && missingSongs.length) warnings.push(`${missingSongs.length} אלבומים בלי לפחות ${settings.songs_min} שירים פעילים`);
+  if (Number(settings.artists_enabled) && artistCount < Number(settings.artists_min || 1)) warnings.push(`צריך לפחות ${settings.artists_min} זמרים פעילים`);
   return { ready: warnings.length === 0, warnings, counts: { albums: albums.results.length, songs: songs.results.reduce((sum, row) => sum + Number(row.total || 0), 0), artists: artistCount, missingCovers: albums.results.filter((album) => !album.coverUrl).length, missingSongs: missingSongs.length } };
 }
 
@@ -564,14 +564,28 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       ["songs", number(body.songsMin, 1), number(body.songsMax, 1)],
       ["artists", number(body.artistsMin, 1), number(body.artistsMax, 3)],
     ] as const;
+    const albumsEnabled = flag(body.albumsEnabled);
+    const songsEnabled = flag(body.songsEnabled);
+    const artistsEnabled = flag(body.artistsEnabled);
+    const votingOpen = flag(body.votingOpen);
     if (pairs.some(([, min, max]) => min < 0 || max < min || max > 50)) return json({ error: "טווחי הבחירה אינם תקינים." }, 400);
-    if (flag(body.songsEnabled) && !flag(body.albumsEnabled)) return json({ error: "אי אפשר לבחור שירים בלי לבחור אלבומים." }, 400);
-    if (flag(body.votingOpen)) {
-      const readiness = await pollReadiness(env, surveyId);
+    if (!albumsEnabled && !songsEnabled && !artistsEnabled) return json({ error: "צריך להפעיל לפחות אחד משלבי ההצבעה." }, 400);
+    if (songsEnabled && !albumsEnabled) return json({ error: "אי אפשר לבחור שירים בלי לבחור אלבומים." }, 400);
+    if ((albumsEnabled && pairs[0][1] < 1) || (songsEnabled && pairs[1][1] < 1) || (artistsEnabled && pairs[2][1] < 1)) {
+      return json({ error: "בשלב פעיל המינימום חייב להיות לפחות 1." }, 400);
+    }
+    const nextSettings = {
+      albums_enabled: albumsEnabled ? 1 : 0, albums_min: pairs[0][1], albums_max: pairs[0][2],
+      songs_enabled: songsEnabled ? 1 : 0, songs_min: pairs[1][1], songs_max: pairs[1][2],
+      artists_enabled: artistsEnabled ? 1 : 0, artists_min: pairs[2][1], artists_max: pairs[2][2],
+    };
+    if (votingOpen) {
+      // Validate the values submitted now, not the previously saved settings.
+      const readiness = await pollReadiness(env, surveyId, nextSettings);
       if (!readiness.ready) return json({ error: `אי אפשר לפרסם עדיין: ${readiness.warnings.join(", ")}.`, readiness }, 400);
     }
     await env.DB.prepare(`UPDATE poll_settings SET voting_open=?, albums_enabled=?, albums_min=?, albums_max=?, songs_enabled=?, songs_min=?, songs_max=?, artists_enabled=?, artists_min=?, artists_max=? WHERE id=?`)
-      .bind(flag(body.votingOpen) ? 1 : 0, flag(body.albumsEnabled) ? 1 : 0, pairs[0][1], pairs[0][2], flag(body.songsEnabled) ? 1 : 0, pairs[1][1], pairs[1][2], flag(body.artistsEnabled) ? 1 : 0, pairs[2][1], pairs[2][2], surveyId).run();
+      .bind(votingOpen ? 1 : 0, nextSettings.albums_enabled, nextSettings.albums_min, nextSettings.albums_max, nextSettings.songs_enabled, nextSettings.songs_min, nextSettings.songs_max, nextSettings.artists_enabled, nextSettings.artists_min, nextSettings.artists_max, surveyId).run();
     return json({ ok: true });
   }
 
