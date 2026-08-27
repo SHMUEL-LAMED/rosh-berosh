@@ -13,6 +13,7 @@ const CONFIG_KEY = "ivr-prompts/config.json";
 export const SYSTEM_PROMPTS = [
   ["system:main_menu", "תפריט ראשי: אלבומים 1, שירים 2, זמרים 3"],
   ["system:albums_intro", "פתיח לבחירת אלבומים"],
+  ["system:albums_menu", "תפריט האלבומים המלא ברצף, כולל מספרי ההקשה"],
   ["system:songs_intro", "פתיח לבחירת שירים"],
   ["system:artists_intro", "פתיח לבחירת זמרים"],
   ["system:need_albums", "יש לבחור קודם אלבומים"],
