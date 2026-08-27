@@ -210,7 +210,7 @@ const worker = {
       if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
       const body = await request.json<{ key?: string; label?: string; yemotPath?: string }>();
       const key = body.key?.trim() || "", label = body.label?.trim() || "", yemotPath = body.yemotPath?.trim() || "";
-      if (!/^[a-z0-9:_-]+$/i.test(key) || !label || label.length > 300 || !/^\/[a-z0-9]+$/i.test(yemotPath)) {
+      if (!/^[a-z0-9:_-]+$/i.test(key) || !label || label.length > 300 || !/^\/(?:[a-z0-9]+\/)*[a-z0-9]+$/i.test(yemotPath)) {
         return json({ error: "פרטי הקריינות אינם תקינים." }, 400);
       }
       const prompts = await readIvrPrompts(env);
