@@ -25,6 +25,7 @@ const SYSTEM_PROMPTS = [
   ["system:main_menu", "תפריט ראשי — אלבומים 1, שירים 2, זמרים 3"], ["system:albums_intro", "פתיח לבחירת אלבומים"],
   ["system:songs_intro", "פתיח לבחירת שירים"], ["system:artists_intro", "פתיח לבחירת זמרים"],
   ["system:need_albums", "יש לבחור קודם אלבומים"], ["system:section_saved", "הבחירה נשמרה וחוזרים לתפריט"],
+  ["system:already_selected", "האפשרות כבר נבחרה"], ["system:finish_selection", "לסיום לאחר הכמות המינימלית הקישו 0"],
   ["system:already_voted", "כבר הצבעתם"], ["system:voting_closed", "ההצבעה עדיין אינה פתוחה"],
   ["system:not_ready", "רשימות המצעד עדיין אינן מוכנות"], ["system:error", "אירעה שגיאה"],
   ["system:success", "ההצבעה נקלטה בהצלחה"],
@@ -162,11 +163,21 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
     <div className={`connection-banner ${data.yemotConnected ? "connected" : "disconnected"}`}><b>{data.yemotConnected ? "החיבור לימות המשיח מוגדר" : "החיבור לימות המשיח עדיין לא מוגדר"}</b><span>{data.yemotConnected ? "קבצים חדשים יישלחו גם לקו." : "הקבצים נשמרים באתר בלבד עד להוספת YEMOT_TOKEN בסביבת Cloudflare."}</span></div>
     <p className="panel-help">בכל שורה אפשר להעלות הקלטה משלכם. אם אין הקלטה פעילה, הקו משתמש בהקראה אוטומטית. התפריט הראשי נשאר קצר: 1 אלבומים, 2 שירים מתוך האלבומים שנבחרו, 3 זמרים.</p>
     <h3 className="prompt-heading">תפריט האלבומים בהקלטה אחת</h3>
-    <p className="panel-help">הקליטו את כל האלבומים ברצף לפי הסדר שמופיע בניהול, כולל מספר ההקשה של כל אלבום. לדוגמה: „לאלבום פלוני הקישו 1, לאלבום אלמוני הקישו 2”. אחרי שינוי סדר האלבומים יש להחליף גם את ההקלטה.</p>
-    {rows([{ key: "system:albums_menu", label: "כל האלבומים ומספרי ההקשה — קובץ אחד רציף" }])}
+    <p className="panel-help">הקליטו את כל האלבומים הפעילים ברצף לפי הסדר שמופיע בניהול, כולל מספר ההקשה של כל אלבום. לדוגמה: „לאלבום פלוני הקישו 1, לאלבום אלמוני הקישו 2”. אחרי שינוי סדר האלבומים יש להחליף גם את ההקלטה.</p>
+    {data.activeSurvey ? rows([{ key: `albums-menu:${data.activeSurvey.id}`, label: `כל האלבומים ומספרי ההקשה של „${data.activeSurvey.name}” — קובץ אחד רציף` }]) : <p className="panel-help">יש להפעיל סקר לפני העלאת תפריט האלבומים.</p>}
+    <h3 className="prompt-heading">תפריטי השירים לפי אלבומים</h3>
+    <p className="panel-help">לכל אלבום מעלים קובץ אחד שמקריא את כל השירים הפעילים לפי הסדר, כולל מספר ההקשה. אחרי שינוי סדר השירים יש להחליף את ההקלטה של אותו אלבום.</p>
+    {data.albums.map((album) => {
+      const albumSongs = data.songs.filter((song) => song.albumId === album.id && song.active);
+      return <details className="prompt-group" key={album.id}><summary>{album.title} — {album.artistName} · {albumSongs.length} שירים פעילים</summary>
+        <ol className="prompt-song-order">{albumSongs.map((song, index) => <li key={song.id}><b>{index + 1}.</b> {song.title}</li>)}</ol>
+        {rows([
+          { key: `album-name:${album.id}`, label: `שם האלבום לפני בחירת השירים — ${album.title}` },
+          { key: `songs-menu:${album.id}`, label: `כל שירי „${album.title}” ומספרי ההקשה — קובץ אחד רציף` },
+        ])}
+      </details>;
+    })}
     <h3 className="prompt-heading">הודעות המערכת</h3>{rows(SYSTEM_PROMPTS.map(([key, label]) => ({ key, label })))}
-    <details className="prompt-group"><summary>שמות האלבומים (שלוחת שירים) — השם בלבד</summary>{rows(data.albums.map((album) => ({ key: `album-name:${album.id}`, label: `${album.title} — ${album.artistName}` })))}</details>
-    <details className="prompt-group"><summary>שמות השירים — השם בלבד, הקו מוסיף את מספר ההקשה</summary>{rows(data.songs.map((song) => ({ key: `song:${song.id}`, label: song.title })))}</details>
     <details className="prompt-group"><summary>שמות הזמרים — הקליטו גם את מספר ההקשה</summary>{rows(data.artists.map((artist) => ({ key: `artist:${artist.id}`, label: artist.name })))}</details>
   </AdminSection>;
 }
