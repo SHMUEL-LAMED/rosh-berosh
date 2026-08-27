@@ -20,6 +20,7 @@ export const SYSTEM_PROMPTS = [
   ["system:section_saved", "הבחירה נשמרה וחוזרים לתפריט"],
   ["system:already_voted", "כבר הצבעתם"],
   ["system:already_selected", "כבר הצבעתם לזה בחרו אפשרות אחרת"],
+  ["system:finish_selection", "סיום בחירה לאחר הכמות המינימלית"],
   ["system:voting_closed", "ההצבעה עדיין אינה פתוחה"],
   ["system:not_ready", "רשימות המצעד עדיין אינן מוכנות"],
   ["system:error", "אירעה שגיאה"],
