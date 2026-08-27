@@ -1,8 +1,11 @@
 const express = require("express");
+const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
 const IVR_SECRET = process.env.IVR_SECRET;
+const RECORDINGS_PIN = String(process.env.RECORDINGS_PIN || "").trim();
+const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().replace(/\/$/, "");
 const PORT = process.env.PORT || 3000;
 const POST_VOTE_TRANSFER = "0796077075";
 const REQUEST_TIMEOUT_MS = 8000;
@@ -112,6 +115,64 @@ async function chooseMany(call, intro, items, minimum, maximum, label, kind, pro
   return selected;
 }
 
+const RECORDABLE_SYSTEM_PROMPTS = [
+  { key: "system:main_menu", label: "התפריט הראשי" },
+  { key: "system:albums_intro", label: "פתיח לבחירת אלבומים" },
+  { key: "system:songs_intro", label: "פתיח לבחירת שירים" },
+  { key: "system:artists_intro", label: "פתיח לבחירת זמרים" },
+  { key: "system:need_albums", label: "יש לבחור קודם אלבומים" },
+  { key: "system:section_saved", label: "הבחירה נשמרה" },
+  { key: "system:already_voted", label: "כבר הצבעתם" },
+  { key: "system:already_selected", label: "האפשרות כבר נבחרה" },
+  { key: "system:finish_selection", label: "לסיום הבחירה הקישו אפס" },
+  { key: "system:welcome_back", label: "ברוכים השבים" },
+  { key: "system:voting_closed", label: "ההצבעה סגורה" },
+  { key: "system:not_ready", label: "הסקר עדיין אינו מוכן" },
+  { key: "system:error", label: "אירעה שגיאה" },
+  { key: "system:success", label: "ההצבעה נקלטה בהצלחה" },
+];
+
+function promptFileName(key) {
+  return `rb${createHash("sha256").update(key).digest("hex").slice(0, 20)}`;
+}
+
+async function adminChoice(call, intro, items) {
+  if (!items.length) return null;
+  const messages = [text(intro)];
+  items.forEach((item) => messages.push(text(item.label), text("הקישו"), number(item.digit)));
+  const maxDigits = Math.max(...items.map((item) => String(item.digit).length));
+  const answer = await call.read(messages, "tap", {
+    min_digits: 1,
+    max_digits: maxDigits,
+    digits_allowed: items.map((item) => item.digit),
+    typing_playback_mode: "No",
+  });
+  return items.find((item) => String(item.digit) === String(answer)) || null;
+}
+
+async function recordPromptByPhone(call, key, label) {
+  const fileName = promptFileName(key);
+  await call.read(
+    [text(`הקליטו כעת ${label} לסיום הקישו סולמית ולאחר מכן אשרו את ההקלטה`)],
+    "record",
+    {
+      path: RECORDINGS_FOLDER,
+      file_name: fileName,
+      no_confirm_menu: false,
+      save_on_hangup: false,
+      max_length: 900,
+    },
+  );
+  const yemotPath = `${RECORDINGS_FOLDER}/${fileName}`;
+  const { response, result } = await api("/api/ivr/prompt", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key, label, yemotPath }),
+  });
+  if (!response.ok || !result?.ok) throw new Error(result?.error || "prompt registration failed");
+  return yemotPath;
+}
+
 const router = YemotRouter({
   printLog: true,
   defaults: { removeInvalidChars: true, read: { removeInvalidChars: true }, id_list_message: { removeInvalidChars: true } },
@@ -141,6 +202,94 @@ async function clearProgress(voterPhone) {
     await api(`/api/ballots/progress?voterKey=${encodeURIComponent(voterPhone)}`, { method: "DELETE" });
   } catch {}
 }
+
+router.get("/recordings", async (call) => {
+  if (!/^\d{4,10}$/.test(RECORDINGS_PIN) || !/^\/(?:\d+\/)*\d+$/.test(RECORDINGS_FOLDER)) {
+    return call.id_list_message([text("קו ההקלטות עדיין אינו מוגדר")]);
+  }
+
+  let authenticated = false;
+  let loginLead = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const entered = await call.read([...loginLead, text("נא להקיש קוד מנהל")], "tap", {
+      min_digits: RECORDINGS_PIN.length,
+      max_digits: RECORDINGS_PIN.length,
+      typing_playback_mode: "No",
+    });
+    if (String(entered) === RECORDINGS_PIN) {
+      authenticated = true;
+      break;
+    }
+    loginLead = [text("קוד שגוי")];
+  }
+  if (!authenticated) {
+    call.id_list_message([text("יותר מדי ניסיונות שגויים")], { prependToNextAction: true });
+    return call.hangup();
+  }
+
+  let lead = [text("ברוכים הבאים לקו הקלטת הקריינויות")];
+  while (true) {
+    const section = await adminChoice(call, "בחרו את סוג הקריינות", [
+      { digit: 1, label: "להודעות המערכת" },
+      { digit: 2, label: "לתפריט האלבומים המלא" },
+      { digit: 3, label: "לקריינויות השירים לפי אלבום" },
+      { digit: 4, label: "לשמות הזמרים" },
+      { digit: 9, label: "לסיום" },
+    ].map((item, index) => index === 0 ? { ...item, label: `${lead.map((message) => message.data).join(" ")} ${item.label}` } : item));
+    lead = [];
+    if (!section || section.digit === 9) {
+      call.id_list_message([text("להתראות")], { prependToNextAction: true });
+      return call.hangup();
+    }
+
+    try {
+      const { response, result: catalog } = await api("/api/catalog");
+      if (!response.ok || !catalog?.surveyId) throw new Error("catalog unavailable");
+
+      let target = null;
+      if (section.digit === 1) {
+        target = await adminChoice(call, "בחרו הודעת מערכת להקלטה", [
+          ...RECORDABLE_SYSTEM_PROMPTS.map((item, index) => ({ ...item, digit: index + 1 })),
+          { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
+        ]);
+      } else if (section.digit === 2) {
+        target = {
+          key: `albums-menu:${catalog.surveyId}`,
+          label: "כל האלבומים הפעילים ומספרי ההקשה ברצף",
+        };
+      } else if (section.digit === 3) {
+        const album = await adminChoice(call, "בחרו אלבום", [
+          ...(catalog.albums || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.title} מאת ${item.artistName}` })),
+          { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
+        ]);
+        if (album?.id) {
+          const songTarget = await adminChoice(call, `בחרו קריינות עבור האלבום ${album.title}`, [
+            { digit: 1, key: `album-name:${album.id}`, label: "הקלטת שם האלבום" },
+            { digit: 2, key: `songs-menu:${album.id}`, label: "הקלטת כל השירים ומספרי ההקשה ברצף" },
+            { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
+          ]);
+          if (songTarget?.key) target = { key: songTarget.key, label: `${songTarget.label} של ${album.title}` };
+        }
+      } else if (section.digit === 4) {
+        const artist = await adminChoice(call, "בחרו זמר", [
+          ...(catalog.artists || []).map((item, index) => ({ ...item, digit: index + 1, label: item.name })),
+          { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
+        ]);
+        if (artist?.id) target = { key: `artist:${artist.id}`, label: `שם הזמר ${artist.name} כולל מספר ההקשה` };
+      }
+
+      if (!target?.key) {
+        lead = [text("חזרתם לתפריט הראשי")];
+        continue;
+      }
+      await recordPromptByPhone(call, target.key, target.label);
+      lead = [text("הקריינות נשמרה והיא פעילה בקו ההצבעה")];
+    } catch (error) {
+      console.error("recordings IVR error", error);
+      lead = [text("שמירת הקריינות נכשלה נא לנסות שוב")];
+    }
+  }
+});
 
 router.get("/", async (call) => {
   const { response, result: catalog } = await api("/api/catalog");
