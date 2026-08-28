@@ -5,6 +5,7 @@ import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verif
 import { adminApi } from "./admin";
 import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
+import { normalizePhone } from "./phone";
 
 interface Env {
   ASSETS: Fetcher;
@@ -22,13 +23,6 @@ type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; alb
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
 const placeholders = (count: number) => Array(count).fill("?").join(",");
-
-function normalizePhone(value: string): string {
-  const digits = value.replace(/\D/g, "");
-  if (digits.startsWith("972")) return `0${digits.slice(3)}`;
-  if (/^5\d{8}$/.test(digits)) return `0${digits}`;
-  return digits;
-}
 
 function verifyIvrSecret(request: Request, env: Env): boolean {
   if (!env.IVR_SECRET) return false;
@@ -115,7 +109,9 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   const rules = await readRules(env, surveyId);
   if (!rules.votingOpen) return json({ error: "ההצבעה סגורה כרגע." }, 403);
 
-  const voterKey = body.voterKey?.trim().toLowerCase();
+  const channel = body.channel === "phone" ? "phone" : "site";
+  const rawVoterKey = body.voterKey?.trim().toLowerCase() || "";
+  const voterKey = channel === "phone" ? normalizePhone(rawVoterKey) : rawVoterKey;
   const albumIds = unique(body.albumIds ?? []);
   const artistIds = unique(body.artistIds ?? []);
   const songMap = Object.fromEntries(Object.entries(body.songIdsByAlbum ?? {}).map(([albumId, value]) => [albumId, unique(Array.isArray(value) ? value : value ? [value] : [])]));
@@ -147,7 +143,7 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
 
   const ballotId = crypto.randomUUID();
   const statements = [
-    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,fingerprint) VALUES (?,?,?,?,?)").bind(ballotId, surveyId, voterKey, body.channel === "phone" ? "phone" : "site", body.fingerprint || null),
+    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,fingerprint) VALUES (?,?,?,?,?)").bind(ballotId, surveyId, voterKey, channel, body.fingerprint || null),
     ...albumIds.map((id) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(ballotId, id)),
     ...albumIds.flatMap((id) => (songMap[id] ?? []).map((songId) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(ballotId, id, songId))),
     ...artistIds.map((id) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(ballotId, id)),
@@ -163,8 +159,11 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
 }
 
 async function serveMedia(request: Request, env: Env, pathname: string): Promise<Response> {
-  const key = pathname.slice(7).split("/").map(decodeURIComponent).join("/");
-  const privateObject = key.startsWith("settings/") || key.startsWith("poll-archives/") || key.startsWith("ivr-progress/") || key === "ivr-prompts/config.json";
+  let key = "";
+  try { key = pathname.slice(7).split("/").map(decodeURIComponent).join("/"); } catch { return new Response("Not Found", { status: 404 }); }
+  const ivrPromptObject = key.startsWith("ivr-prompts/");
+  const ivrPromptAudio = ivrPromptObject && /\.(?:wav|mp3|m4a|ogg|aac|flac|webm)$/i.test(key);
+  const privateObject = key.startsWith("settings/") || key.startsWith("poll-archives/") || key.startsWith("ivr-progress/") || (ivrPromptObject && !ivrPromptAudio);
   if (!key || key.includes("..") || privateObject) return new Response("Not Found", { status: 404 });
   const rangeHeader = request.headers.get("range");
   const object = rangeHeader
@@ -173,6 +172,7 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
   if (!object) return new Response("Not Found", { status: 404 });
   const headers = new Headers();
   object.writeHttpMetadata(headers);
+  if (ivrPromptObject && !/^audio\//i.test(headers.get("content-type") || "")) return new Response("Not Found", { status: 404 });
   headers.set("etag", object.httpEtag);
   headers.set("cache-control", headers.get("cache-control") || "public, max-age=31536000, immutable");
   headers.set("x-content-type-options", "nosniff");
@@ -252,7 +252,8 @@ const worker = {
         const user = await readSession(request, env);
         if (!user) return json({ error: "אין הרשאה." }, 401);
       }
-      const voterKey = url.searchParams.get("voterKey")?.trim().toLowerCase();
+      const rawVoterKey = url.searchParams.get("voterKey")?.trim().toLowerCase() || "";
+      const voterKey = isIvr ? normalizePhone(rawVoterKey) : rawVoterKey;
       if (!voterKey) return json({ voted: false });
       const surveyId = await activeSurveyId(env);
       const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first();
@@ -260,7 +261,7 @@ const worker = {
     }
     if (url.pathname === "/api/ballots/progress" && verifyIvrSecret(request, env)) {
       const surveyId = await activeSurveyId(env);
-      const voterKey = url.searchParams.get("voterKey")?.trim().toLowerCase();
+      const voterKey = normalizePhone(url.searchParams.get("voterKey") || "");
       if (!voterKey) return json({ error: "חסר מזהה מצביע." }, 400);
       const progressKey = `ivr-progress/${surveyId}/${voterKey}.json`;
       if (request.method === "GET") {
