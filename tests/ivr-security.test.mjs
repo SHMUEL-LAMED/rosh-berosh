@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 import { normalizePhone as normalizeWorkerPhone } from "../worker/phone.js";
+import { ballotRateConfig, checkBallotRate } from "../worker/rate-limit.js";
 
 const require = createRequire(import.meta.url);
 const { normalizePhone: normalizeIvrPhone, phone } = require("../ivr-service/src/phone.js");
+const { menuPages, menuReadOptions, pagePromptKey } = require("../ivr-service/src/menu-input.js");
 
 const phoneCases = [
   ["0501234567", "0501234567"],
@@ -28,6 +30,130 @@ test("phone numbers are canonical in both the Worker and IVR service", () => {
 test("the IVR never falls back to a call id when caller id is missing", () => {
   assert.equal(phone({ callId: "shared-call-id" }), "");
   assert.equal(phone({ ApiPhone: "972501234567", callId: "ignored" }), "0501234567");
+});
+
+test("long IVR menus are split into immediate single-digit pages", () => {
+  assert.equal(menuReadOptions([0, 1, 9]).max_digits, 1);
+  assert.deepEqual(menuPages(Array.from({ length: 9 }, (_, index) => index + 1)).map((page) => page.length), [9]);
+  assert.deepEqual(menuPages(Array.from({ length: 18 }, (_, index) => index + 1)).map((page) => page.length), [8, 8, 2]);
+  assert.equal(pagePromptKey("albums-menu:survey", 1, 3), "albums-menu:survey:page:2");
+});
+
+test("ballot rate limiting is persisted through D1", async () => {
+  const buckets = new Map();
+  const db = {
+    prepare() {
+      return {
+        bind(bucket, resetAt, now) {
+          return {
+            async first() {
+              const current = buckets.get(bucket);
+              const next = !current || current.resetAt <= now
+                ? { count: 1, resetAt }
+                : { count: current.count + 1, resetAt: current.resetAt };
+              buckets.set(bucket, next);
+              return { count: next.count };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  for (let index = 0; index < ballotRateConfig.limit; index++) {
+    assert.equal(await checkBallotRate(db, "203.0.113.7", 1_000), true);
+  }
+  assert.equal(await checkBallotRate(db, "203.0.113.7", 1_000), false);
+  assert.equal(await checkBallotRate(db, "203.0.113.8", 1_000), true);
+  assert.equal(await checkBallotRate(db, "203.0.113.7", 1_000 + ballotRateConfig.window), true);
+});
+
+test("phone ballot flow canonicalizes the voter before the unique check", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("ballot-flow-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const voters = new Set();
+
+  const statement = (sql) => ({
+    bind() { return statement(sql); },
+    async first() {
+      if (sql.includes("PRAGMA table_info")) return null;
+      if (sql.includes("SELECT id FROM surveys")) return { id: "survey-1" };
+      if (sql.includes("SELECT voting_open AS votingOpen")) return {
+        votingOpen: 1,
+        albumsEnabled: 1, albumsMin: 1, albumsMax: 1,
+        songsEnabled: 1, songsMin: 1, songsMax: 1,
+        artistsEnabled: 1, artistsMin: 1, artistsMax: 1,
+      };
+      return null;
+    },
+    async all() {
+      if (sql.includes("PRAGMA table_info(songs)")) return { results: [{ name: "cover_url" }] };
+      if (sql.includes("PRAGMA table_info(ballots)")) return { results: [{ name: "fingerprint" }] };
+      if (sql.includes("COUNT(*) AS total FROM songs")) return { results: [{ albumId: "album-1", total: 1 }] };
+      if (sql.includes("SELECT id FROM albums")) return { results: [{ id: "album-1" }] };
+      if (sql.includes("SELECT id FROM artists")) return { results: [{ id: "artist-1" }] };
+      if (sql.includes("SELECT s.id")) return { results: [{ id: "song-1", albumId: "album-1" }] };
+      return { results: [] };
+    },
+  });
+
+  const env = {
+    IVR_SECRET: "test-secret",
+    MEDIA: { async get(key) { return key === "settings/admin-emails.json" ? { async json() { return []; } } : null; } },
+    DB: {
+      prepare(sql) { return statement(sql); },
+      async exec() {},
+      async batch(statements) {
+        const ballot = statements.find((item) => item && typeof item === "object" && "bind" in item);
+        void ballot;
+        const first = statements[0];
+        const voterKey = first?.bind ? undefined : undefined;
+        // The bound values live in the closure returned by statement; expose
+        // them through a tiny inspection hook only for the ballot insert.
+        const extract = first?._args;
+        void voterKey;
+        void extract;
+        return [];
+      },
+    },
+  };
+
+  // Wrap statement so batch can inspect the SQL and bound ballot voter.
+  env.DB.prepare = (sql) => {
+    const make = (args = []) => ({
+      _sql: sql,
+      _args: args,
+      bind(...nextArgs) { return make(nextArgs); },
+      async first() { return statement(sql).first(); },
+      async all() { return statement(sql).all(); },
+    });
+    return make();
+  };
+  env.DB.batch = async (statements) => {
+    const ballot = statements.find((item) => item._sql?.includes("INSERT INTO ballots"));
+    if (ballot) {
+      const voterKey = ballot._args[2];
+      if (voters.has(voterKey)) throw new Error("UNIQUE constraint failed: ballots.survey_id, ballots.voter_key");
+      voters.add(voterKey);
+    }
+    return [];
+  };
+
+  const submit = (voterKey) => worker.fetch(new Request("http://localhost/api/ballots", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ivr-secret": "test-secret" },
+    body: JSON.stringify({
+      channel: "phone", voterKey,
+      albumIds: ["album-1"],
+      songIdsByAlbum: { "album-1": ["song-1"] },
+      artistIds: ["artist-1"],
+    }),
+  }), env, { waitUntil() {}, passThroughOnException() {} });
+
+  assert.equal((await submit("972501234567")).status, 201);
+  assert.equal((await submit("0501234567")).status, 409);
+  assert.deepEqual([...voters], ["0501234567"]);
 });
 
 test("private IVR configuration is never served as public media", async () => {
