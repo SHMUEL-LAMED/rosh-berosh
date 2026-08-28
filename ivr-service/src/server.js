@@ -2,7 +2,7 @@ const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { phone } = require("./phone");
-const { continuousMenuInput, menuCode, menuCodeWidth, menuPages, menuReadOptions } = require("./menu-input");
+const { continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions } = require("./menu-input");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
@@ -139,25 +139,13 @@ async function adminChoice(call, intro, items) {
     return items.find((item) => String(item.digit) === String(answer)) || null;
   }
 
-  const pages = menuPages(choices);
-  let pageIndex = 0;
-  while (true) {
-    const page = pages[pageIndex];
-    const messages = [text(pageIndex === 0 ? intro : `המשך הרשימה עמוד ${pageIndex + 1} מתוך ${pages.length}`)];
-    page.forEach((item, index) => messages.push(text(item.label), text("הקישו"), number(index + 1)));
-    messages.push(text(pageIndex === pages.length - 1 ? "לחזרה לתחילת הרשימה הקישו 9" : "להמשך הקישו 9"));
-    if (back) messages.push(text(back.label), text("הקישו 0"));
-    const digits = page.map((_, index) => index + 1);
-    digits.push(9);
-    if (back) digits.push(0);
-    const answer = await call.read(messages, "tap", menuReadOptions(digits));
-    if (answer === "0" && back) return back;
-    if (answer === "9") {
-      pageIndex = (pageIndex + 1) % pages.length;
-      continue;
-    }
-    return page[Number(answer) - 1] || null;
-  }
+  const input = continuousMenuInput(choices.length, Boolean(back));
+  const messages = [text(intro)];
+  choices.forEach((item, index) => messages.push(text(item.label), text("הקישו"), number(menuCode(index, input.width))));
+  if (back) messages.push(text(back.label), text("הקישו"), number(input.finishCode));
+  const answer = await call.read(messages, "tap", input.read);
+  if (back && answer === input.finishCode) return back;
+  return choices[Number(answer) - 1] || null;
 }
 
 async function menuRecordingTarget(_call, baseKey, label, items) {
