@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { NoticeProvider } from "./notice";
 import { PlayerProvider } from "./player-context";
 
 const websiteJsonLd = {
@@ -64,7 +65,9 @@ export default function RootLayout({
     <html lang="he" dir="rtl">
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }} />
-        <PlayerProvider>{children}</PlayerProvider>
+        <NoticeProvider>
+          <PlayerProvider>{children}</PlayerProvider>
+        </NoticeProvider>
       </body>
     </html>
   );
