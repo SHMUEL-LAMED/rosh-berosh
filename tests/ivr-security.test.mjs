@@ -6,7 +6,7 @@ import { ballotRateConfig, checkBallotRate } from "../worker/rate-limit.js";
 
 const require = createRequire(import.meta.url);
 const { normalizePhone: normalizeIvrPhone, phone } = require("../ivr-service/src/phone.js");
-const { continuousMenuInput, menuCode, menuPages, menuReadOptions } = require("../ivr-service/src/menu-input.js");
+const { continuousMenuInput, menuCode, menuReadOptions } = require("../ivr-service/src/menu-input.js");
 
 const phoneCases = [
   ["0501234567", "0501234567"],
@@ -32,10 +32,8 @@ test("the IVR never falls back to a call id when caller id is missing", () => {
   assert.equal(phone({ ApiPhone: "972501234567", callId: "ignored" }), "0501234567");
 });
 
-test("continuous menus use fixed-width codes while admin menus keep single-digit pages", () => {
+test("all long IVR menus use fixed-width codes without pages", () => {
   assert.equal(menuReadOptions([0, 1, 9]).max_digits, 1);
-  assert.deepEqual(menuPages(Array.from({ length: 9 }, (_, index) => index + 1)).map((page) => page.length), [9]);
-  assert.deepEqual(menuPages(Array.from({ length: 18 }, (_, index) => index + 1)).map((page) => page.length), [8, 8, 2]);
   const fiftyItems = continuousMenuInput(50, true);
   assert.equal(fiftyItems.width, 2);
   assert.equal(fiftyItems.finishCode, "00");
@@ -45,6 +43,11 @@ test("continuous menus use fixed-width codes while admin menus keep single-digit
   assert.equal(fiftyItems.read.digits_allowed[1], "01");
   assert.equal(fiftyItems.read.digits_allowed.at(-1), "50");
   assert.equal(menuCode(9, 2), "10");
+  const systemPrompts = continuousMenuInput(15, true);
+  assert.equal(systemPrompts.finishCode, "00");
+  assert.deepEqual(systemPrompts.read.digits_allowed.slice(0, 3), ["00", "01", "02"]);
+  assert.equal(systemPrompts.read.digits_allowed.at(-1), "15");
+  assert.equal(systemPrompts.read.digits_allowed.includes("9"), false);
 });
 
 test("ballot rate limiting is persisted through D1", async () => {

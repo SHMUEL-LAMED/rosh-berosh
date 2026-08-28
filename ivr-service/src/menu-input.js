@@ -1,5 +1,3 @@
-const PAGE_SIZE = 8;
-
 function menuReadOptions(digits) {
   return {
     min_digits: 1,
@@ -34,11 +32,4 @@ function continuousMenuInput(itemCount, allowFinish = false) {
   };
 }
 
-function menuPages(items) {
-  if (items.length <= 9) return items.length ? [items] : [];
-  const pages = [];
-  for (let index = 0; index < items.length; index += PAGE_SIZE) pages.push(items.slice(index, index + PAGE_SIZE));
-  return pages;
-}
-
-module.exports = { PAGE_SIZE, continuousMenuInput, menuCode, menuCodeWidth, menuPages, menuReadOptions };
+module.exports = { continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions };
