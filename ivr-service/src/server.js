@@ -1,6 +1,7 @@
 const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
+const { phone } = require("./phone");
 
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
 const IVR_SECRET = process.env.IVR_SECRET;
@@ -39,7 +40,6 @@ async function api(path, options = {}) {
   throw lastError;
 }
 
-function phone(call) { return call.phone || call.ApiPhone || call.values?.ApiPhone || call.values?.Phone || call.callId || "unknown"; }
 function text(data) { return { type: "text", data }; }
 function number(data) { return { type: "digits", data: String(data) }; }
 function file(data) { return { type: "file", data }; }
@@ -326,6 +326,10 @@ router.get("/", async (call) => {
   if (!response.ok || !catalog.rules?.votingOpen) return call.id_list_message(prompt(prompts, "system:voting_closed", "ההצבעה עדיין אינה פתוחה"));
 
   const voterPhone = phone(call);
+  if (!voterPhone) {
+    call.id_list_message([text("לא ניתן להצביע ממספר חסוי נא להתקשר ממספר מזוהה ולנסות שוב")], { prependToNextAction: true });
+    return call.hangup();
+  }
   try {
     const { result: check } = await api(`/api/ballots/check?voterKey=${encodeURIComponent(voterPhone)}`);
     if (check.voted) {
@@ -431,7 +435,7 @@ router.get("/", async (call) => {
   const submission = await api("/api/ballots", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ voterKey: phone(call), albumIds: selectedAlbums.map((item) => item.id), songIdsByAlbum, artistIds: selectedArtists.map((item) => item.id), channel: "phone" }),
+    body: JSON.stringify({ voterKey: voterPhone, albumIds: selectedAlbums.map((item) => item.id), songIdsByAlbum, artistIds: selectedArtists.map((item) => item.id), channel: "phone" }),
   });
   if (submission.response.status === 409) {
     await clearProgress(voterPhone);

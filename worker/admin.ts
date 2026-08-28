@@ -1,6 +1,7 @@
 import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
 import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, saveIvrRecorders, syncPromptToYemot } from "./ivr-prompts";
+import { normalizePhone } from "./phone";
 
 type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -41,12 +42,6 @@ const text = (value: unknown) => String(value ?? "").trim();
 const number = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const flag = (value: unknown) => value === true || value === 1 || value === "1" || value === "true" || value === "on";
 const DEFAULT_SETTINGS = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
-const normalizePhone = (value: unknown) => {
-  const digits = text(value).replace(/\D/g, "");
-  if (digits.startsWith("972")) return `0${digits.slice(3)}`;
-  if (/^5\d{8}$/.test(digits)) return `0${digits}`;
-  return digits;
-};
 const mediaUrl = (key: string) => `/media/${key.split("/").map(encodeURIComponent).join("/")}`;
 const safeName = (name: string) => name.normalize("NFKD").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 110) || "file";
 const keyFromMediaUrl = (url?: string | null) => url?.startsWith("/media/") ? decodeURIComponent(url.slice(7)) : null;
