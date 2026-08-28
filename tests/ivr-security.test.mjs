@@ -6,7 +6,7 @@ import { ballotRateConfig, checkBallotRate } from "../worker/rate-limit.js";
 
 const require = createRequire(import.meta.url);
 const { normalizePhone: normalizeIvrPhone, phone } = require("../ivr-service/src/phone.js");
-const { menuPages, menuReadOptions, pagePromptKey } = require("../ivr-service/src/menu-input.js");
+const { continuousMenuInput, menuCode, menuPages, menuReadOptions } = require("../ivr-service/src/menu-input.js");
 
 const phoneCases = [
   ["0501234567", "0501234567"],
@@ -32,11 +32,19 @@ test("the IVR never falls back to a call id when caller id is missing", () => {
   assert.equal(phone({ ApiPhone: "972501234567", callId: "ignored" }), "0501234567");
 });
 
-test("long IVR menus are split into immediate single-digit pages", () => {
+test("continuous menus use fixed-width codes while admin menus keep single-digit pages", () => {
   assert.equal(menuReadOptions([0, 1, 9]).max_digits, 1);
   assert.deepEqual(menuPages(Array.from({ length: 9 }, (_, index) => index + 1)).map((page) => page.length), [9]);
   assert.deepEqual(menuPages(Array.from({ length: 18 }, (_, index) => index + 1)).map((page) => page.length), [8, 8, 2]);
-  assert.equal(pagePromptKey("albums-menu:survey", 1, 3), "albums-menu:survey:page:2");
+  const fiftyItems = continuousMenuInput(50, true);
+  assert.equal(fiftyItems.width, 2);
+  assert.equal(fiftyItems.finishCode, "00");
+  assert.equal(fiftyItems.read.min_digits, 2);
+  assert.equal(fiftyItems.read.max_digits, 2);
+  assert.equal(fiftyItems.read.digits_allowed[0], "00");
+  assert.equal(fiftyItems.read.digits_allowed[1], "01");
+  assert.equal(fiftyItems.read.digits_allowed.at(-1), "50");
+  assert.equal(menuCode(9, 2), "10");
 });
 
 test("ballot rate limiting is persisted through D1", async () => {
