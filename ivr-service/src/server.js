@@ -2,7 +2,7 @@ const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { phone } = require("./phone");
-const { menuPages, menuReadOptions, pagePromptKey } = require("./menu-input");
+const { continuousMenuInput, menuCode, menuCodeWidth, menuPages, menuReadOptions } = require("./menu-input");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
@@ -57,46 +57,32 @@ function itemPrompt(prompts, kind, item, label) {
   return [text(`${label} ${item.title || item.name}`)];
 }
 
-// Individual recordings contain only the item name. The keypad digit is added
-// by the IVR, because lists longer than eight items reuse digits on each page.
+// Individual recordings contain only the item name. The keypad code is added
+// by the IVR so the same recording also works in fixed-width long menus.
 const KINDS_MISSING_DIGIT = new Set(["album", "song", "artist"]);
 
 async function chooseOne(call, messages, items, label, kind, prompts, menuPromptKey = "", allowFinish = false) {
-  const pages = menuPages(items);
-  let pageIndex = 0;
-  while (pages.length) {
-    const page = pages[pageIndex];
-    const full = pageIndex === 0 ? [...messages] : [text(`המשך הרשימה עמוד ${pageIndex + 1} מתוך ${pages.length}`)];
-    const continuousKey = menuPromptKey ? pagePromptKey(menuPromptKey, pageIndex, pages.length) : "";
-    const continuousMenu = continuousKey ? prompts.get(continuousKey) : null;
-    if (continuousMenu?.yemotPath) {
-      full.push(file(continuousMenu.yemotPath));
-    } else {
-      page.forEach((item, index) => {
-        const recorded = prompts.get(`${kind}:${item.id}`);
-        if (recorded?.yemotPath) {
-          full.push(file(recorded.yemotPath));
-          if (KINDS_MISSING_DIGIT.has(kind)) full.push(text("הקישו"), number(index + 1));
-        } else {
-          full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(index + 1));
-        }
-      });
-    }
-    const digitsAllowed = page.map((_, index) => index + 1);
-    if (allowFinish) digitsAllowed.unshift(0);
-    if (pages.length > 1) {
-      full.push(text(pageIndex === pages.length - 1 ? "לחזרה לתחילת הרשימה הקישו 9" : "להמשך הקישו 9"));
-      digitsAllowed.push(9);
-    }
-    const answer = await call.read(full, "tap", menuReadOptions(digitsAllowed));
-    if (answer === "0") return null;
-    if (answer === "9" && pages.length > 1) {
-      pageIndex = (pageIndex + 1) % pages.length;
-      continue;
-    }
-    return page[Number(answer) - 1];
+  if (!items.length) return null;
+  const input = continuousMenuInput(items.length, allowFinish);
+  const full = [...messages];
+  const continuousMenu = menuPromptKey ? prompts.get(menuPromptKey) : null;
+  if (continuousMenu?.yemotPath) {
+    full.push(file(continuousMenu.yemotPath));
+  } else {
+    items.forEach((item, index) => {
+      const recorded = prompts.get(`${kind}:${item.id}`);
+      const code = menuCode(index, input.width);
+      if (recorded?.yemotPath) {
+        full.push(file(recorded.yemotPath));
+        if (KINDS_MISSING_DIGIT.has(kind)) full.push(text("הקישו"), number(code));
+      } else {
+        full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(code));
+      }
+    });
   }
-  return null;
+  const answer = await call.read(full, "tap", input.read);
+  if (allowFinish && answer === input.finishCode) return null;
+  return items[Number(answer) - 1] || null;
 }
 
 // A list shorter than the requested amount (a song deactivated mid-poll, say)
@@ -112,11 +98,13 @@ async function chooseMany(call, intro, items, minimum, maximum, label, kind, pro
   const selectedIds = new Set();
   let lead = [];
   let showIntro = true;
-  const pages = menuPages(items);
-  const hasRecordedMenu = Boolean(menuPromptKey && pages.length && pages.every((_, index) => prompts.get(pagePromptKey(menuPromptKey, index, pages.length))?.yemotPath));
+  const hasRecordedMenu = Boolean(menuPromptKey && prompts.get(menuPromptKey)?.yemotPath);
   while (selected.length < maxTarget) {
     const canFinish = selected.length >= minTarget;
-    const finishPrompt = canFinish ? prompt(prompts, "system:finish_selection", "לסיום הבחירה הקישו 0") : [];
+    const finishCode = "0".repeat(menuCodeWidth(items.length));
+    const finishPrompt = canFinish
+      ? (finishCode === "0" ? prompt(prompts, "system:finish_selection", "לסיום הבחירה הקישו 0") : [text(`לסיום הבחירה הקישו ${finishCode}`)])
+      : [];
     const progressPrompt = hasRecordedMenu ? [] : [text(`בחירה ${selected.length + 1} מתוך עד ${maxTarget}`)];
     const messages = [...lead, ...(showIntro ? intro : []), ...progressPrompt, ...finishPrompt];
     lead = [];
@@ -172,18 +160,12 @@ async function adminChoice(call, intro, items) {
   }
 }
 
-async function menuRecordingTarget(call, baseKey, label, items) {
-  const pages = menuPages(items);
-  if (pages.length <= 1) return { key: baseKey, label };
-  const selected = await adminChoice(call, "בחרו עמוד להקלטה", [
-    ...pages.map((page, index) => ({
-      digit: index + 1,
-      key: pagePromptKey(baseKey, index, pages.length),
-      label: `עמוד ${index + 1} מתוך ${pages.length}, פריטים ${index * 8 + 1} עד ${index * 8 + page.length}`,
-    })),
-    { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
-  ]);
-  return selected?.key ? { key: selected.key, label: `${label}, ${selected.label}` } : null;
+async function menuRecordingTarget(_call, baseKey, label, items) {
+  const width = menuCodeWidth(items.length);
+  if (width === 1) return { key: baseKey, label };
+  const firstCode = menuCode(0, width);
+  const lastCode = menuCode(items.length - 1, width);
+  return { key: baseKey, label: `${label}, בקובץ אחד, עם קודים בני ${width} ספרות מ ${firstCode} עד ${lastCode}` };
 }
 
 async function downloadRecordedAudio(fileName) {
