@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import { adminApi } from "./admin";
+import { ivrAdminApi } from "./ivr-admin";
 import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
@@ -203,6 +204,10 @@ const worker = {
       const phone = normalizePhone(url.searchParams.get("phone") || "");
       const recorders = await readIvrRecorders(env);
       return json({ allowed: !!phone && recorders.includes(phone) });
+    }
+    if (url.pathname.startsWith("/api/ivr/admin/")) {
+      if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+      return ivrAdminApi(request, env);
     }
     if (url.pathname === "/api/ivr/prompt" && request.method === "POST") {
       if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
