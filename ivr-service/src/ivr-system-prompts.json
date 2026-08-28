@@ -1,0 +1,17 @@
+[
+  { "key": "system:main_menu", "label": "תפריט ראשי — אלבומים 1, שירים 2, זמרים 3" },
+  { "key": "system:albums_intro", "label": "פתיח לבחירת אלבומים" },
+  { "key": "system:albums_menu", "label": "תפריט האלבומים המלא ברצף, כולל מספרי ההקשה" },
+  { "key": "system:songs_intro", "label": "פתיח לבחירת שירים" },
+  { "key": "system:artists_intro", "label": "פתיח לבחירת זמרים" },
+  { "key": "system:need_albums", "label": "יש לבחור קודם אלבומים" },
+  { "key": "system:section_saved", "label": "הבחירה נשמרה וחוזרים לתפריט" },
+  { "key": "system:already_voted", "label": "כבר הצבעתם" },
+  { "key": "system:already_selected", "label": "האפשרות כבר נבחרה" },
+  { "key": "system:finish_selection", "label": "לסיום לאחר הכמות המינימלית הקישו 0" },
+  { "key": "system:welcome_back", "label": "ברוכים השבים — ממשיכים מהמקום שבו הפסקתם" },
+  { "key": "system:voting_closed", "label": "ההצבעה עדיין אינה פתוחה" },
+  { "key": "system:not_ready", "label": "רשימות המצעד עדיין אינן מוכנות" },
+  { "key": "system:error", "label": "אירעה שגיאה" },
+  { "key": "system:success", "label": "ההצבעה נקלטה בהצלחה" }
+]

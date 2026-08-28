@@ -19,6 +19,12 @@ export async function ensureRuntimeSchema(env: SchemaEnv): Promise<void> {
       CREATE INDEX IF NOT EXISTS album_votes_album_idx ON album_votes(album_id);
       CREATE INDEX IF NOT EXISTS song_votes_song_idx ON song_votes(song_id);
       CREATE INDEX IF NOT EXISTS artist_votes_artist_idx ON artist_votes(artist_id);
+      CREATE TABLE IF NOT EXISTS ballot_rate_limits (
+        bucket TEXT PRIMARY KEY NOT NULL,
+        count INTEGER NOT NULL,
+        reset_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS ballot_rate_limits_reset_idx ON ballot_rate_limits(reset_at);
     `);
     migrated = true;
   } catch (error) {

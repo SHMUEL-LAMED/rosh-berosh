@@ -1,11 +1,12 @@
 /** Cloudflare Worker entry point. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
+import { clearSessionCookie, GOOGLE_CLIENT_ID, migrateLegacyAdminEmails, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import { adminApi } from "./admin";
 import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
+import { checkBallotRate } from "./rate-limit";
 
 interface Env {
   ASSETS: Fetcher;
@@ -14,6 +15,7 @@ interface Env {
   YEMOT_TOKEN?: string;
   YEMOT_API_BASE?: string;
   IVR_SECRET?: string;
+  ADMIN_EMAILS?: string;
   IMAGES: { input(stream: ReadableStream): { transform(options: Record<string, unknown>): { output(options: { format: string; quality: number }): Promise<{ response(): Response }> } } };
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
@@ -28,23 +30,6 @@ function verifyIvrSecret(request: Request, env: Env): boolean {
   if (!env.IVR_SECRET) return false;
   const header = request.headers.get("x-ivr-secret");
   return header === env.IVR_SECRET;
-}
-
-const BALLOT_RATE_WINDOW = 60;
-const BALLOT_RATE_LIMIT = 5;
-const rateBuckets = new Map<string, { count: number; reset: number }>();
-
-function checkBallotRate(ip: string): boolean {
-  const now = Math.floor(Date.now() / 1000);
-  const bucket = rateBuckets.get(ip);
-  if (!bucket || now >= bucket.reset) {
-    for (const [key, expired] of rateBuckets) if (now >= expired.reset) rateBuckets.delete(key);
-    rateBuckets.set(ip, { count: 1, reset: now + BALLOT_RATE_WINDOW });
-    return true;
-  }
-  if (bucket.count >= BALLOT_RATE_LIMIT) return false;
-  bucket.count++;
-  return true;
 }
 
 async function activeSurveyId(env: Env): Promise<string> {
@@ -194,6 +179,7 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
+    await migrateLegacyAdminEmails(env);
 
     if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
     if (url.pathname === "/api/auth/google" && request.method === "POST") {
@@ -285,7 +271,10 @@ const worker = {
       // secret instead; a request claiming "phone" without it is still rejected.
       const fromIvr = verifyIvrSecret(request, env);
       const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-      if (!fromIvr && !checkBallotRate(clientIp)) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
+      if (!fromIvr) {
+        await ensureRuntimeSchema(env);
+        if (!(await checkBallotRate(env.DB, clientIp))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
+      }
       let original: Submission;
       try { original = await request.json<Submission>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
       if (original.channel === "phone") {

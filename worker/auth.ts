@@ -9,18 +9,38 @@ export type SessionUser = {
   exp: number;
 };
 
-const ADMIN_EMAILS = new Set([
+const LEGACY_ADMIN_EMAILS = [
   "o0534169095@gmail.com",
   "0534169095@xn--4dbjbascrao3i.com",
-]);
+];
 
-type AuthEnv = { MEDIA?: R2Bucket };
+type AuthEnv = { MEDIA?: R2Bucket; ADMIN_EMAILS?: string };
 const ADMIN_LIST_KEY = "settings/admin-emails.json";
 
+function configuredAdminEmails(env?: AuthEnv): string[] {
+  return String(env?.ADMIN_EMAILS || "")
+    .split(/[\s,;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+// Temporary zero-downtime migration: persist the previous bootstrap accounts
+// before the following deployment removes them from source control.
+export async function migrateLegacyAdminEmails(env?: AuthEnv): Promise<void> {
+  if (!env?.MEDIA) return;
+  const current = await env.MEDIA.get(ADMIN_LIST_KEY);
+  if (current) return;
+  const emails = [...new Set([...LEGACY_ADMIN_EMAILS, ...configuredAdminEmails(env)])].sort();
+  await env.MEDIA.put(ADMIN_LIST_KEY, JSON.stringify(emails), {
+    httpMetadata: { contentType: "application/json", cacheControl: "no-store" },
+  });
+}
+
 export async function readAdminEmails(env?: AuthEnv): Promise<string[]> {
-  const emails = new Set(ADMIN_EMAILS);
+  const emails = new Set(configuredAdminEmails(env));
   if (env?.MEDIA) {
     try {
+      await migrateLegacyAdminEmails(env);
       const object = await env.MEDIA.get(ADMIN_LIST_KEY);
       if (object) {
         const saved = await object.json<string[]>();

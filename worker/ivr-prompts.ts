@@ -1,3 +1,5 @@
+import systemPrompts from "../ivr-service/src/ivr-system-prompts.json";
+
 export type IvrPrompt = {
   key: string;
   label: string;
@@ -10,22 +12,7 @@ type PromptEnv = { MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: strin
 
 const CONFIG_KEY = "ivr-prompts/config.json";
 
-export const SYSTEM_PROMPTS = [
-  ["system:main_menu", "תפריט ראשי: אלבומים 1, שירים 2, זמרים 3"],
-  ["system:albums_intro", "פתיח לבחירת אלבומים"],
-  ["system:albums_menu", "תפריט האלבומים המלא ברצף, כולל מספרי ההקשה"],
-  ["system:songs_intro", "פתיח לבחירת שירים"],
-  ["system:artists_intro", "פתיח לבחירת זמרים"],
-  ["system:need_albums", "יש לבחור קודם אלבומים"],
-  ["system:section_saved", "הבחירה נשמרה וחוזרים לתפריט"],
-  ["system:already_voted", "כבר הצבעתם"],
-  ["system:already_selected", "כבר הצבעתם לזה בחרו אפשרות אחרת"],
-  ["system:finish_selection", "סיום בחירה לאחר הכמות המינימלית"],
-  ["system:voting_closed", "ההצבעה עדיין אינה פתוחה"],
-  ["system:not_ready", "רשימות המצעד עדיין אינן מוכנות"],
-  ["system:error", "אירעה שגיאה"],
-  ["system:success", "ההצבעה נקלטה בהצלחה"],
-] as const;
+export const SYSTEM_PROMPTS = systemPrompts.map(({ key, label }) => [key, label] as const);
 
 const RECORDERS_KEY = "ivr-prompts/recorders.json";
 

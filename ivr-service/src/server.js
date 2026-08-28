@@ -2,6 +2,8 @@ const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { phone } = require("./phone");
+const { menuPages, menuReadOptions, pagePromptKey } = require("./menu-input");
+const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
 const IVR_SECRET = process.env.IVR_SECRET;
@@ -9,7 +11,7 @@ const RECORDINGS_YEMOT_TOKEN = String(process.env.RECORDINGS_YEMOT_TOKEN || "").
 const RECORDINGS_YEMOT_API_BASE = String(process.env.RECORDINGS_YEMOT_API_BASE || "https://www.call2all.co.il/ym/api").replace(/\/$/, "");
 const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().replace(/\/$/, "");
 const PORT = process.env.PORT || 3000;
-const POST_VOTE_TRANSFER = "0796077075";
+const POST_VOTE_TRANSFER = String(process.env.POST_VOTE_TRANSFER || "0796077075").replace(/\D/g, "");
 const REQUEST_TIMEOUT_MS = 8000;
 if (!SITE_API_BASE_URL) { console.error("חסר SITE_API_BASE_URL"); process.exit(1); }
 if (!IVR_SECRET) { console.error("חסר IVR_SECRET"); process.exit(1); }
@@ -55,35 +57,46 @@ function itemPrompt(prompts, kind, item, label) {
   return [text(`${label} ${item.title || item.name}`)];
 }
 
-// Album and artist recordings hold the whole line, digit included ("לאלבום
-// פלוני הקישו 1"), so the line adds nothing after them. Song recordings hold
-// the title alone, and the line announces the digit itself.
-const KINDS_MISSING_DIGIT = new Set(["song"]);
+// Individual recordings contain only the item name. The keypad digit is added
+// by the IVR, because lists longer than eight items reuse digits on each page.
+const KINDS_MISSING_DIGIT = new Set(["album", "song", "artist"]);
 
 async function chooseOne(call, messages, items, label, kind, prompts, menuPromptKey = "", allowFinish = false) {
-  const full = [...messages];
-  const continuousMenu = menuPromptKey ? prompts.get(menuPromptKey) : null;
-  if (continuousMenu?.yemotPath) {
-    // A single recording contains this complete menu and every keypad number.
-    full.push(file(continuousMenu.yemotPath));
-  } else {
-    // Keep the previous per-item recordings and automatic speech as a safe
-    // fallback until the administrator uploads the continuous recording.
-    items.forEach((item, index) => {
-      const recorded = prompts.get(`${kind}:${item.id}`);
-      if (recorded?.yemotPath) {
-        full.push(file(recorded.yemotPath));
-        if (KINDS_MISSING_DIGIT.has(kind)) full.push(text("הקישו"), number(index + 1));
-      } else {
-        full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(index + 1));
-      }
-    });
+  const pages = menuPages(items);
+  let pageIndex = 0;
+  while (pages.length) {
+    const page = pages[pageIndex];
+    const full = pageIndex === 0 ? [...messages] : [text(`המשך הרשימה עמוד ${pageIndex + 1} מתוך ${pages.length}`)];
+    const continuousKey = menuPromptKey ? pagePromptKey(menuPromptKey, pageIndex, pages.length) : "";
+    const continuousMenu = continuousKey ? prompts.get(continuousKey) : null;
+    if (continuousMenu?.yemotPath) {
+      full.push(file(continuousMenu.yemotPath));
+    } else {
+      page.forEach((item, index) => {
+        const recorded = prompts.get(`${kind}:${item.id}`);
+        if (recorded?.yemotPath) {
+          full.push(file(recorded.yemotPath));
+          if (KINDS_MISSING_DIGIT.has(kind)) full.push(text("הקישו"), number(index + 1));
+        } else {
+          full.push(text(`${label} ${item.title || item.name}`), text("הקישו"), number(index + 1));
+        }
+      });
+    }
+    const digitsAllowed = page.map((_, index) => index + 1);
+    if (allowFinish) digitsAllowed.unshift(0);
+    if (pages.length > 1) {
+      full.push(text(pageIndex === pages.length - 1 ? "לחזרה לתחילת הרשימה הקישו 9" : "להמשך הקישו 9"));
+      digitsAllowed.push(9);
+    }
+    const answer = await call.read(full, "tap", menuReadOptions(digitsAllowed));
+    if (answer === "0") return null;
+    if (answer === "9" && pages.length > 1) {
+      pageIndex = (pageIndex + 1) % pages.length;
+      continue;
+    }
+    return page[Number(answer) - 1];
   }
-  const digitsAllowed = items.map((_, index) => index + 1);
-  if (allowFinish) digitsAllowed.unshift(0);
-  const answer = await call.read(full, "tap", { min_digits: 1, max_digits: String(items.length).length, digits_allowed: digitsAllowed, typing_playback_mode: "No" });
-  if (answer === "0") return null;
-  return items[Number(answer) - 1];
+  return null;
 }
 
 // A list shorter than the requested amount (a song deactivated mid-poll, say)
@@ -99,10 +112,13 @@ async function chooseMany(call, intro, items, minimum, maximum, label, kind, pro
   const selectedIds = new Set();
   let lead = [];
   let showIntro = true;
+  const pages = menuPages(items);
+  const hasRecordedMenu = Boolean(menuPromptKey && pages.length && pages.every((_, index) => prompts.get(pagePromptKey(menuPromptKey, index, pages.length))?.yemotPath));
   while (selected.length < maxTarget) {
     const canFinish = selected.length >= minTarget;
     const finishPrompt = canFinish ? prompt(prompts, "system:finish_selection", "לסיום הבחירה הקישו 0") : [];
-    const messages = [...lead, ...(showIntro ? intro : []), text(`בחירה ${selected.length + 1} מתוך עד ${maxTarget}`), ...finishPrompt];
+    const progressPrompt = hasRecordedMenu ? [] : [text(`בחירה ${selected.length + 1} מתוך עד ${maxTarget}`)];
+    const messages = [...lead, ...(showIntro ? intro : []), ...progressPrompt, ...finishPrompt];
     lead = [];
     showIntro = false;
     const choice = await chooseOne(call, messages, items, label, kind, prompts, menuPromptKey, canFinish);
@@ -117,39 +133,57 @@ async function chooseMany(call, intro, items, minimum, maximum, label, kind, pro
   return selected;
 }
 
-const RECORDABLE_SYSTEM_PROMPTS = [
-  { key: "system:main_menu", label: "התפריט הראשי" },
-  { key: "system:albums_intro", label: "פתיח לבחירת אלבומים" },
-  { key: "system:songs_intro", label: "פתיח לבחירת שירים" },
-  { key: "system:artists_intro", label: "פתיח לבחירת זמרים" },
-  { key: "system:need_albums", label: "יש לבחור קודם אלבומים" },
-  { key: "system:section_saved", label: "הבחירה נשמרה" },
-  { key: "system:already_voted", label: "כבר הצבעתם" },
-  { key: "system:already_selected", label: "האפשרות כבר נבחרה" },
-  { key: "system:finish_selection", label: "לסיום הבחירה הקישו אפס" },
-  { key: "system:welcome_back", label: "ברוכים השבים" },
-  { key: "system:voting_closed", label: "ההצבעה סגורה" },
-  { key: "system:not_ready", label: "הסקר עדיין אינו מוכן" },
-  { key: "system:error", label: "אירעה שגיאה" },
-  { key: "system:success", label: "ההצבעה נקלטה בהצלחה" },
-];
-
 function promptFileName(key) {
   return `rb${createHash("sha256").update(key).digest("hex").slice(0, 20)}`;
 }
 
 async function adminChoice(call, intro, items) {
   if (!items.length) return null;
-  const messages = [text(intro)];
-  items.forEach((item) => messages.push(text(item.label), text("הקישו"), number(item.digit)));
-  const maxDigits = Math.max(...items.map((item) => String(item.digit).length));
-  const answer = await call.read(messages, "tap", {
-    min_digits: 1,
-    max_digits: maxDigits,
-    digits_allowed: items.map((item) => item.digit),
-    typing_playback_mode: "No",
-  });
-  return items.find((item) => String(item.digit) === String(answer)) || null;
+  const back = items.find((item) => item.digit === 0) || null;
+  const choices = items.filter((item) => item.digit !== 0);
+  if (choices.length <= 9) {
+    const messages = [text(intro)];
+    choices.forEach((item) => messages.push(text(item.label), text("הקישו"), number(item.digit)));
+    if (back) messages.push(text(back.label), text("הקישו 0"));
+    const digits = choices.map((item) => item.digit);
+    if (back) digits.push(0);
+    const answer = await call.read(messages, "tap", menuReadOptions(digits));
+    return items.find((item) => String(item.digit) === String(answer)) || null;
+  }
+
+  const pages = menuPages(choices);
+  let pageIndex = 0;
+  while (true) {
+    const page = pages[pageIndex];
+    const messages = [text(pageIndex === 0 ? intro : `המשך הרשימה עמוד ${pageIndex + 1} מתוך ${pages.length}`)];
+    page.forEach((item, index) => messages.push(text(item.label), text("הקישו"), number(index + 1)));
+    messages.push(text(pageIndex === pages.length - 1 ? "לחזרה לתחילת הרשימה הקישו 9" : "להמשך הקישו 9"));
+    if (back) messages.push(text(back.label), text("הקישו 0"));
+    const digits = page.map((_, index) => index + 1);
+    digits.push(9);
+    if (back) digits.push(0);
+    const answer = await call.read(messages, "tap", menuReadOptions(digits));
+    if (answer === "0" && back) return back;
+    if (answer === "9") {
+      pageIndex = (pageIndex + 1) % pages.length;
+      continue;
+    }
+    return page[Number(answer) - 1] || null;
+  }
+}
+
+async function menuRecordingTarget(call, baseKey, label, items) {
+  const pages = menuPages(items);
+  if (pages.length <= 1) return { key: baseKey, label };
+  const selected = await adminChoice(call, "בחרו עמוד להקלטה", [
+    ...pages.map((page, index) => ({
+      digit: index + 1,
+      key: pagePromptKey(baseKey, index, pages.length),
+      label: `עמוד ${index + 1} מתוך ${pages.length}, פריטים ${index * 8 + 1} עד ${index * 8 + page.length}`,
+    })),
+    { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
+  ]);
+  return selected?.key ? { key: selected.key, label: `${label}, ${selected.label}` } : null;
 }
 
 async function downloadRecordedAudio(fileName) {
@@ -270,10 +304,20 @@ router.get("/recordings", async (call) => {
           { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
         ]);
       } else if (section.digit === 2) {
-        target = {
-          key: `albums-menu:${catalog.surveyId}`,
-          label: "כל האלבומים הפעילים ומספרי ההקשה ברצף",
-        };
+        const albumMode = await adminChoice(call, "בחרו סוג הקלטה לאלבומים", [
+          { digit: 1, key: `albums-menu:${catalog.surveyId}`, label: "להקלטת כל רשימת האלבומים ומספרי ההקשה ברצף" },
+          { digit: 2, key: "", label: "להקלטת אלבום בודד" },
+          { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
+        ]);
+        if (albumMode?.digit === 1) {
+          target = await menuRecordingTarget(call, albumMode.key, "רשימת האלבומים ומספרי ההקשה", catalog.albums || []);
+        } else if (albumMode?.digit === 2) {
+          const album = await adminChoice(call, "בחרו אלבום", [
+            ...(catalog.albums || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.title} מאת ${item.artistName}` })),
+            { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
+          ]);
+          if (album?.id) target = { key: `album:${album.id}`, label: `שם האלבום ${album.title}` };
+        }
       } else if (section.digit === 3) {
         const album = await adminChoice(call, "בחרו אלבום", [
           ...(catalog.albums || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.title} מאת ${item.artistName}` })),
@@ -283,9 +327,22 @@ router.get("/recordings", async (call) => {
           const songTarget = await adminChoice(call, `בחרו קריינות עבור האלבום ${album.title}`, [
             { digit: 1, key: `album-name:${album.id}`, label: "הקלטת שם האלבום" },
             { digit: 2, key: `songs-menu:${album.id}`, label: "הקלטת כל השירים ומספרי ההקשה ברצף" },
+            { digit: 3, key: "", label: "הקלטת שיר בודד" },
             { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
           ]);
-          if (songTarget?.key) target = { key: songTarget.key, label: `${songTarget.label} של ${album.title}` };
+          if (songTarget?.digit === 2) {
+            const songs = (catalog.songs || []).filter((song) => song.albumId === album.id);
+            target = await menuRecordingTarget(call, songTarget.key, `רשימת השירים ומספרי ההקשה של ${album.title}`, songs);
+          } else if (songTarget?.key) {
+            target = { key: songTarget.key, label: `${songTarget.label} של ${album.title}` };
+          } else if (songTarget?.digit === 3) {
+            const songs = (catalog.songs || []).filter((song) => song.albumId === album.id);
+            const song = await adminChoice(call, "בחרו שיר", [
+              ...songs.map((item, index) => ({ ...item, digit: index + 1, label: item.title })),
+              { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
+            ]);
+            if (song?.id) target = { key: `song:${song.id}`, label: `שם השיר ${song.title}` };
+          }
         }
       } else if (section.digit === 4) {
         const artistMode = await adminChoice(call, "בחרו סוג הקלטה לזמרים", [
@@ -294,16 +351,13 @@ router.get("/recordings", async (call) => {
           { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
         ]);
         if (artistMode?.digit === 1) {
-          target = {
-            key: artistMode.key,
-            label: "כל הזמרים הפעילים ומספרי ההקשה ברצף",
-          };
+          target = await menuRecordingTarget(call, artistMode.key, "רשימת הזמרים ומספרי ההקשה", catalog.artists || []);
         } else if (artistMode?.digit === 2) {
           const artist = await adminChoice(call, "בחרו זמר", [
             ...(catalog.artists || []).map((item, index) => ({ ...item, digit: index + 1, label: item.name })),
             { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
           ]);
-          if (artist?.id) target = { key: `artist:${artist.id}`, label: `שם הזמר ${artist.name} כולל מספר ההקשה` };
+          if (artist?.id) target = { key: `artist:${artist.id}`, label: `שם הזמר ${artist.name}` };
         }
       }
 

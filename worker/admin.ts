@@ -3,7 +3,7 @@ import { ensureRuntimeSchema } from "./schema";
 import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, saveIvrRecorders, syncPromptToYemot } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
 
-type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
+type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; ADMIN_EMAILS?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const ARCHIVE_PREFIX = "poll-archives/";
 
@@ -89,6 +89,20 @@ async function deleteMediaUrls(env: AdminEnv, urls: Array<string | null | undefi
   }
 }
 
+async function deleteR2Prefix(bucket: R2Bucket, prefix: string): Promise<void> {
+  let cursor: string | undefined;
+  do {
+    const page = await bucket.list({ prefix, cursor, limit: 1000 });
+    const keys = page.objects.map((object) => object.key);
+    if (keys.length) await bucket.delete(keys);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+}
+
+async function clearIvrProgress(env: AdminEnv, surveyId: string): Promise<void> {
+  await deleteR2Prefix(env.MEDIA, `ivr-progress/${surveyId}/`);
+}
+
 async function readPollSnapshot(env: AdminEnv, key: string) {
   if (!key.startsWith(ARCHIVE_PREFIX) || !key.endsWith(".json")) throw new Error("invalid archive key");
   const object = await env.MEDIA.get(key);
@@ -128,6 +142,7 @@ async function clearCurrentPoll(env: AdminEnv, surveyId?: string) {
     env.DB.prepare("DELETE FROM artists WHERE survey_id=?").bind(survey),
     env.DB.prepare("UPDATE poll_settings SET voting_open=0, albums_enabled=1, albums_min=5, albums_max=5, songs_enabled=1, songs_min=1, songs_max=1, artists_enabled=1, artists_min=1, artists_max=3 WHERE id=?").bind(survey),
   ]);
+  await clearIvrProgress(env, survey);
 }
 
 async function pollReadiness(env: AdminEnv, surveyId?: string, settingsOverride?: Record<string, unknown>) {
@@ -336,6 +351,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       env.DB.prepare("UPDATE surveys SET active=0"),
       env.DB.prepare("UPDATE surveys SET active=1 WHERE id=?").bind(id),
     ]);
+    if (surveyId !== id) await clearIvrProgress(env, surveyId);
     return json({ ok: true, surveys: await listSurveys(env) });
   }
 
@@ -481,8 +497,6 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const email = text(body.email).toLowerCase();
     if (!email) return json({ error: "כתובת מנהל חסרה." }, 400);
     if (email === currentAdmin.email) return json({ error: "אי אפשר להסיר את החשבון שבו אתם מחוברים." }, 400);
-    const protectedEmails = new Set(["o0534169095@gmail.com", "0534169095@xn--4dbjbascrao3i.com"]);
-    if (protectedEmails.has(email)) return json({ error: "זהו חשבון מנהל ראשי ואי אפשר להסירו." }, 400);
     const managers = (await readAdminEmails(env)).filter((item) => item !== email);
     return json({ ok: true, managers: await saveAdminEmails(env, managers) });
   }
@@ -604,21 +618,25 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       const readiness = await pollReadiness(env, surveyId, nextSettings);
       if (!readiness.ready) return json({ error: `אי אפשר לפרסם עדיין: ${readiness.warnings.join(", ")}.`, readiness }, 400);
     }
+    const previous = await env.DB.prepare("SELECT voting_open AS votingOpen FROM poll_settings WHERE id=?").bind(surveyId).first<{ votingOpen: number }>();
     await env.DB.prepare(`UPDATE poll_settings SET voting_open=?, albums_enabled=?, albums_min=?, albums_max=?, songs_enabled=?, songs_min=?, songs_max=?, artists_enabled=?, artists_min=?, artists_max=? WHERE id=?`)
       .bind(votingOpen ? 1 : 0, nextSettings.albums_enabled, nextSettings.albums_min, nextSettings.albums_max, nextSettings.songs_enabled, nextSettings.songs_min, nextSettings.songs_max, nextSettings.artists_enabled, nextSettings.artists_min, nextSettings.artists_max, surveyId).run();
+    if (Number(previous?.votingOpen) && !votingOpen) await clearIvrProgress(env, surveyId);
     return json({ ok: true });
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/reset-votes") {
     const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM ballots WHERE survey_id=?").bind(surveyId).first<{ total: number }>();
-    if (!count?.total) return json({ ok: true, deleted: 0 });
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM song_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
-      env.DB.prepare("DELETE FROM album_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
-      env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
-      env.DB.prepare("DELETE FROM ballots WHERE survey_id=?").bind(surveyId),
-    ]);
-    return json({ ok: true, deleted: count.total });
+    if (count?.total) {
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM song_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
+        env.DB.prepare("DELETE FROM album_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
+        env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
+        env.DB.prepare("DELETE FROM ballots WHERE survey_id=?").bind(surveyId),
+      ]);
+    }
+    await clearIvrProgress(env, surveyId);
+    return json({ ok: true, deleted: count?.total || 0 });
   }
 
   if (request.method === "DELETE" && url.pathname === "/api/admin/poll") {
