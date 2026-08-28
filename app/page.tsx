@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { LoginScreen, logout, useCurrentUser } from "./auth-ui";
+import { useNotice } from "./notice";
 import { usePlayer } from "./player-context";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string | null };
@@ -54,11 +55,13 @@ export default function Home() {
   const [artists, setArtists] = useState<string[]>([]);
   const { song: player, play, stop, setSiblings } = usePlayer();
   const [user] = useCurrentUser();
-  const [error, setError] = useState("");
+  const { notify, clear: clearNotice } = useNotice();
+  const fail = (text: string) => notify(text, "error");
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
-  useEffect(() => { fetch("/api/catalog", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); return response.json(); }).then(setCatalog).catch(() => setError("לא הצלחנו לטעון את רשימת המצעד.")); }, []);
+  useEffect(() => { fetch("/api/catalog", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); return response.json(); }).then(setCatalog).catch(() => { setLoadFailed(true); notify("לא הצלחנו לטעון את רשימת המצעד.", "error"); }); }, [notify]);
   const stages = useMemo(() => {
     if (!catalog) return [] as { key: Stage; label: string }[];
     return [
@@ -75,9 +78,9 @@ export default function Home() {
   const selectedSongNames = (albumId: string) => catalog?.songs.filter((song) => songs[albumId]?.includes(song.id)).map((song) => song.title).join(" · ") || "לא נבחר";
 
   const toggleLimited = (items: string[], id: string, max: number, set: (next: string[]) => void, message: string) => {
-    setError("");
+    clearNotice();
     if (items.includes(id)) return set(items.filter((item) => item !== id));
-    if (items.length >= max) return setError(message);
+    if (items.length >= max) return fail(message);
     set([...items, id]);
   };
   const toggleAlbum = (id: string) => {
@@ -86,9 +89,9 @@ export default function Home() {
   };
   const toggleSong = (albumId: string, songId: string) => {
     const current = songs[albumId] ?? [], max = catalog?.rules.songsMax ?? 1;
-    setError("");
+    clearNotice();
     if (current.includes(songId)) return setSongs({ ...songs, [albumId]: current.filter((id) => id !== songId) });
-    if (current.length >= max) return setError(`אפשר לבחור עד ${max} שירים מכל אלבום.`);
+    if (current.length >= max) return fail(`אפשר לבחור עד ${max} שירים מכל אלבום.`);
     setSongs({ ...songs, [albumId]: [...current, songId] });
   };
   const toggleArtist = (id: string) => toggleLimited(artists, id, catalog?.rules.artistsMax ?? 3, setArtists, `אפשר לבחור עד ${catalog?.rules.artistsMax ?? 3} זמרים.`);
@@ -97,10 +100,10 @@ export default function Home() {
   const goToStage = (index: number) => { setStageIndex(Math.max(0, Math.min(stages.length - 1, index))); scrollTop(); };
   const next = () => {
     if (!catalog) return;
-    setError("");
+    clearNotice();
     const r = catalog.rules;
     if (stage === "albums") {
-      if (albums.length < r.albumsMin || albums.length > r.albumsMax) return setError(`יש לבחור ${rangeText(r.albumsMin, r.albumsMax, "אלבומים")}.`);
+      if (albums.length < r.albumsMin || albums.length > r.albumsMax) return fail(`יש לבחור ${rangeText(r.albumsMin, r.albumsMax, "אלבומים")}.`);
       setSongAlbumIndex(0);
       return goToStage(stageIndex + 1);
     }
@@ -111,15 +114,15 @@ export default function Home() {
       // could never clear this step. Ask only for what the album actually has.
       const available = album ? songsByAlbum(album.id).length : 0;
       const required = Math.min(r.songsMin, available);
-      if (album && (chosen < required || chosen > r.songsMax)) return setError(`יש לבחור ${rangeText(required, Math.min(r.songsMax, available), "שירים")} מ״${album.title}״.`);
+      if (album && (chosen < required || chosen > r.songsMax)) return fail(`יש לבחור ${rangeText(required, Math.min(r.songsMax, available), "שירים")} מ״${album.title}״.`);
       if (songAlbumIndex < selectedAlbums.length - 1) { setSongAlbumIndex(songAlbumIndex + 1); return scrollTop(); }
       return goToStage(stageIndex + 1);
     }
-    if (stage === "artists" && (artists.length < r.artistsMin || artists.length > r.artistsMax)) return setError(`יש לבחור ${rangeText(r.artistsMin, r.artistsMax, "זמרים")}.`);
+    if (stage === "artists" && (artists.length < r.artistsMin || artists.length > r.artistsMax)) return fail(`יש לבחור ${rangeText(r.artistsMin, r.artistsMax, "זמרים")}.`);
     goToStage(stageIndex + 1);
   };
   const back = () => {
-    setError("");
+    clearNotice();
     if (stage === "songs" && songAlbumIndex > 0) { setSongAlbumIndex(songAlbumIndex - 1); return scrollTop(); }
     const target = stageIndex - 1;
     if (target < 0) return;
@@ -127,14 +130,14 @@ export default function Home() {
     goToStage(target);
   };
   const submit = async () => {
-    setBusy(true); setError("");
+    setBusy(true); clearNotice();
     try {
       const fp = await browserFingerprint().catch(() => "");
       const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site", fingerprint: fp }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
       setDone(true); stop();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "שמירת ההצבעה נכשלה."); } finally { setBusy(false); }
+    } catch (caught) { notify(caught instanceof Error ? caught.message : "שמירת ההצבעה נכשלה.", "error"); } finally { setBusy(false); }
   };
 
   if (user === undefined) return <main className="login-shell"><div className="loading">בודקים התחברות…</div></main>;
@@ -147,7 +150,7 @@ export default function Home() {
     {catalog && !catalog.rules.votingOpen ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
-        {!catalog && !error && <div className="loading">טוענים את רשימת המצעד…</div>}
+        {!catalog && !loadFailed && <div className="loading">טוענים את רשימת המצעד…</div>}
         {catalog && catalog.albums.length === 0 && <div className="empty-catalog"><h2>המצעד בהכנה</h2><p>התוכן יעלה בקרוב.</p></div>}
         {catalog && stage === "albums" && <><Title kicker="שלב ראשון" title={`בחרו ${rangeText(catalog.rules.albumsMin, catalog.rules.albumsMax, "אלבומים")}`} count={`${albums.length}/${catalog.rules.albumsMax}`} /><div className="album-grid">{catalog.albums.map((album) => <button type="button" key={album.id} className={`choice-card ${albums.includes(album.id) ? "selected" : ""}`} onClick={() => toggleAlbum(album.id)}>{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><b>{album.title}</b><small>{album.artistName}</small><i>{albums.includes(album.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "songs" && (() => {
@@ -160,7 +163,6 @@ export default function Home() {
         })()}
         {catalog && stage === "artists" && <><Title kicker="שלב שלישי" title={`בחרו ${rangeText(catalog.rules.artistsMin, catalog.rules.artistsMax, "זמרים")}`} count={`${artists.length}/${catalog.rules.artistsMax}`} /><div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b><i>{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "summary" && <><Title kicker="כמעט סיימנו" title="אישור ההצבעה" /><div className="summary">{catalog.rules.albumsEnabled ? <><h3>האלבומים והשירים שבחרתם</h3><div className="summary-albums">{selectedAlbums.map((album) => <div key={album.id} className="summary-album">{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><div><b>{album.title}</b><small>{album.artistName}</small><span>{selectedSongNames(album.id)}</span></div></div>)}</div></> : null}{catalog.rules.artistsEnabled ? <><h3>הזמרים שבחרתם</h3><div className="summary-artists">{selectedArtists.map((artist) => <div key={artist.id} className="summary-artist">{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b></div>)}</div></> : null}</div><div className="signed-voter"><span>ההצבעה תישמר עבור</span><b>{user.email}</b></div></>}
-        {error && <p className="vote-error">{error}</p>}
         {catalog && catalog.albums.length > 0 && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
       </section>
     </>}
