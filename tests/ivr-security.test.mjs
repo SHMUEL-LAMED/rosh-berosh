@@ -220,3 +220,54 @@ test("an IVR object with a fake audio extension is still private", async () => {
   );
   assert.equal(response.status, 404);
 });
+
+test("phone administration requires both the IVR secret and an authorized caller", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("phone-admin-security-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  let recorders = ["0501111111"];
+  const media = {
+    async get(key) {
+      if (key !== "ivr-prompts/recorders.json") return null;
+      return { async json() { return [...recorders]; } };
+    },
+    async put(key, value) {
+      if (key === "ivr-prompts/recorders.json") recorders = JSON.parse(String(value));
+    },
+  };
+  const env = { IVR_SECRET: "phone-admin-secret", MEDIA: media };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const request = (phone, headers = {}) => new Request("http://localhost/api/ivr/admin/action", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify({ phone, action: "add-recorder", targetPhone: "972502222222" }),
+  });
+
+  assert.equal((await worker.fetch(request("0501111111"), env, ctx)).status, 401);
+  assert.equal((await worker.fetch(request("0509999999", { "x-ivr-secret": "phone-admin-secret" }), env, ctx)).status, 403);
+
+  const added = await worker.fetch(request("0501111111", { "x-ivr-secret": "phone-admin-secret" }), env, ctx);
+  assert.equal(added.status, 200);
+  assert.deepEqual(recorders, ["0501111111", "0502222222"]);
+});
+
+test("phone administration never removes the last authorized recorder", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("last-recorder-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const recorders = ["0501111111"];
+  const env = {
+    IVR_SECRET: "phone-admin-secret",
+    MEDIA: {
+      async get(key) { return key === "ivr-prompts/recorders.json" ? { async json() { return recorders; } } : null; },
+      async put() { throw new Error("the last recorder must not be removed"); },
+    },
+  };
+  const response = await worker.fetch(new Request("http://localhost/api/ivr/admin/action", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ivr-secret": "phone-admin-secret" },
+    body: JSON.stringify({ phone: "0501111111", action: "remove-recorder", targetPhone: "0501111111" }),
+  }), env, { waitUntil() {}, passThroughOnException() {} });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /האחרון/);
+});

@@ -1,7 +1,7 @@
 const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
-const { phone } = require("./phone");
+const { normalizePhone, phone } = require("./phone");
 const { continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions } = require("./menu-input");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 
@@ -235,111 +235,332 @@ async function clearProgress(voterPhone) {
   } catch {}
 }
 
+async function phoneAdminOverview(callerPhone) {
+  const { response, result } = await api(`/api/ivr/admin/overview?phone=${encodeURIComponent(callerPhone)}`);
+  if (!response.ok) throw new Error(result?.error || "לא ניתן לטעון את נתוני הניהול");
+  return result;
+}
+
+async function phoneAdminAction(callerPhone, action) {
+  const { response, result } = await api("/api/ivr/admin/action", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ phone: callerPhone, ...action }),
+  });
+  if (!response.ok) throw new Error(result?.error || "פעולת הניהול נכשלה");
+  return result;
+}
+
+async function confirmAction(call, messages) {
+  const content = Array.isArray(messages) ? [...messages] : [text(messages)];
+  content.push(text("לאישור הקישו 1 לביטול הקישו 0"));
+  const answer = await call.read(content, "tap", menuReadOptions([0, 1]));
+  return String(answer) === "1";
+}
+
+async function readNumberWithHash(call, message, maxDigits = 2) {
+  const answer = await call.read([text(message), text("לסיום הקישו סולמית לביטול הקישו 0 וסולמית")], "tap", {
+    min_digits: 1,
+    max_digits: maxDigits,
+    typing_playback_mode: "No",
+  });
+  return String(answer || "");
+}
+
+async function chooseRecordingTarget(call, catalog, section) {
+  if (section.digit === 1) {
+    return adminChoice(call, "בחרו הודעת מערכת", [
+      ...RECORDABLE_SYSTEM_PROMPTS.map((item, index) => ({ ...item, digit: index + 1 })),
+      { digit: 0, key: "", label: "לחזרה" },
+    ]);
+  }
+  if (section.digit === 2) {
+    const albumMode = await adminChoice(call, "בחרו סוג קריינות לאלבומים", [
+      { digit: 1, key: `albums-menu:${catalog.surveyId}`, label: "כל רשימת האלבומים ומספרי ההקשה ברצף" },
+      { digit: 2, key: "", label: "אלבום בודד" },
+      { digit: 0, key: "", label: "לחזרה" },
+    ]);
+    if (albumMode?.digit === 1) return menuRecordingTarget(call, albumMode.key, "רשימת האלבומים ומספרי ההקשה", catalog.albums || []);
+    if (albumMode?.digit === 2) {
+      const album = await adminChoice(call, "בחרו אלבום", [
+        ...(catalog.albums || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.title} מאת ${item.artistName}` })),
+        { digit: 0, id: "", label: "לחזרה" },
+      ]);
+      if (album?.id) return { key: `album:${album.id}`, label: `שם האלבום ${album.title}` };
+    }
+  }
+  if (section.digit === 3) {
+    const album = await adminChoice(call, "בחרו אלבום", [
+      ...(catalog.albums || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.title} מאת ${item.artistName}` })),
+      { digit: 0, id: "", label: "לחזרה" },
+    ]);
+    if (!album?.id) return null;
+    const songTarget = await adminChoice(call, `בחרו קריינות עבור האלבום ${album.title}`, [
+      { digit: 1, key: `album-name:${album.id}`, label: "שם האלבום לפני בחירת השירים" },
+      { digit: 2, key: `songs-menu:${album.id}`, label: "כל השירים ומספרי ההקשה ברצף" },
+      { digit: 3, key: "", label: "שיר בודד" },
+      { digit: 0, key: "", label: "לחזרה" },
+    ]);
+    if (songTarget?.digit === 2) {
+      const songs = (catalog.songs || []).filter((song) => song.albumId === album.id);
+      return menuRecordingTarget(call, songTarget.key, `רשימת השירים ומספרי ההקשה של ${album.title}`, songs);
+    }
+    if (songTarget?.key) return { key: songTarget.key, label: `${songTarget.label} של ${album.title}` };
+    if (songTarget?.digit === 3) {
+      const songs = (catalog.songs || []).filter((song) => song.albumId === album.id);
+      const song = await adminChoice(call, "בחרו שיר", [
+        ...songs.map((item, index) => ({ ...item, digit: index + 1, label: item.title })),
+        { digit: 0, id: "", label: "לחזרה" },
+      ]);
+      if (song?.id) return { key: `song:${song.id}`, label: `שם השיר ${song.title}` };
+    }
+  }
+  if (section.digit === 4) {
+    const artistMode = await adminChoice(call, "בחרו סוג קריינות לזמרים", [
+      { digit: 1, key: `artists-menu:${catalog.surveyId}`, label: "כל רשימת הזמרים ומספרי ההקשה ברצף" },
+      { digit: 2, key: "", label: "זמר בודד" },
+      { digit: 0, key: "", label: "לחזרה" },
+    ]);
+    if (artistMode?.digit === 1) return menuRecordingTarget(call, artistMode.key, "רשימת הזמרים ומספרי ההקשה", catalog.artists || []);
+    if (artistMode?.digit === 2) {
+      const artist = await adminChoice(call, "בחרו זמר", [
+        ...(catalog.artists || []).map((item, index) => ({ ...item, digit: index + 1, label: item.name })),
+        { digit: 0, id: "", label: "לחזרה" },
+      ]);
+      if (artist?.id) return { key: `artist:${artist.id}`, label: `שם הזמר ${artist.name}` };
+    }
+  }
+  return null;
+}
+
+async function managePrompt(call, callerPhone, target, prompts) {
+  const current = (prompts || []).find((item) => item.key === target.key);
+  const action = await adminChoice(call, `${target.label}. ${current ? "קיימת קריינות מוקלטת" : "עדיין אין קריינות מוקלטת"}`, [
+    ...(current?.yemotPath ? [{ digit: 1, label: "להשמעת הקריינות הקיימת" }] : []),
+    { digit: 2, label: current ? "להחלפת הקריינות" : "להקלטת קריינות" },
+    ...(current ? [{ digit: 3, label: "למחיקת הקריינות" }] : []),
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (!action || action.digit === 0) return "חזרתם לתפריט הקריינויות";
+  if (action.digit === 1 && current?.yemotPath) {
+    await call.read([file(current.yemotPath), text("לחזרה הקישו 0")], "tap", menuReadOptions([0]));
+    return "השמעת הקריינות הסתיימה";
+  }
+  if (action.digit === 2) {
+    await recordPromptByPhone(call, target.key, target.label);
+    return "הקריינות נשמרה והיא פעילה בקו ההצבעה";
+  }
+  if (action.digit === 3 && current) {
+    if (!(await confirmAction(call, `האם למחוק את הקריינות של ${target.label}`))) return "המחיקה בוטלה";
+    const result = await phoneAdminAction(callerPhone, { action: "delete-prompt", key: target.key });
+    return result.message;
+  }
+  return "חזרתם לתפריט הקריינויות";
+}
+
+async function recordingsManagement(call, callerPhone) {
+  const section = await adminChoice(call, "ניהול קריינויות. בחרו נושא", [
+    { digit: 1, label: "הודעות מערכת" },
+    { digit: 2, label: "אלבומים" },
+    { digit: 3, label: "שירים לפי אלבום" },
+    { digit: 4, label: "זמרים" },
+    { digit: 0, label: "לחזרה לתפריט הניהול" },
+  ]);
+  if (!section || section.digit === 0) return "חזרתם לתפריט הניהול";
+  const { response, result: catalog } = await api("/api/catalog");
+  if (!response.ok || !catalog?.surveyId) throw new Error("לא ניתן לטעון את רשימות הקריינות");
+  const target = await chooseRecordingTarget(call, catalog, section);
+  if (!target?.key) return "חזרתם לתפריט הקריינויות";
+  return managePrompt(call, callerPhone, target, catalog.ivrPrompts || []);
+}
+
+async function votingManagement(call, callerPhone) {
+  const state = await phoneAdminOverview(callerPhone);
+  const open = Boolean(state.settings?.votingOpen);
+  const choice = await adminChoice(call, `הסקר הפעיל הוא ${state.activeSurvey.name}. ההצבעה כעת ${open ? "פתוחה" : "סגורה"}`, [
+    { digit: 1, label: open ? "לסגירת ההצבעה" : "לפתיחת ההצבעה" },
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (choice?.digit !== 1) return "חזרתם לתפריט הניהול";
+  if (!(await confirmAction(call, `האם ${open ? "לסגור" : "לפתוח"} את ההצבעה`))) return "השינוי בוטל";
+  return (await phoneAdminAction(callerPhone, { action: "set-voting-open", value: !open })).message;
+}
+
+async function surveysManagement(call, callerPhone) {
+  const state = await phoneAdminOverview(callerPhone);
+  const survey = await adminChoice(call, `הסקר הפעיל הוא ${state.activeSurvey.name}. בחרו סקר להפעלה`, [
+    ...(state.surveys || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.name}${item.active ? ", פעיל כעת" : ""}` })),
+    { digit: 0, id: "", label: "לחזרה" },
+  ]);
+  if (!survey?.id) return "חזרתם לתפריט הניהול";
+  if (survey.active) return "הסקר שבחרתם כבר פעיל";
+  if (!(await confirmAction(call, `האם להפעיל את הסקר ${survey.name}`))) return "הפעלת הסקר בוטלה";
+  return (await phoneAdminAction(callerPhone, { action: "activate-survey", id: survey.id })).message;
+}
+
+async function settingsManagement(call, callerPhone) {
+  const state = await phoneAdminOverview(callerPhone);
+  const stages = [
+    { digit: 1, key: "albums", label: "אלבומים", enabled: state.settings.albumsEnabled, min: state.settings.albumsMin, max: state.settings.albumsMax },
+    { digit: 2, key: "songs", label: "שירים", enabled: state.settings.songsEnabled, min: state.settings.songsMin, max: state.settings.songsMax },
+    { digit: 3, key: "artists", label: "זמרים", enabled: state.settings.artistsEnabled, min: state.settings.artistsMin, max: state.settings.artistsMax },
+  ];
+  const stage = await adminChoice(call, "הגדרות שלבי ההצבעה", [
+    ...stages.map((item) => ({ ...item, label: `${item.label}, ${item.enabled ? "פעיל" : "כבוי"}, מינימום ${item.min}, מקסימום ${item.max}` })),
+    { digit: 0, key: "", label: "לחזרה" },
+  ]);
+  if (!stage?.key) return "חזרתם לתפריט הניהול";
+  const choice = await adminChoice(call, `ניהול ${stage.label}`, [
+    { digit: 1, label: stage.enabled ? "לכיבוי השלב" : "להפעלת השלב" },
+    { digit: 2, label: "לשינוי המינימום והמקסימום" },
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (choice?.digit === 1) {
+    if (!(await confirmAction(call, `${stage.enabled ? "לכבות" : "להפעיל"} את שלב ${stage.label}`))) return "השינוי בוטל";
+    return (await phoneAdminAction(callerPhone, { action: "set-stage-enabled", stage: stage.key, value: !stage.enabled })).message;
+  }
+  if (choice?.digit === 2) {
+    const minimum = Number(await readNumberWithHash(call, `הקישו את מספר הבחירות המינימלי עבור ${stage.label}`));
+    if (!minimum) return "השינוי בוטל";
+    const maximum = Number(await readNumberWithHash(call, `הקישו את מספר הבחירות המקסימלי עבור ${stage.label}`));
+    if (!maximum) return "השינוי בוטל";
+    if (!(await confirmAction(call, [text(`המינימום יהיה ${minimum} והמקסימום יהיה ${maximum}`)]))) return "השינוי בוטל";
+    return (await phoneAdminAction(callerPhone, { action: "set-quota", stage: stage.key, min: minimum, max: maximum })).message;
+  }
+  return "חזרתם לתפריט ההגדרות";
+}
+
+async function contentManagement(call, callerPhone) {
+  const state = await phoneAdminOverview(callerPhone);
+  const section = await adminChoice(call, "הפעלה והשבתה של תוכן", [
+    { digit: 1, label: "אלבומים" },
+    { digit: 2, label: "שירים לפי אלבום" },
+    { digit: 3, label: "זמרים" },
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (!section || section.digit === 0) return "חזרתם לתפריט הניהול";
+  let kind = "album";
+  let items = state.albums || [];
+  if (section.digit === 2) {
+    const album = await adminChoice(call, "בחרו אלבום", [
+      ...(state.albums || []).map((item, index) => ({ ...item, digit: index + 1, label: item.title })),
+      { digit: 0, id: "", label: "לחזרה" },
+    ]);
+    if (!album?.id) return "חזרתם לתפריט ניהול התוכן";
+    kind = "song";
+    items = (state.songs || []).filter((song) => song.albumId === album.id);
+  } else if (section.digit === 3) {
+    kind = "artist";
+    items = state.artists || [];
+  }
+  const item = await adminChoice(call, "בחרו פריט", [
+    ...items.map((entry, index) => ({ ...entry, digit: index + 1, label: `${entry.title || entry.name}, ${entry.active ? "פעיל" : "מושבת"}` })),
+    { digit: 0, id: "", label: "לחזרה" },
+  ]);
+  if (!item?.id) return "חזרתם לתפריט ניהול התוכן";
+  const nextActive = !item.active;
+  if (!(await confirmAction(call, `${nextActive ? "להפעיל" : "להשבית"} את ${item.title || item.name}`))) return "השינוי בוטל";
+  return (await phoneAdminAction(callerPhone, { action: "toggle-item", kind, id: item.id, value: nextActive })).message;
+}
+
+async function recordersManagement(call, callerPhone) {
+  const state = await phoneAdminOverview(callerPhone);
+  const choice = await adminChoice(call, `יש ${state.recorders.length} מספרים מורשים להקליט ולנהל`, [
+    { digit: 1, label: "להוספת מספר מורשה" },
+    { digit: 2, label: "להסרת מספר מורשה" },
+    { digit: 3, label: "להשמעת רשימת המספרים" },
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (choice?.digit === 1) {
+    const raw = await readNumberWithHash(call, "הקישו את מספר הטלפון המלא", 12);
+    if (raw === "0") return "הוספת המספר בוטלה";
+    const targetPhone = normalizePhone(raw);
+    if (!targetPhone) return "מספר הטלפון שהוקש אינו תקין";
+    if (!(await confirmAction(call, [text("המספר שהוקש הוא"), number(targetPhone)]))) return "הוספת המספר בוטלה";
+    return (await phoneAdminAction(callerPhone, { action: "add-recorder", targetPhone })).message;
+  }
+  if (choice?.digit === 2) {
+    const target = await adminChoice(call, "בחרו מספר להסרת הרשאה", [
+      ...state.recorders.map((item, index) => ({ digit: index + 1, phone: item, label: item })),
+      { digit: 0, phone: "", label: "לחזרה" },
+    ]);
+    if (!target?.phone) return "חזרתם לתפריט ההרשאות";
+    if (!(await confirmAction(call, [text("האם להסיר את ההרשאה של המספר"), number(target.phone)]))) return "הסרת ההרשאה בוטלה";
+    return (await phoneAdminAction(callerPhone, { action: "remove-recorder", targetPhone: target.phone })).message;
+  }
+  if (choice?.digit === 3) {
+    const messages = [text("המספרים המורשים הם")];
+    state.recorders.forEach((item) => messages.push(number(item)));
+    messages.push(text("לחזרה הקישו 0"));
+    await call.read(messages, "tap", menuReadOptions([0]));
+    return "חזרתם לתפריט ההרשאות";
+  }
+  return "חזרתם לתפריט הניהול";
+}
+
+async function statusManagement(call, callerPhone) {
+  const state = await phoneAdminOverview(callerPhone);
+  const choice = await adminChoice(call, `מצב הסקר ${state.activeSurvey.name}. ההצבעה ${state.settings.votingOpen ? "פתוחה" : "סגורה"}. התקבלו ${Number(state.votes.total || 0)} הצבעות`, [
+    { digit: 1, label: "פירוט מצב המערכת" },
+    { digit: 2, label: "חמשת האלבומים המובילים" },
+    { digit: 3, label: "חמשת השירים המובילים" },
+    { digit: 4, label: "חמשת הזמרים המובילים" },
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (!choice || choice.digit === 0) return "חזרתם לתפריט הניהול";
+  let messages = [];
+  if (choice.digit === 1) {
+    messages = [text(`הצבעות באתר ${Number(state.votes.site || 0)}. הצבעות בטלפון ${Number(state.votes.phone || 0)}. אלבומים פעילים ${state.readiness.counts.albums}. שירים פעילים ${state.readiness.counts.songs}. זמרים פעילים ${state.readiness.counts.artists}. ${state.readiness.ready ? "הסקר מוכן להצבעה" : state.readiness.warnings.join(". ")}`)];
+  } else {
+    const key = choice.digit === 2 ? "albums" : choice.digit === 3 ? "songs" : "artists";
+    const label = choice.digit === 2 ? "אלבומים" : choice.digit === 3 ? "שירים" : "זמרים";
+    messages = [text(`${label} מובילים`)];
+    (state.results[key] || []).forEach((item, index) => messages.push(text(`מקום ${index + 1}. ${item.label}. ${Number(item.votes || 0)} הצבעות`)));
+  }
+  messages.push(text("לחזרה הקישו 0"));
+  await call.read(messages, "tap", menuReadOptions([0]));
+  return "חזרתם לתפריט מצב ותוצאות";
+}
+
 router.get("/recordings", async (call) => {
   if (!RECORDINGS_YEMOT_TOKEN || !/^\/(?:\d+\/)*\d+$/.test(RECORDINGS_FOLDER)) {
-    return call.id_list_message([text("קו ההקלטות עדיין אינו מוגדר")]);
+    return call.id_list_message([text("קו הניהול וההקלטות עדיין אינו מוגדר")]);
   }
 
   const callerPhone = phone(call);
   const access = await api(`/api/ivr/recorders/check?phone=${encodeURIComponent(callerPhone)}`);
   if (!access.response.ok || !access.result?.allowed) {
-    call.id_list_message([text("מספר הטלפון שלכם אינו מורשה להקליט קריינויות")], { prependToNextAction: true });
+    call.id_list_message([text("מספר הטלפון שלכם אינו מורשה לניהול ולהקלטת קריינויות")], { prependToNextAction: true });
     return call.hangup();
   }
 
-  let lead = [text("ברוכים הבאים לקו הקלטת הקריינויות")];
+  let lead = "ברוכים הבאים לקו הניהול והקלטת הקריינויות";
   while (true) {
-    const menuIntro = [...lead.map((message) => message.data), "בחרו את סוג הקריינות"].join(" ");
-    const section = await adminChoice(call, menuIntro, [
-      { digit: 1, label: "להודעות המערכת" },
-      { digit: 2, label: "לתפריט האלבומים המלא" },
-      { digit: 3, label: "לקריינויות השירים לפי אלבום" },
-      { digit: 4, label: "לשמות הזמרים" },
+    const section = await adminChoice(call, `${lead}. תפריט ניהול ראשי`, [
+      { digit: 1, label: "ניהול והקלטת קריינויות" },
+      { digit: 2, label: "פתיחה וסגירה של ההצבעה" },
+      { digit: 3, label: "בחירת הסקר הפעיל" },
+      { digit: 4, label: "הגדרות שלבים וכמויות" },
+      { digit: 5, label: "הפעלה והשבתה של אלבומים שירים וזמרים" },
+      { digit: 6, label: "ניהול מספרי מקליטים מורשים" },
+      { digit: 7, label: "מצב המערכת ותוצאות" },
       { digit: 9, label: "לסיום" },
     ]);
-    lead = [];
     if (!section || section.digit === 9) {
       call.id_list_message([text("להתראות")], { prependToNextAction: true });
       return call.hangup();
     }
-
     try {
-      const { response, result: catalog } = await api("/api/catalog");
-      if (!response.ok || !catalog?.surveyId) throw new Error("catalog unavailable");
-
-      let target = null;
-      if (section.digit === 1) {
-        target = await adminChoice(call, "בחרו הודעת מערכת להקלטה", [
-          ...RECORDABLE_SYSTEM_PROMPTS.map((item, index) => ({ ...item, digit: index + 1 })),
-          { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
-        ]);
-      } else if (section.digit === 2) {
-        const albumMode = await adminChoice(call, "בחרו סוג הקלטה לאלבומים", [
-          { digit: 1, key: `albums-menu:${catalog.surveyId}`, label: "להקלטת כל רשימת האלבומים ומספרי ההקשה ברצף" },
-          { digit: 2, key: "", label: "להקלטת אלבום בודד" },
-          { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
-        ]);
-        if (albumMode?.digit === 1) {
-          target = await menuRecordingTarget(call, albumMode.key, "רשימת האלבומים ומספרי ההקשה", catalog.albums || []);
-        } else if (albumMode?.digit === 2) {
-          const album = await adminChoice(call, "בחרו אלבום", [
-            ...(catalog.albums || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.title} מאת ${item.artistName}` })),
-            { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
-          ]);
-          if (album?.id) target = { key: `album:${album.id}`, label: `שם האלבום ${album.title}` };
-        }
-      } else if (section.digit === 3) {
-        const album = await adminChoice(call, "בחרו אלבום", [
-          ...(catalog.albums || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.title} מאת ${item.artistName}` })),
-          { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
-        ]);
-        if (album?.id) {
-          const songTarget = await adminChoice(call, `בחרו קריינות עבור האלבום ${album.title}`, [
-            { digit: 1, key: `album-name:${album.id}`, label: "הקלטת שם האלבום" },
-            { digit: 2, key: `songs-menu:${album.id}`, label: "הקלטת כל השירים ומספרי ההקשה ברצף" },
-            { digit: 3, key: "", label: "הקלטת שיר בודד" },
-            { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
-          ]);
-          if (songTarget?.digit === 2) {
-            const songs = (catalog.songs || []).filter((song) => song.albumId === album.id);
-            target = await menuRecordingTarget(call, songTarget.key, `רשימת השירים ומספרי ההקשה של ${album.title}`, songs);
-          } else if (songTarget?.key) {
-            target = { key: songTarget.key, label: `${songTarget.label} של ${album.title}` };
-          } else if (songTarget?.digit === 3) {
-            const songs = (catalog.songs || []).filter((song) => song.albumId === album.id);
-            const song = await adminChoice(call, "בחרו שיר", [
-              ...songs.map((item, index) => ({ ...item, digit: index + 1, label: item.title })),
-              { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
-            ]);
-            if (song?.id) target = { key: `song:${song.id}`, label: `שם השיר ${song.title}` };
-          }
-        }
-      } else if (section.digit === 4) {
-        const artistMode = await adminChoice(call, "בחרו סוג הקלטה לזמרים", [
-          { digit: 1, key: `artists-menu:${catalog.surveyId}`, label: "להקלטת כל רשימת הזמרים ומספרי ההקשה ברצף" },
-          { digit: 2, key: "", label: "להקלטת זמר בודד" },
-          { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
-        ]);
-        if (artistMode?.digit === 1) {
-          target = await menuRecordingTarget(call, artistMode.key, "רשימת הזמרים ומספרי ההקשה", catalog.artists || []);
-        } else if (artistMode?.digit === 2) {
-          const artist = await adminChoice(call, "בחרו זמר", [
-            ...(catalog.artists || []).map((item, index) => ({ ...item, digit: index + 1, label: item.name })),
-            { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
-          ]);
-          if (artist?.id) target = { key: `artist:${artist.id}`, label: `שם הזמר ${artist.name}` };
-        }
-      }
-
-      if (!target?.key) {
-        lead = [text("חזרתם לתפריט הראשי")];
-        continue;
-      }
-      await recordPromptByPhone(call, target.key, target.label);
-      lead = [text("הקריינות נשמרה והיא פעילה בקו ההצבעה")];
+      if (section.digit === 1) lead = await recordingsManagement(call, callerPhone);
+      else if (section.digit === 2) lead = await votingManagement(call, callerPhone);
+      else if (section.digit === 3) lead = await surveysManagement(call, callerPhone);
+      else if (section.digit === 4) lead = await settingsManagement(call, callerPhone);
+      else if (section.digit === 5) lead = await contentManagement(call, callerPhone);
+      else if (section.digit === 6) lead = await recordersManagement(call, callerPhone);
+      else if (section.digit === 7) lead = await statusManagement(call, callerPhone);
     } catch (error) {
-      console.error("recordings IVR error", error);
-      lead = [text("שמירת הקריינות נכשלה נא לנסות שוב")];
+      console.error("phone admin IVR error", error);
+      lead = error instanceof Error ? error.message : "פעולת הניהול נכשלה נא לנסות שוב";
     }
   }
 });
