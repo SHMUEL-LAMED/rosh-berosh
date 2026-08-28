@@ -173,7 +173,6 @@ function RecorderAccessPanel({ recorders, onSaved, onMessage }: { recorders: str
     onMessage("הגישה של המספר לקו ההקלטות בוטלה."); await onSaved();
   };
   return <div className="recorder-access">
-    <h3 className="prompt-heading">מספרים מורשים לקו ההקלטות</h3>
     <p className="panel-help">רק מספרים שמופיעים כאן יוכלו להיכנס לקו 0772267078. הזיהוי אוטומטי לפי מספר המתקשר ואין צורך בקוד.</p>
     <form className="archive-form" onSubmit={add}><input name="phone" type="tel" inputMode="tel" placeholder="לדוגמה 0501234567" required /><button>אישור מספר</button></form>
     <div className="admin-list manager-list">{recorders.length ? recorders.map((phone) => <article key={phone}><div><i>☎</i><span><b>{phone}</b><small>מורשה להקלטת קריינויות</small></span></div><button type="button" className="danger" onClick={() => remove(phone)}>ביטול גישה</button></article>) : <p className="panel-help">עדיין לא אושר אף מספר.</p>}</div>
@@ -183,27 +182,54 @@ function RecorderAccessPanel({ recorders, onSaved, onMessage }: { recorders: str
 function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const promptFor = (key: string) => data.ivrPrompts?.find((prompt) => prompt.key === key);
   const rows = (items: { key: string; label: string }[]) => <div className="prompt-list">{items.map((item) => <PromptRow key={item.key} item={item} prompt={promptFor(item.key)} ttsAvailable={data.ttsAvailable} onSaved={onSaved} onMessage={onMessage} />)}</div>;
+  const activeAlbums = data.albums.filter((album) => album.active);
+  const activeArtists = data.artists.filter((artist) => artist.active);
+  const orderPreview = (label: string, items: { id: string; name: string }[]) => <details className="prompt-order-details"><summary>הצגת סדר {label} להקלטה</summary><ol>{items.map((item, index) => <li key={item.id}><b>{index + 1}.</b> {item.name}</li>)}</ol></details>;
   return <AdminSection title="קריינות הקו הטלפוני">
     <div className={`connection-banner ${data.yemotConnected ? "connected" : "disconnected"}`}><b>{data.yemotConnected ? "החיבור לימות המשיח מוגדר" : "החיבור לימות המשיח עדיין לא מוגדר"}</b><span>{data.yemotConnected ? "קבצים חדשים יישלחו גם לקו." : "הקבצים נשמרים באתר בלבד עד להוספת YEMOT_TOKEN בסביבת Cloudflare."}</span></div>
-    <RecorderAccessPanel recorders={data.ivrRecorders || []} onSaved={onSaved} onMessage={onMessage} />
-    <p className="panel-help">בכל שורה אפשר להעלות הקלטה משלכם. אם אין הקלטה פעילה, הקו משתמש בהקראה אוטומטית. התפריט הראשי נשאר קצר: 1 אלבומים, 2 שירים מתוך האלבומים שנבחרו, 3 זמרים.</p>
-    <h3 className="prompt-heading">תפריט האלבומים בהקלטה אחת</h3>
-    <p className="panel-help">הקליטו את כל האלבומים הפעילים ברצף לפי הסדר שמופיע בניהול, כולל מספר ההקשה של כל אלבום. לדוגמה: „לאלבום פלוני הקישו 1, לאלבום אלמוני הקישו 2”. אחרי שינוי סדר האלבומים יש להחליף גם את ההקלטה.</p>
-    {data.activeSurvey ? rows([{ key: `albums-menu:${data.activeSurvey.id}`, label: `כל האלבומים ומספרי ההקשה של „${data.activeSurvey.name}” — קובץ אחד רציף` }]) : <p className="panel-help">יש להפעיל סקר לפני העלאת תפריט האלבומים.</p>}
-    <h3 className="prompt-heading">תפריטי השירים לפי אלבומים</h3>
-    <p className="panel-help">לכל אלבום מעלים קובץ אחד שמקריא את כל השירים הפעילים לפי הסדר, כולל מספר ההקשה. אחרי שינוי סדר השירים יש להחליף את ההקלטה של אותו אלבום.</p>
-    {data.albums.map((album) => {
-      const albumSongs = data.songs.filter((song) => song.albumId === album.id && song.active);
-      return <details className="prompt-group" key={album.id}><summary>{album.title} — {album.artistName} · {albumSongs.length} שירים פעילים</summary>
-        <ol className="prompt-song-order">{albumSongs.map((song, index) => <li key={song.id}><b>{index + 1}.</b> {song.title}</li>)}</ol>
-        {rows([
-          { key: `album-name:${album.id}`, label: `שם האלבום לפני בחירת השירים — ${album.title}` },
-          { key: `songs-menu:${album.id}`, label: `כל שירי „${album.title}” ומספרי ההקשה — קובץ אחד רציף` },
-        ])}
-      </details>;
-    })}
-    <h3 className="prompt-heading">הודעות המערכת</h3>{rows(SYSTEM_PROMPTS.map(([key, label]) => ({ key, label })))}
-    <details className="prompt-group"><summary>שמות הזמרים — הקליטו גם את מספר ההקשה</summary>{rows(data.artists.map((artist) => ({ key: `artist:${artist.id}`, label: artist.name })))}</details>
+    <p className="panel-help ivr-intro">המסך מחולק לפי סוג הקלטה. הקבוצות הארוכות סגורות עד שפותחים אותן, והקלטות התפריטים המלאים מרוכזות ראשונות.</p>
+    <div className="ivr-overview" aria-label="סיכום קריינויות"><span><b>2</b> תפריטים מלאים</span><span><b>{activeAlbums.length}</b> אלבומים פעילים</span><span><b>{activeArtists.length}</b> זמרים פעילים</span><span><b>{data.ivrRecorders?.length || 0}</b> מקליטים מורשים</span></div>
+
+    <details className="ivr-section" open={!data.ivrRecorders?.length}>
+      <summary><span>הרשאות לקו ההקלטות</span><small>{data.ivrRecorders?.length || 0} מספרים מורשים</small></summary>
+      <div className="ivr-section-body"><RecorderAccessPanel recorders={data.ivrRecorders || []} onSaved={onSaved} onMessage={onMessage} /></div>
+    </details>
+
+    <details className="ivr-section primary" open>
+      <summary><span>התפריטים המלאים להקלטה</span><small>אלבומים וזמרים בקובץ אחד לכל רשימה</small></summary>
+      <div className="ivr-section-body prompt-bundles">
+        {!data.activeSurvey ? <p className="panel-help">יש להפעיל סקר לפני העלאת תפריטים מלאים.</p> : <>
+          <article className="prompt-bundle"><div><h4>כל האלבומים ברצף</h4><p>הקליטו את שמות האלבומים ומספרי ההקשה לפי הסדר.</p></div>{rows([{ key: `albums-menu:${data.activeSurvey.id}`, label: `כל האלבומים ומספרי ההקשה של „${data.activeSurvey.name}”` }])}{orderPreview("האלבומים", activeAlbums.map((album) => ({ id: album.id, name: `${album.title} — ${album.artistName}` })))}</article>
+          <article className="prompt-bundle"><div><h4>כל הזמרים ברצף</h4><p>הקליטו את שמות כל הזמרים הפעילים ומספרי ההקשה בקובץ אחד.</p></div>{rows([{ key: `artists-menu:${data.activeSurvey.id}`, label: `כל הזמרים ומספרי ההקשה של „${data.activeSurvey.name}”` }])}{orderPreview("הזמרים", activeArtists.map((artist) => ({ id: artist.id, name: artist.name })))}</article>
+        </>}
+      </div>
+    </details>
+
+    <details className="ivr-section">
+      <summary><span>שירים לפי אלבום</span><small>{activeAlbums.length} אלבומים — פותחים רק את האלבום שרוצים</small></summary>
+      <div className="ivr-section-body"><p className="panel-help">בכל אלבום אפשר להקליט את שם האלבום וקובץ אחד רציף עם כל השירים ומספרי ההקשה.</p>
+        {activeAlbums.map((album) => {
+          const albumSongs = data.songs.filter((song) => song.albumId === album.id && song.active);
+          return <details className="prompt-group" key={album.id}><summary>{album.title} — {album.artistName} · {albumSongs.length} שירים</summary>
+            <ol className="prompt-song-order">{albumSongs.map((song, index) => <li key={song.id}><b>{index + 1}.</b> {song.title}</li>)}</ol>
+            {rows([
+              { key: `album-name:${album.id}`, label: `שם האלבום לפני בחירת השירים — ${album.title}` },
+              { key: `songs-menu:${album.id}`, label: `כל שירי „${album.title}” ומספרי ההקשה` },
+            ])}
+          </details>;
+        })}
+      </div>
+    </details>
+
+    <details className="ivr-section">
+      <summary><span>הודעות מערכת</span><small>{SYSTEM_PROMPTS.length} הודעות כלליות</small></summary>
+      <div className="ivr-section-body">{rows(SYSTEM_PROMPTS.map(([key, label]) => ({ key, label })))}</div>
+    </details>
+
+    <details className="ivr-section">
+      <summary><span>הקלטת זמר בודד</span><small>אפשרות נוספת — לא נדרשת כשיש תפריט זמרים מלא</small></summary>
+      <div className="ivr-section-body">{rows(activeArtists.map((artist) => ({ key: `artist:${artist.id}`, label: `${artist.name} כולל מספר ההקשה` })))}</div>
+    </details>
   </AdminSection>;
 }
 

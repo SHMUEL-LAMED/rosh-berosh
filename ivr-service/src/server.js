@@ -288,11 +288,23 @@ router.get("/recordings", async (call) => {
           if (songTarget?.key) target = { key: songTarget.key, label: `${songTarget.label} של ${album.title}` };
         }
       } else if (section.digit === 4) {
-        const artist = await adminChoice(call, "בחרו זמר", [
-          ...(catalog.artists || []).map((item, index) => ({ ...item, digit: index + 1, label: item.name })),
-          { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
+        const artistMode = await adminChoice(call, "בחרו סוג הקלטה לזמרים", [
+          { digit: 1, key: `artists-menu:${catalog.surveyId}`, label: "להקלטת כל רשימת הזמרים ומספרי ההקשה ברצף" },
+          { digit: 2, key: "", label: "להקלטת זמר בודד" },
+          { digit: 0, key: "", label: "לחזרה לתפריט הראשי" },
         ]);
-        if (artist?.id) target = { key: `artist:${artist.id}`, label: `שם הזמר ${artist.name} כולל מספר ההקשה` };
+        if (artistMode?.digit === 1) {
+          target = {
+            key: artistMode.key,
+            label: "כל הזמרים הפעילים ומספרי ההקשה ברצף",
+          };
+        } else if (artistMode?.digit === 2) {
+          const artist = await adminChoice(call, "בחרו זמר", [
+            ...(catalog.artists || []).map((item, index) => ({ ...item, digit: index + 1, label: item.name })),
+            { digit: 0, id: "", label: "לחזרה לתפריט הראשי" },
+          ]);
+          if (artist?.id) target = { key: `artist:${artist.id}`, label: `שם הזמר ${artist.name} כולל מספר ההקשה` };
+        }
       }
 
       if (!target?.key) {
@@ -330,6 +342,7 @@ router.get("/", async (call) => {
   const artistMinimum = rules.artistsEnabled ? rules.artistsMin : 0;
   const artistMaximum = rules.artistsEnabled ? rules.artistsMax : 0;
   const albumMenuKey = catalog.surveyId ? `albums-menu:${catalog.surveyId}` : "system:albums_menu";
+  const artistMenuKey = catalog.surveyId ? `artists-menu:${catalog.surveyId}` : "system:artists_menu";
   if (rules.albumsEnabled && (!catalog.albums?.length || catalog.albums.length < albumMinimum)) return call.id_list_message(prompt(prompts, "system:not_ready", "רשימת האלבומים עדיין אינה מוכנה"));
 
   const saved = await loadProgress(voterPhone);
@@ -382,7 +395,7 @@ router.get("/", async (call) => {
         }
         menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה");
       } else {
-        selectedArtists = await chooseMany(call, [...menuLead, ...prompt(prompts, "system:artists_intro", `בחרו בין ${artistMinQuota} ל ${artistMaxQuota} זמרים`)], catalog.artists || [], artistMinimum, artistMaximum, "לזמר", "artist", prompts);
+        selectedArtists = await chooseMany(call, [...menuLead, ...prompt(prompts, "system:artists_intro", `בחרו בין ${artistMinQuota} ל ${artistMaxQuota} זמרים`)], catalog.artists || [], artistMinimum, artistMaximum, "לזמר", "artist", prompts, artistMenuKey);
         menuLead = [];
         await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
         menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה");
@@ -409,7 +422,7 @@ router.get("/", async (call) => {
       }
       menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה חוזרים לתפריט הראשי");
     } else if (answer === "3" && rules.artistsEnabled) {
-      selectedArtists = await chooseMany(call, prompt(prompts, "system:artists_intro", `בחרו בין ${artistMinQuota} ל ${artistMaxQuota} זמרים`), catalog.artists || [], artistMinimum, artistMaximum, "לזמר", "artist", prompts);
+      selectedArtists = await chooseMany(call, prompt(prompts, "system:artists_intro", `בחרו בין ${artistMinQuota} ל ${artistMaxQuota} זמרים`), catalog.artists || [], artistMinimum, artistMaximum, "לזמר", "artist", prompts, artistMenuKey);
       await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה חוזרים לתפריט הראשי");
     }
