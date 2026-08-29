@@ -22,9 +22,9 @@ npm install
 npm run dev
 ```
 
-יש להחיל את `drizzle/0000_polite_devos.sql`, `drizzle/0001_poll_settings_and_previews.sql` ו־`drizzle/0002_surveys.sql` על מסד D1 לפני הפעלת ההצבעה — ה-deploy אינו מריץ מיגרציות, ובלעדיהן חסרות הטבלאות `poll_settings` ו־`surveys` והעמודה `survey_id`, ומסך הניהול נכשל. כאשר הרשימות הסופיות יתקבלו, יש להזין אלבומים לטבלת `albums`, שירים לטבלת `songs` וזמרים לטבלת `artists`.
+אין צורך להחיל מיגרציות ביד: ה-deploy אינו מריץ אותן, ולכן בבקשה הראשונה `worker/schema-statements.js` בונה את הסכמה כולה על מסד D1 — טבלאות, עמודות חסרות, אינדקסים ושורות ברירת המחדל של `surveys` ו־`poll_settings`. כל המשפטים idempotent, כך שמסד קיים אינו משתנה ומסד ריק נבנה במלואו. הקבצים ב-`drizzle/` נשארים מקור האמת לסכמה עבור drizzle-kit. כאשר הרשימות הסופיות יתקבלו, יש להזין אלבומים לטבלת `albums`, שירים לטבלת `songs` וזמרים לטבלת `artists`.
 
-התוספות שאחריה — `ballot_rate_limits`, טבלאות ה־IVR (`ivr_recorders`, `ivr_prompts`, `ivr_store_meta`, `ivr_admin_audit`), העמודות `songs.cover_url` ו־`ballots.fingerprint` והאינדקסים — נוצרות גם אוטומטית בבקשה הראשונה על ידי `worker/schema-statements.js`. כל משפט SQL שם רץ בנפרד דרך `prepare`, כי `D1Database.exec()` מפצל את הקלט לפי שורות ואינו יכול להריץ משפט הפרוס על כמה שורות.
+כל משפט SQL שם רץ בנפרד דרך `prepare`, כי `D1Database.exec()` מפצל את הקלט לפי שורות ואינו יכול להריץ משפט הפרוס על כמה שורות. משפט שנכשל נרשם ללוג ואינו מונע את המשפטים שאחריו, והבקשה הבאה תנסה שוב.
 
 שירות הטלפון דורש `SITE_API_BASE_URL` ומופעל בנפרד מתוך `ivr-service/`.
 

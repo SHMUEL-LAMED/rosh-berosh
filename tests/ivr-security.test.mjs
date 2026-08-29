@@ -233,6 +233,24 @@ test("phone ballot flow canonicalizes the voter before the unique check", async 
   assert.deepEqual([...voters], ["0501234567"]);
 });
 
+test("an unexpected database error answers with a JSON 500, not a bare crash", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("api-error-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const env = {
+    IVR_SECRET: "error-secret",
+    MEDIA: { async get() { return null; } },
+    DB: { prepare() { throw new Error("D1_ERROR: connection lost"); } },
+  };
+  const response = await worker.fetch(
+    new Request("http://localhost/api/ivr/recorders/check?phone=0501234567", { headers: { "x-ivr-secret": "error-secret" } }),
+    env,
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { error: "שגיאה בשרת." });
+});
+
 test("private IVR configuration is never served as public media", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("security-test", `${process.pid}-${Date.now()}`);

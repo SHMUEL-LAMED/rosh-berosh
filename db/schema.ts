@@ -46,23 +46,36 @@ export const ballots = sqliteTable("ballots", {
   channel: text("channel").notNull().default("site"),
   fingerprint: text("fingerprint"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
-}, (table) => [uniqueIndex("ballots_voter_survey_unique").on(table.surveyId, table.voterKey)]);
+}, (table) => [
+  uniqueIndex("ballots_voter_survey_unique").on(table.surveyId, table.voterKey),
+  index("ballots_survey_created_idx").on(table.surveyId, table.createdAt),
+  index("ballots_fingerprint_idx").on(table.fingerprint).where(sql`fingerprint is not null`),
+]);
 
 export const albumVotes = sqliteTable("album_votes", {
   ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),
   albumId: text("album_id").notNull().references(() => albums.id),
-}, (table) => [uniqueIndex("album_votes_unique").on(table.ballotId, table.albumId)]);
+}, (table) => [
+  uniqueIndex("album_votes_unique").on(table.ballotId, table.albumId),
+  index("album_votes_album_idx").on(table.albumId),
+]);
 
 export const songVotes = sqliteTable("song_votes", {
   ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),
   albumId: text("album_id").notNull().references(() => albums.id),
   songId: text("song_id").notNull().references(() => songs.id),
-}, (table) => [uniqueIndex("song_votes_unique").on(table.ballotId, table.albumId, table.songId)]);
+}, (table) => [
+  uniqueIndex("song_votes_unique").on(table.ballotId, table.albumId, table.songId),
+  index("song_votes_song_idx").on(table.songId),
+]);
 
 export const artistVotes = sqliteTable("artist_votes", {
   ballotId: text("ballot_id").notNull().references(() => ballots.id, { onDelete: "cascade" }),
   artistId: text("artist_id").notNull().references(() => artists.id),
-}, (table) => [uniqueIndex("artist_votes_unique").on(table.ballotId, table.artistId)]);
+}, (table) => [
+  uniqueIndex("artist_votes_unique").on(table.ballotId, table.artistId),
+  index("artist_votes_artist_idx").on(table.artistId),
+]);
 
 export const pollSettings = sqliteTable("poll_settings", {
   id: text("id").primaryKey().default("main"),
@@ -77,6 +90,12 @@ export const pollSettings = sqliteTable("poll_settings", {
   artistsMin: integer("artists_min").notNull().default(1),
   artistsMax: integer("artists_max").notNull().default(3),
 });
+
+export const ballotRateLimits = sqliteTable("ballot_rate_limits", {
+  bucket: text("bucket").primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: integer("reset_at").notNull(),
+}, (table) => [index("ballot_rate_limits_reset_idx").on(table.resetAt)]);
 
 export const ivrRecorders = sqliteTable("ivr_recorders", {
   phone: text("phone").primaryKey(),
