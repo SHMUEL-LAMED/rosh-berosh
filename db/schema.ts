@@ -77,3 +77,30 @@ export const pollSettings = sqliteTable("poll_settings", {
   artistsMin: integer("artists_min").notNull().default(1),
   artistsMax: integer("artists_max").notNull().default(3),
 });
+
+export const ivrRecorders = sqliteTable("ivr_recorders", {
+  phone: text("phone").primaryKey(),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+});
+
+export const ivrPrompts = sqliteTable("ivr_prompts", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  audioUrl: text("audio_url").notNull(),
+  yemotPath: text("yemot_path").notNull().default(""),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const ivrStoreMeta = sqliteTable("ivr_store_meta", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
+export const ivrAdminAudit = sqliteTable("ivr_admin_audit", {
+  id: text("id").primaryKey(),
+  phone: text("phone").notNull(),
+  action: text("action").notNull(),
+  target: text("target"),
+  status: integer("status").notNull(),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [index("ivr_admin_audit_created_idx").on(table.createdAt)]);

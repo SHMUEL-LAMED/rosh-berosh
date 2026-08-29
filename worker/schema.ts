@@ -25,6 +25,30 @@ export async function ensureRuntimeSchema(env: SchemaEnv): Promise<void> {
         reset_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS ballot_rate_limits_reset_idx ON ballot_rate_limits(reset_at);
+      CREATE TABLE IF NOT EXISTS ivr_recorders (
+        phone TEXT PRIMARY KEY NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      CREATE TABLE IF NOT EXISTS ivr_prompts (
+        key TEXT PRIMARY KEY NOT NULL,
+        label TEXT NOT NULL,
+        audio_url TEXT NOT NULL,
+        yemot_path TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ivr_store_meta (
+        key TEXT PRIMARY KEY NOT NULL,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ivr_admin_audit (
+        id TEXT PRIMARY KEY NOT NULL,
+        phone TEXT NOT NULL,
+        action TEXT NOT NULL,
+        target TEXT,
+        status INTEGER NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      CREATE INDEX IF NOT EXISTS ivr_admin_audit_created_idx ON ivr_admin_audit(created_at);
     `);
     migrated = true;
   } catch (error) {

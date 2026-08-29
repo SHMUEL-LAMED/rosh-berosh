@@ -5,7 +5,7 @@ import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verif
 import { adminApi } from "./admin";
 import { ivrAdminApi } from "./ivr-admin";
 import { ensureRuntimeSchema } from "./schema";
-import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, syncPromptToYemot } from "./ivr-prompts";
+import { deleteIvrAudioIfUnreferenced, readIvrPrompts, readIvrRecorders, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
 import { checkBallotRate } from "./rate-limit";
 
@@ -201,18 +201,24 @@ const worker = {
     if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
     if (url.pathname === "/api/ivr/recorders/check" && request.method === "GET") {
       if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+      await ensureRuntimeSchema(env);
       const phone = normalizePhone(url.searchParams.get("phone") || "");
       const recorders = await readIvrRecorders(env);
       return json({ allowed: !!phone && recorders.includes(phone) });
     }
     if (url.pathname.startsWith("/api/ivr/admin/")) {
       if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+      await ensureRuntimeSchema(env);
       return ivrAdminApi(request, env);
     }
     if (url.pathname === "/api/ivr/prompt" && request.method === "POST") {
       if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+      await ensureRuntimeSchema(env);
       const form = await request.formData();
       const file = form.get("file"), key = String(form.get("key") || "").trim(), label = String(form.get("label") || "").trim();
+      const phone = normalizePhone(form.get("phone"));
+      const recorders = await readIvrRecorders(env);
+      if (!phone || !recorders.includes(phone)) return json({ error: "מספר הטלפון אינו מורשה עוד להקליט." }, 403);
       if (!(file instanceof File) || !/^[a-z0-9:_-]+$/i.test(key) || !label || label.length > 300) {
         return json({ error: "פרטי הקריינות אינם תקינים." }, 400);
       }
@@ -227,13 +233,9 @@ const worker = {
       });
       const prompts = await readIvrPrompts(env);
       const previous = prompts.find((item) => item.key === key);
-      const next = prompts.filter((item) => item.key !== key);
       const audioUrl = `/media/${mediaKey.split("/").map(encodeURIComponent).join("/")}`;
-      next.push({ key, label, audioUrl, yemotPath: sync.path, updatedAt: Date.now() });
-      await saveIvrPrompts(env, next);
-      if (previous?.audioUrl.startsWith("/media/") && previous.audioUrl !== audioUrl) {
-        await env.MEDIA.delete(decodeURIComponent(previous.audioUrl.slice(7)));
-      }
+      await upsertIvrPrompt(env, { key, label, audioUrl, yemotPath: sync.path, updatedAt: Date.now() });
+      if (previous?.audioUrl !== audioUrl) await deleteIvrAudioIfUnreferenced(env, previous?.audioUrl);
       return json({ ok: true, prompt: { key, label, audioUrl, yemotPath: sync.path } });
     }
     if (url.pathname === "/api/ballots/check" && request.method === "GET") {

@@ -8,47 +8,86 @@ export type IvrPrompt = {
   updatedAt: number;
 };
 
-type PromptEnv = { MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string };
+type PromptEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string };
 
 const CONFIG_KEY = "ivr-prompts/config.json";
+const RECORDERS_KEY = "ivr-prompts/recorders.json";
+const PROMPTS_MIGRATED_KEY = "ivr-prompts-migrated";
+const RECORDERS_MIGRATED_KEY = "ivr-recorders-migrated";
 
 export const SYSTEM_PROMPTS = systemPrompts.map(({ key, label }) => [key, label] as const);
 
-const RECORDERS_KEY = "ivr-prompts/recorders.json";
-
-export async function readIvrRecorders(env: Pick<PromptEnv, "MEDIA">): Promise<string[]> {
-  const object = await env.MEDIA.get(RECORDERS_KEY);
-  if (!object) return [];
-  try {
-    const value = await object.json<unknown>();
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
+async function legacyJson(env: Pick<PromptEnv, "MEDIA">, key: string): Promise<unknown> {
+  const object = await env.MEDIA.get(key);
+  if (!object) return null;
+  try { return await object.json<unknown>(); }
+  catch { return null; }
 }
 
-export async function saveIvrRecorders(env: Pick<PromptEnv, "MEDIA">, recorders: string[]): Promise<void> {
-  await env.MEDIA.put(RECORDERS_KEY, JSON.stringify([...new Set(recorders)].sort()), {
-    httpMetadata: { contentType: "application/json", cacheControl: "no-store" },
-  });
+async function migrateLegacyRecorders(env: Pick<PromptEnv, "DB" | "MEDIA">): Promise<void> {
+  const migrated = await env.DB.prepare("SELECT value FROM ivr_store_meta WHERE key=?").bind(RECORDERS_MIGRATED_KEY).first();
+  if (migrated) return;
+  const legacy = await legacyJson(env, RECORDERS_KEY);
+  const recorders = Array.isArray(legacy) ? legacy.filter((item): item is string => typeof item === "string") : [];
+  await env.DB.batch([
+    ...[...new Set(recorders)].map((phone) => env.DB.prepare("INSERT OR IGNORE INTO ivr_recorders (phone) VALUES (?)").bind(phone)),
+    env.DB.prepare("INSERT OR REPLACE INTO ivr_store_meta (key,value) VALUES (?,?)").bind(RECORDERS_MIGRATED_KEY, "1"),
+  ]);
 }
 
-export async function readIvrPrompts(env: Pick<PromptEnv, "MEDIA">): Promise<IvrPrompt[]> {
-  const object = await env.MEDIA.get(CONFIG_KEY);
-  if (!object) return [];
-  try {
-    const value = await object.json<unknown>();
-    if (!Array.isArray(value)) return [];
-    return value.filter(isPrompt);
-  } catch {
-    return [];
-  }
+async function migrateLegacyPrompts(env: Pick<PromptEnv, "DB" | "MEDIA">): Promise<void> {
+  const migrated = await env.DB.prepare("SELECT value FROM ivr_store_meta WHERE key=?").bind(PROMPTS_MIGRATED_KEY).first();
+  if (migrated) return;
+  const legacy = await legacyJson(env, CONFIG_KEY);
+  const prompts = Array.isArray(legacy) ? legacy.filter(isPrompt) : [];
+  await env.DB.batch([
+    ...prompts.map((prompt) => env.DB.prepare("INSERT OR IGNORE INTO ivr_prompts (key,label,audio_url,yemot_path,updated_at) VALUES (?,?,?,?,?)").bind(prompt.key, prompt.label, prompt.audioUrl, prompt.yemotPath, prompt.updatedAt)),
+    env.DB.prepare("INSERT OR REPLACE INTO ivr_store_meta (key,value) VALUES (?,?)").bind(PROMPTS_MIGRATED_KEY, "1"),
+  ]);
 }
 
-export async function saveIvrPrompts(env: Pick<PromptEnv, "MEDIA">, prompts: IvrPrompt[]): Promise<void> {
-  await env.MEDIA.put(CONFIG_KEY, JSON.stringify(prompts), {
-    httpMetadata: { contentType: "application/json", cacheControl: "no-store" },
-  });
+export async function readIvrRecorders(env: Pick<PromptEnv, "DB" | "MEDIA">): Promise<string[]> {
+  await migrateLegacyRecorders(env);
+  const rows = await env.DB.prepare("SELECT phone FROM ivr_recorders ORDER BY phone").all<{ phone: string }>();
+  return rows.results.map((row) => row.phone);
+}
+
+export async function addIvrRecorder(env: Pick<PromptEnv, "DB" | "MEDIA">, phone: string): Promise<string[]> {
+  await migrateLegacyRecorders(env);
+  await env.DB.prepare("INSERT OR IGNORE INTO ivr_recorders (phone) VALUES (?)").bind(phone).run();
+  return readIvrRecorders(env);
+}
+
+export async function removeIvrRecorder(env: Pick<PromptEnv, "DB" | "MEDIA">, phone: string): Promise<{ removed: boolean; reason?: "missing" | "last"; recorders: string[] }> {
+  await migrateLegacyRecorders(env);
+  const removed = await env.DB.prepare("DELETE FROM ivr_recorders WHERE phone=? AND (SELECT COUNT(*) FROM ivr_recorders)>1 RETURNING phone").bind(phone).first<{ phone: string }>();
+  if (removed) return { removed: true, recorders: await readIvrRecorders(env) };
+  const exists = await env.DB.prepare("SELECT phone FROM ivr_recorders WHERE phone=?").bind(phone).first();
+  return { removed: false, reason: exists ? "last" : "missing", recorders: await readIvrRecorders(env) };
+}
+
+export async function readIvrPrompts(env: Pick<PromptEnv, "DB" | "MEDIA">): Promise<IvrPrompt[]> {
+  await migrateLegacyPrompts(env);
+  const rows = await env.DB.prepare("SELECT key,label,audio_url AS audioUrl,yemot_path AS yemotPath,updated_at AS updatedAt FROM ivr_prompts ORDER BY key").all<IvrPrompt>();
+  return rows.results;
+}
+
+export async function upsertIvrPrompt(env: Pick<PromptEnv, "DB" | "MEDIA">, prompt: IvrPrompt): Promise<void> {
+  await migrateLegacyPrompts(env);
+  await env.DB.prepare("INSERT INTO ivr_prompts (key,label,audio_url,yemot_path,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET label=excluded.label,audio_url=excluded.audio_url,yemot_path=excluded.yemot_path,updated_at=excluded.updated_at")
+    .bind(prompt.key, prompt.label, prompt.audioUrl, prompt.yemotPath, prompt.updatedAt).run();
+}
+
+export async function deleteIvrPrompt(env: Pick<PromptEnv, "DB" | "MEDIA">, key: string): Promise<void> {
+  await migrateLegacyPrompts(env);
+  await env.DB.prepare("DELETE FROM ivr_prompts WHERE key=?").bind(key).run();
+}
+
+export async function deleteIvrAudioIfUnreferenced(env: Pick<PromptEnv, "DB" | "MEDIA">, audioUrl?: string): Promise<void> {
+  if (!audioUrl?.startsWith("/media/")) return;
+  const referenced = await env.DB.prepare("SELECT COUNT(*) AS total FROM ivr_prompts WHERE audio_url=?").bind(audioUrl).first<{ total: number }>();
+  if (Number(referenced?.total || 0)) return;
+  await env.MEDIA.delete(decodeURIComponent(audioUrl.slice(7)));
 }
 
 export async function syncPromptToYemot(env: PromptEnv, key: string, file: File): Promise<{ path: string; warning?: string }> {

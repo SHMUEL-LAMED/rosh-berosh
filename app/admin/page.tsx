@@ -21,7 +21,7 @@ type Survey = { id: string; name: string; active: number; createdAt: number; vot
 type SuspiciousVote = { fingerprint: string; count: number; voters: string[] };
 type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
 type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "managers" | "results" | "archives" | "voters";
-type Voter = { id: string; voterKey: string; channel: string; fingerprint?: string; createdAt: string; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
+type Voter = { id: string; voterKey: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
 const SYSTEM_PROMPTS = systemPrompts;
 
@@ -60,12 +60,14 @@ export default function AdminPage() {
     try { await api("/api/admin/catalog", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id }) }); notify("נמחק בהצלחה."); await load(); }
     catch (error) { notify(error instanceof Error ? error.message : "המחיקה נכשלה."); }
   };
-  const uploadMedia = async (albumId: string, file: File, position = 0) => {
-    const form = new FormData(); form.set("albumId", albumId); form.set("kind", "audio"); form.set("file", file); form.set("title", file.name.replace(/\.[^.]+$/, "").replace(/^\d+[\s._-]*/, "")); form.set("position", String(position));
+  const uploadMedia = async (albumId: string, file: File, position?: number) => {
+    const form = new FormData(); form.set("albumId", albumId); form.set("kind", "audio"); form.set("file", file); form.set("title", file.name.replace(/\.[^.]+$/, "").replace(/^\d+[\s._-]*/, ""));
+    if (position !== undefined) form.set("position", String(position));
     await api("/api/admin/media", { method: "POST", body: form });
   };
   const uploadAlbum = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setUploading(true); notify("מכינים את האלבום…");
+    let createdAlbumId = "";
     try {
       const form = event.currentTarget, values = new FormData(form), title = String(values.get("title") || "").trim(), artistName = String(values.get("artistName") || "").trim();
       const folderInput = form.elements.namedItem("folder") as HTMLInputElement, zipInput = form.elements.namedItem("zip") as HTMLInputElement;
@@ -73,13 +75,17 @@ export default function AdminPage() {
       const split = splitAlbumFiles(files);
       if (!title || !artistName || !split.audio.length) throw new Error("יש להזין שם, אמן ולבחור תיקייה או ZIP עם קובצי שמע.");
       const { id } = await api("/api/admin/catalog", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "album", title, artistName }) });
+      createdAlbumId = id;
       for (let index = 0; index < split.audio.length; index++) { notify(`מעלים שיר ${index + 1} מתוך ${split.audio.length}…`); await uploadMedia(id, split.audio[index], index); }
       form.reset(); notify(`האלבום הועלה בהצלחה עם ${split.audio.length} שירים.`); await load();
-    } catch (error) { notify(error instanceof Error ? error.message : "העלאת האלבום נכשלה."); } finally { setUploading(false); }
+    } catch (error) {
+      if (createdAlbumId) await fetch("/api/admin/catalog", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "album", id: createdAlbumId, cleanup: true }) }).catch(() => {});
+      notify(error instanceof Error ? `${error.message} האלבום החלקי נוקה.` : "העלאת האלבום נכשלה והאלבום החלקי נוקה.");
+    } finally { setUploading(false); }
   };
   const addFiles = async (albumId: string, files: FileList | null) => {
     if (!files?.length) return; setUploading(true);
-    try { const split = splitAlbumFiles(fromDirectory(files)); for (let i = 0; i < split.audio.length; i++) { notify(`מעלים קובץ ${i + 1} מתוך ${split.audio.length}…`); await uploadMedia(albumId, split.audio[i], i); } notify("הקבצים נוספו לאלבום."); await load(); }
+    try { const split = splitAlbumFiles(fromDirectory(files)); const start = (data?.songs.filter((song) => song.albumId === albumId).reduce((max, song) => Math.max(max, song.position), -1) ?? -1) + 1; for (let i = 0; i < split.audio.length; i++) { notify(`מעלים קובץ ${i + 1} מתוך ${split.audio.length}…`); await uploadMedia(albumId, split.audio[i], start + i); } notify("הקבצים נוספו לאלבום."); await load(); }
     catch (error) { notify(error instanceof Error ? error.message : "ההעלאה נכשלה."); } finally { setUploading(false); }
   };
   const uploadArtistImage = async (artistId: string, file: File) => {
@@ -97,7 +103,7 @@ export default function AdminPage() {
     if (!name) return notify("יש להזין שם זמר.");
     notify("שומרים…");
     try {
-      const { id } = await api("/api/admin/catalog", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "artist", name, imageUrl: String(values.get("imageUrl") || ""), position: Number(values.get("position") || 0) }) });
+      const { id } = await api("/api/admin/catalog", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "artist", name, imageUrl: String(values.get("imageUrl") || ""), position: String(values.get("position") || "") }) });
       const file = (form.elements.namedItem("image") as HTMLInputElement)?.files?.[0];
       if (file) { const body = new FormData(); body.set("artistId", id); body.set("kind", "artist"); body.set("file", file); notify("מעלים תמונת זמר…"); await api("/api/admin/media", { method: "POST", body }); }
       form.reset(); notify("הזמר נוסף."); await load();
@@ -109,11 +115,13 @@ export default function AdminPage() {
     if (kind === "album") {
       if (target < 0 || target >= albumOrder.length) return;
       const next = [...albumOrder]; [next[index], next[target]] = [next[target], next[index]]; setAlbumOrder(next);
-      await fetch("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "album", ids: next.map((a) => a.id) }) }).catch(() => {});
+      try { await api("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "album", ids: next.map((a) => a.id) }) }); }
+      catch (error) { setAlbumOrder(null); notify(error instanceof Error ? error.message : "שינוי הסדר נכשל."); }
     } else {
       if (target < 0 || target >= artistOrder.length) return;
       const next = [...artistOrder]; [next[index], next[target]] = [next[target], next[index]]; setArtistOrder(next);
-      await fetch("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "artist", ids: next.map((a) => a.id) }) }).catch(() => {});
+      try { await api("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "artist", ids: next.map((a) => a.id) }) }); }
+      catch (error) { setArtistOrder(null); notify(error instanceof Error ? error.message : "שינוי הסדר נכשל."); }
     }
   };
   const uploadAlbumCover = async (albumId: string, file: File) => {
@@ -166,7 +174,7 @@ function RecorderAccessPanel({ recorders, onSaved, onMessage }: { recorders: str
     onMessage("הגישה של המספר לקו ההקלטות בוטלה."); await onSaved();
   };
   return <div className="recorder-access">
-    <p className="panel-help">רק מספרים שמופיעים כאן יוכלו להיכנס לקו 0772267078. הזיהוי אוטומטי לפי מספר המתקשר ואין צורך בקוד.</p>
+    <p className="panel-help">רק מספרים שמופיעים כאן יוכלו להיכנס לקו ההקלטות והניהול. הזיהוי אוטומטי לפי מספר המתקשר ואין צורך בקוד.</p>
     <form className="archive-form" onSubmit={add}><input name="phone" type="tel" inputMode="tel" placeholder="לדוגמה 0501234567" required /><button>אישור מספר</button></form>
     <div className="admin-list manager-list">{recorders.length ? recorders.map((phone) => <article key={phone}><div><i>☎</i><span><b>{phone}</b><small>מורשה להקלטת קריינויות</small></span></div><button type="button" className="danger" onClick={() => remove(phone)}>ביטול גישה</button></article>) : <p className="panel-help">עדיין לא אושר אף מספר.</p>}</div>
   </div>;
@@ -338,7 +346,7 @@ function SettingsPanel({ data, onSaved }: { data: Overview; onSaved(): void }) {
   const { settings, readiness } = data;
   const { notify } = useNotice();
   const save = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.currentTarget)); const response = await fetch("/api/admin/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const result = await response.json(); if (response.ok) { notify(body.votingOpen ? "הסקר פורסם ופתוח להצבעה באתר ובקו." : "הסקר נשמר כטיוטה וסגור למאזינים."); onSaved(); } else notify(result.error || "לא הצלחנו לשמור את ההגדרות."); };
-  const clearPoll = async () => { if (!confirm("למחוק את כל הסקר הפעיל? לפני המחיקה יישמר ארכיון מלא ויירד גיבוי למחשב.")) return; const backup = await fetch("/api/admin/backup"); if (!backup.ok) return notify("לא הצלחנו ליצור גיבוי ולכן הסקר לא נמחק."); const blob = await backup.blob(), link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `rosh-berosh-backup-${Date.now()}.json`; link.click(); URL.revokeObjectURL(link.href); const response = await fetch("/api/admin/poll?skipArchive=1", { method: "DELETE" }); if (response.ok) { notify("הסקר הועבר לארכיון, הגיבוי ירד למחשב ונפתחה טיוטה חדשה."); onSaved(); } else notify("מחיקת הסקר נכשלה."); };
+  const clearPoll = async () => { if (!confirm("למחוק את כל הסקר הפעיל? לפני המחיקה יישמר בארכיון גיבוי מלא כולל קובצי המדיה, ויירד למחשב קובץ נתונים JSON.")) return; const backup = await fetch("/api/admin/backup"); if (!backup.ok) return notify("לא הצלחנו ליצור גיבוי ולכן הסקר לא נמחק."); const blob = await backup.blob(), link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `rosh-berosh-backup-${Date.now()}.json`; link.click(); URL.revokeObjectURL(link.href); const response = await fetch("/api/admin/poll?skipArchive=1", { method: "DELETE" }); if (response.ok) { notify("גיבוי מלא נשמר בארכיון, קובץ הנתונים ירד למחשב ונפתחה טיוטה חדשה."); onSaved(); } else notify("מחיקת הסקר נכשלה."); };
   const resetVotes = async () => { if (!confirm("לאפס את כל ההצבעות בסקר הפעיל? הפעולה בלתי הפיכה. האלבומים, השירים והזמרים יישארו.")) return; notify("מאפסים הצבעות..."); try { const response = await fetch("/api/admin/reset-votes", { method: "POST" }); const result = await response.json(); if (!response.ok) throw new Error(result.error || "איפוס ההצבעות נכשל."); notify(`${result.deleted} הצבעות נמחקו. האלבומים, השירים והזמרים נשמרו.`); onSaved(); } catch (error) { notify(error instanceof Error ? error.message : "איפוס ההצבעות נכשל."); } };
   return <AdminSection title="הכנת סקר ופרסום"><div className={`poll-state ${settings.votingOpen ? "published" : "draft"}`}><b>{settings.votingOpen ? "הסקר פעיל" : "טיוטה — הסקר עדיין לא מוצג למאזינים"}</b><span>{settings.votingOpen ? "האתר והקו הטלפוני מקבלים הצבעות." : "אפשר להעלות תוכן ולשנות הכל בלי שאיש יוכל להצביע."}</span></div><div className={`readiness-card ${readiness.ready ? "ready" : "not-ready"}`}><h3>{readiness.ready ? "הסקר מוכן לפרסום" : "בדיקת מוכנות לפרסום"}</h3><div className="readiness-counts"><span>✓ {readiness.counts.albums} אלבומים</span><span>✓ {readiness.counts.songs} שירים</span><span>✓ {readiness.counts.artists} זמרים</span></div>{readiness.warnings.length ? <ul>{readiness.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : <p>כל הרשימות מוכנות. אפשר לפרסם.</p>}{readiness.counts.missingCovers > 0 && <small>המלצה: חסרות עטיפות ל־{readiness.counts.missingCovers} אלבומים, אבל אפשר לפרסם גם כך.</small>}</div><form className="settings-form" onSubmit={save}><label className="master-switch"><input type="checkbox" name="votingOpen" defaultChecked={!!settings.votingOpen} /> פרסם ופתח את הסקר להצבעה</label><RuleRow title="אלבומים" prefix="albums" enabled={settings.albumsEnabled} min={settings.albumsMin} max={settings.albumsMax} /><RuleRow title="שירים מכל אלבום" prefix="songs" enabled={settings.songsEnabled} min={settings.songsMin} max={settings.songsMax} /><RuleRow title="זמרים" prefix="artists" enabled={settings.artistsEnabled} min={settings.artistsMin} max={settings.artistsMax} /><button>{settings.votingOpen ? "שמירת הגדרות הסקר" : "שמירה כטיוטה / פרסום"}</button><small>הסקר נשאר טיוטה עד לסימון „פרסם”. כל שינוי חל גם באתר וגם בקו הטלפוני.</small></form><button className="danger clear-poll" onClick={resetVotes}>איפוס כל ההצבעות</button><button className="danger clear-poll" onClick={clearPoll}>העברה לארכיון והתחלת סקר חדש</button></AdminSection>;
 }
@@ -353,7 +361,10 @@ function AlbumEditor({ album, songs, onSave, onToggle, onDelete, onFiles, onUplo
     const target = index + direction;
     if (target < 0 || target >= songOrder.length) return;
     const next = [...songOrder]; [next[index], next[target]] = [next[target], next[index]]; setSongOverride({ ref: songs, order: next });
-    await fetch("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "song", ids: next.map((s) => s.id) }) }).catch(() => {});
+    try {
+      const response = await fetch("/api/admin/reorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "song", ids: next.map((s) => s.id) }) });
+      if (!response.ok) throw new Error();
+    } catch { setSongOverride(null); alert("שינוי סדר השירים נכשל. הרשימה הוחזרה למצבה הקודם."); }
   };
   const uniqueCovers = [...new Set(songs.map((s) => s.coverUrl).filter(Boolean))];
   const derivedCover = album.coverUrl || (uniqueCovers.length >= 1 ? uniqueCovers[0] : null);
@@ -458,7 +469,7 @@ function ArchivesPanel({ onChanged, onMessage }: { onChanged(): Promise<void> | 
   const archive = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget, name = String(new FormData(form).get("name") || "").trim(); const response = await fetch("/api/admin/archive", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) }); if (response.ok) { form.reset(); onMessage("הסקר נשמר בארכיון."); await loadArchives(); } else onMessage("שמירת הארכיון נכשלה."); };
   const restore = async (item: PollArchive) => { if (!confirm(`לשחזר את „${item.name}”? הסקר הנוכחי יגובה אוטומטית והשחזור ייפתח כטיוטה.`)) return; const response = await fetch("/api/admin/archive", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ restoreKey: item.key }) }); if (response.ok) { onMessage("הסקר שוחזר כטיוטה. בדקו אותו לפני הפרסום."); await onChanged(); } else onMessage("השחזור נכשל."); };
   const remove = async (item: PollArchive) => { if (!confirm(`למחוק את „${item.name}” מהארכיון?`)) return; const response = await fetch("/api/admin/archive", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: item.key }) }); if (response.ok) { onMessage("העותק נמחק מהארכיון."); await loadArchives(); } };
-  return <AdminSection title="ארכיון סקרים וגיבויים"><p className="panel-help">שמרו גרסה מלאה של הסקר הנוכחי. אפשר לשחזר כל סקר כטיוטה, בלי לפרסם אותו מיד.</p><form className="archive-form" onSubmit={archive}><input name="name" placeholder="שם הסקר בארכיון" /><button>שמירת הסקר הנוכחי בארכיון</button></form>{loading ? <p>טוען ארכיון…</p> : <div className="archive-list">{archives.length ? archives.map((item) => <article key={item.key}><div><b>{item.name}</b><small>{new Date(item.createdAt).toLocaleString("he-IL")} · {item.votes} הצבעות</small><span>{item.albums} אלבומים · {item.songs} שירים · {item.artists} זמרים</span></div><div><button onClick={() => restore(item)}>שחזור כטיוטה</button><button className="danger" onClick={() => remove(item)}>מחיקה מהארכיון</button></div></article>) : <p>עדיין אין סקרים בארכיון.</p>}</div>}</AdminSection>;
+  return <AdminSection title="ארכיון סקרים וגיבויים"><p className="panel-help">שמרו גרסה מלאה של הסקר הנוכחי, כולל קובצי השמע והתמונות. אפשר לשחזר כל סקר כטיוטה, בלי לפרסם אותו מיד.</p><form className="archive-form" onSubmit={archive}><input name="name" placeholder="שם הסקר בארכיון" /><button>שמירת הסקר הנוכחי בארכיון</button></form>{loading ? <p>טוען ארכיון…</p> : <div className="archive-list">{archives.length ? archives.map((item) => <article key={item.key}><div><b>{item.name}</b><small>{new Date(item.createdAt).toLocaleString("he-IL")} · {item.votes} הצבעות</small><span>{item.albums} אלבומים · {item.songs} שירים · {item.artists} זמרים</span></div><div><button onClick={() => restore(item)}>שחזור כטיוטה</button><button className="danger" onClick={() => remove(item)}>מחיקה מהארכיון</button></div></article>) : <p>עדיין אין סקרים בארכיון.</p>}</div>}</AdminSection>;
 }
 function SurveysPanel({ data, onChanged, onMessage }: { data: Overview; onChanged(): Promise<void> | void; onMessage(message: string): void }) {
   const surveys = data.surveys ?? [];
@@ -520,7 +531,7 @@ function VotersPanel() {
         <div className="voter-header">
           <span className="voter-key">{v.voterKey}</span>
           <span className={`voter-channel ${v.channel}`}>{channelLabel(v.channel)}</span>
-          <time>{new Date(v.createdAt).toLocaleString("he-IL")}</time>
+          <time>{new Date(v.createdAt < 1_000_000_000_000 ? v.createdAt * 1000 : v.createdAt).toLocaleString("he-IL")}</time>
         </div>
         {v.albums.length > 0 && <div className="voter-section"><strong>אלבומים:</strong> {v.albums.join(", ")}</div>}
         {v.songs.length > 0 && <div className="voter-section"><strong>שירים:</strong> {v.songs.map((s) => `${s.title} (${s.albumTitle})`).join(", ")}</div>}

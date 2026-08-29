@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { LoginScreen, logout, useCurrentUser } from "./auth-ui";
 import { useNotice } from "./notice";
 import { usePlayer } from "./player-context";
+import { hasStageChoices } from "./voting-stage.js";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string | null };
 type Song = { id: string; albumId: string; title: string; audioUrl?: string | null; coverUrl?: string | null; previewStart?: number; previewEnd?: number };
@@ -74,6 +75,7 @@ export default function Home() {
   const stage = stages[stageIndex]?.key;
   const selectedAlbums = useMemo(() => catalog?.albums.filter((album) => albums.includes(album.id)) ?? [], [catalog, albums]);
   const selectedArtists = useMemo(() => catalog?.artists.filter((artist) => artists.includes(artist.id)) ?? [], [catalog, artists]);
+  const stageHasChoices = hasStageChoices(stage, catalog, selectedAlbums.length);
   const songsByAlbum = (albumId: string) => catalog?.songs.filter((song) => song.albumId === albumId) ?? [];
   const selectedSongNames = (albumId: string) => catalog?.songs.filter((song) => songs[albumId]?.includes(song.id)).map((song) => song.title).join(" · ") || "לא נבחר";
 
@@ -151,7 +153,8 @@ export default function Home() {
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
         {!catalog && !loadFailed && <div className="loading">טוענים את רשימת המצעד…</div>}
-        {catalog && catalog.albums.length === 0 && <div className="empty-catalog"><h2>המצעד בהכנה</h2><p>התוכן יעלה בקרוב.</p></div>}
+        {catalog && stage === "albums" && catalog.albums.length === 0 && <div className="empty-catalog"><h2>רשימת האלבומים בהכנה</h2><p>האלבומים יעלו בקרוב.</p></div>}
+        {catalog && stage === "artists" && catalog.artists.length === 0 && <div className="empty-catalog"><h2>רשימת הזמרים בהכנה</h2><p>הזמרים יעלו בקרוב.</p></div>}
         {catalog && stage === "albums" && <><Title kicker="שלב ראשון" title={`בחרו ${rangeText(catalog.rules.albumsMin, catalog.rules.albumsMax, "אלבומים")}`} count={`${albums.length}/${catalog.rules.albumsMax}`} /><div className="album-grid">{catalog.albums.map((album) => <button type="button" key={album.id} className={`choice-card ${albums.includes(album.id) ? "selected" : ""}`} onClick={() => toggleAlbum(album.id)}>{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><b>{album.title}</b><small>{album.artistName}</small><i>{albums.includes(album.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "songs" && (() => {
           const album = selectedAlbums[Math.min(songAlbumIndex, Math.max(0, selectedAlbums.length - 1))];
@@ -163,7 +166,7 @@ export default function Home() {
         })()}
         {catalog && stage === "artists" && <><Title kicker="שלב שלישי" title={`בחרו ${rangeText(catalog.rules.artistsMin, catalog.rules.artistsMax, "זמרים")}`} count={`${artists.length}/${catalog.rules.artistsMax}`} /><div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b><i>{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "summary" && <><Title kicker="כמעט סיימנו" title="אישור ההצבעה" /><div className="summary">{catalog.rules.albumsEnabled ? <><h3>האלבומים והשירים שבחרתם</h3><div className="summary-albums">{selectedAlbums.map((album) => <div key={album.id} className="summary-album">{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><div><b>{album.title}</b><small>{album.artistName}</small><span>{selectedSongNames(album.id)}</span></div></div>)}</div></> : null}{catalog.rules.artistsEnabled ? <><h3>הזמרים שבחרתם</h3><div className="summary-artists">{selectedArtists.map((artist) => <div key={artist.id} className="summary-artist">{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b></div>)}</div></> : null}</div><div className="signed-voter"><span>ההצבעה תישמר עבור</span><b>{user.email}</b></div></>}
-        {catalog && catalog.albums.length > 0 && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
+        {catalog && stageHasChoices && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
       </section>
     </>}
     {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} />}
