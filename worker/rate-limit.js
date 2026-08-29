@@ -1,5 +1,6 @@
 const BALLOT_RATE_WINDOW = 60;
 const BALLOT_RATE_LIMIT = 5;
+let lastCleanupAt = 0;
 
 async function rateBucket(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -8,6 +9,10 @@ async function rateBucket(value) {
 
 export async function checkBallotRate(db, ip, now = Math.floor(Date.now() / 1000)) {
   try {
+    if (now - lastCleanupAt >= BALLOT_RATE_WINDOW) {
+      await db.prepare("DELETE FROM ballot_rate_limits WHERE reset_at < ?").bind(now - BALLOT_RATE_WINDOW).run();
+      lastCleanupAt = now;
+    }
     const bucket = await rateBucket(ip);
     const resetAt = now + BALLOT_RATE_WINDOW;
     const row = await db.prepare(`

@@ -3,6 +3,7 @@ const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { normalizePhone, phone } = require("./phone");
 const { continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions } = require("./menu-input");
+const { sanitizeProgress, progressChanged } = require("./progress");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
@@ -11,7 +12,7 @@ const RECORDINGS_YEMOT_TOKEN = String(process.env.RECORDINGS_YEMOT_TOKEN || "").
 const RECORDINGS_YEMOT_API_BASE = String(process.env.RECORDINGS_YEMOT_API_BASE || "https://www.call2all.co.il/ym/api").replace(/\/$/, "");
 const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().replace(/\/$/, "");
 const PORT = process.env.PORT || 3000;
-const POST_VOTE_TRANSFER = String(process.env.POST_VOTE_TRANSFER || "0796077075").replace(/\D/g, "");
+const POST_VOTE_TRANSFER = String(process.env.POST_VOTE_TRANSFER || "").replace(/\D/g, "");
 const REQUEST_TIMEOUT_MS = 8000;
 if (!SITE_API_BASE_URL) { console.error("חסר SITE_API_BASE_URL"); process.exit(1); }
 if (!IVR_SECRET) { console.error("חסר IVR_SECRET"); process.exit(1); }
@@ -21,8 +22,11 @@ const RETRY_DELAY_MS = 1000;
 
 async function api(path, options = {}) {
   const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
+  const method = String(fetchOptions.method || "GET").toUpperCase();
+  const retries = method === "GET" || method === "HEAD" ? MAX_RETRIES : 0;
+  const logPath = new URL(path, "http://ivr.local").pathname;
   let lastError;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -36,7 +40,7 @@ async function api(path, options = {}) {
     } catch (error) {
       lastError = error;
       clearTimeout(timer);
-      if (attempt < MAX_RETRIES) { console.error(`IVR api retry ${attempt + 1} for ${path}:`, error.message); continue; }
+      if (attempt < retries) { console.error(`IVR api retry ${attempt + 1} for ${logPath}:`, error.message); continue; }
     } finally { clearTimeout(timer); }
   }
   throw lastError;
@@ -45,6 +49,7 @@ async function api(path, options = {}) {
 function text(data) { return { type: "text", data }; }
 function number(data) { return { type: "digits", data: String(data) }; }
 function file(data) { return { type: "file", data }; }
+function finishCall(call) { return POST_VOTE_TRANSFER ? call.routing_yemot(POST_VOTE_TRANSFER) : call.hangup(); }
 
 function promptMap(catalog) { return new Map((catalog.ivrPrompts || []).filter((item) => item?.key).map((item) => [item.key, item])); }
 function prompt(prompts, key, fallback) {
@@ -178,7 +183,7 @@ async function downloadRecordedAudio(fileName) {
   }
 }
 
-async function recordPromptByPhone(call, key, label) {
+async function recordPromptByPhone(call, callerPhone, key, label) {
   const fileName = promptFileName(key);
   await call.read(
     [text(`הקליטו כעת ${label} לסיום הקישו סולמית ולאחר מכן אשרו את ההקלטה`)],
@@ -195,6 +200,7 @@ async function recordPromptByPhone(call, key, label) {
   const form = new FormData();
   form.set("key", key);
   form.set("label", label);
+  form.set("phone", callerPhone);
   form.set("file", audio, `${fileName}.wav`);
   const { response, result } = await api("/api/ivr/prompt", {
     method: "POST",
@@ -347,7 +353,7 @@ async function managePrompt(call, callerPhone, target, prompts) {
     return "השמעת הקריינות הסתיימה";
   }
   if (action.digit === 2) {
-    await recordPromptByPhone(call, target.key, target.label);
+    await recordPromptByPhone(call, callerPhone, target.key, target.label);
     return "הקריינות נשמרה והיא פעילה בקו ההצבעה";
   }
   if (action.digit === 3 && current) {
@@ -388,14 +394,30 @@ async function votingManagement(call, callerPhone) {
 
 async function surveysManagement(call, callerPhone) {
   const state = await phoneAdminOverview(callerPhone);
-  const survey = await adminChoice(call, `הסקר הפעיל הוא ${state.activeSurvey.name}. בחרו סקר להפעלה`, [
-    ...(state.surveys || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.name}${item.active ? ", פעיל כעת" : ""}` })),
+  const operation = await adminChoice(call, `הסקר הפעיל הוא ${state.activeSurvey.name}. ניהול סקרים`, [
+    { digit: 1, label: "להפעלת סקר קיים" },
+    { digit: 2, label: "ליצירת סקר חדש בשם אוטומטי" },
+    { digit: 3, label: "למחיקת סקר שאינו פעיל" },
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (!operation || operation.digit === 0) return "חזרתם לתפריט הניהול";
+  if (operation.digit === 2) {
+    if (!(await confirmAction(call, "האם ליצור סקר חדש כטיוטה עם שם אוטומטי"))) return "יצירת הסקר בוטלה";
+    return (await phoneAdminAction(callerPhone, { action: "create-survey" })).message;
+  }
+  const candidates = operation.digit === 1 ? (state.surveys || []) : (state.surveys || []).filter((item) => !item.active);
+  const survey = await adminChoice(call, operation.digit === 1 ? "בחרו סקר להפעלה" : "בחרו סקר למחיקה", [
+    ...candidates.map((item, index) => ({ ...item, digit: index + 1, label: `${item.name}${item.active ? ", פעיל כעת" : ""}` })),
     { digit: 0, id: "", label: "לחזרה" },
   ]);
-  if (!survey?.id) return "חזרתם לתפריט הניהול";
-  if (survey.active) return "הסקר שבחרתם כבר פעיל";
-  if (!(await confirmAction(call, `האם להפעיל את הסקר ${survey.name}`))) return "הפעלת הסקר בוטלה";
-  return (await phoneAdminAction(callerPhone, { action: "activate-survey", id: survey.id })).message;
+  if (!survey?.id) return "חזרתם לתפריט ניהול הסקרים";
+  if (operation.digit === 1) {
+    if (survey.active) return "הסקר שבחרתם כבר פעיל";
+    if (!(await confirmAction(call, `האם להפעיל את הסקר ${survey.name}`))) return "הפעלת הסקר בוטלה";
+    return (await phoneAdminAction(callerPhone, { action: "activate-survey", id: survey.id })).message;
+  }
+  if (!(await confirmAction(call, `האם למחוק לצמיתות את הסקר ${survey.name}`))) return "מחיקת הסקר בוטלה";
+  return (await phoneAdminAction(callerPhone, { action: "delete-survey", id: survey.id })).message;
 }
 
 async function settingsManagement(call, callerPhone) {
@@ -458,9 +480,24 @@ async function contentManagement(call, callerPhone) {
     { digit: 0, id: "", label: "לחזרה" },
   ]);
   if (!item?.id) return "חזרתם לתפריט ניהול התוכן";
-  const nextActive = !item.active;
-  if (!(await confirmAction(call, `${nextActive ? "להפעיל" : "להשבית"} את ${item.title || item.name}`))) return "השינוי בוטל";
-  return (await phoneAdminAction(callerPhone, { action: "toggle-item", kind, id: item.id, value: nextActive })).message;
+  const operation = await adminChoice(call, `ניהול ${item.title || item.name}`, [
+    { digit: 1, label: item.active ? "להשבתת הפריט" : "להפעלת הפריט" },
+    { digit: 2, label: "להזזת הפריט למעלה" },
+    { digit: 3, label: "להזזת הפריט למטה" },
+    { digit: 4, label: "למחיקת הפריט לצמיתות" },
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (!operation || operation.digit === 0) return "חזרתם לתפריט ניהול התוכן";
+  if (operation.digit === 1) {
+    const nextActive = !item.active;
+    if (!(await confirmAction(call, `${nextActive ? "להפעיל" : "להשבית"} את ${item.title || item.name}`))) return "השינוי בוטל";
+    return (await phoneAdminAction(callerPhone, { action: "toggle-item", kind, id: item.id, value: nextActive })).message;
+  }
+  if (operation.digit === 2 || operation.digit === 3) {
+    return (await phoneAdminAction(callerPhone, { action: "move-item", kind, id: item.id, direction: operation.digit === 2 ? -1 : 1 })).message;
+  }
+  if (!(await confirmAction(call, `האם למחוק לצמיתות את ${item.title || item.name}`))) return "המחיקה בוטלה";
+  return (await phoneAdminAction(callerPhone, { action: "delete-item", kind, id: item.id })).message;
 }
 
 async function recordersManagement(call, callerPhone) {
@@ -496,6 +533,37 @@ async function recordersManagement(call, callerPhone) {
     return "חזרתם לתפריט ההרשאות";
   }
   return "חזרתם לתפריט הניהול";
+}
+
+async function maintenanceManagement(call, callerPhone) {
+  const state = await phoneAdminOverview(callerPhone);
+  const choice = await adminChoice(call, "גיבויים ופעולות מתקדמות", [
+    { digit: 1, label: "ליצירת גיבוי מלא בארכיון" },
+    { digit: 2, label: "לשחזור גיבוי מהארכיון" },
+    { digit: 3, label: "למחיקת גיבוי מהארכיון" },
+    { digit: 4, label: "לאיפוס כל ההצבעות בסקר הפעיל" },
+    { digit: 0, label: "לחזרה" },
+  ]);
+  if (!choice || choice.digit === 0) return "חזרתם לתפריט הניהול";
+  if (choice.digit === 1) {
+    if (!(await confirmAction(call, "האם ליצור עכשיו גיבוי מלא כולל קובצי המדיה"))) return "יצירת הגיבוי בוטלה";
+    return (await phoneAdminAction(callerPhone, { action: "create-archive" })).message;
+  }
+  if (choice.digit === 4) {
+    if (!(await confirmAction(call, "האם למחוק לצמיתות את כל ההצבעות בסקר הפעיל"))) return "איפוס ההצבעות בוטל";
+    return (await phoneAdminAction(callerPhone, { action: "reset-votes" })).message;
+  }
+  const archive = await adminChoice(call, choice.digit === 2 ? "בחרו גיבוי לשחזור" : "בחרו גיבוי למחיקה", [
+    ...(state.archives || []).map((item, index) => ({ ...item, digit: index + 1, label: `${item.name}, ${item.votes} הצבעות` })),
+    { digit: 0, key: "", label: "לחזרה" },
+  ]);
+  if (!archive?.key) return "חזרתם לתפריט הפעולות המתקדמות";
+  if (choice.digit === 2) {
+    if (!(await confirmAction(call, `האם לשחזר את הגיבוי ${archive.name}. המצב הנוכחי יגובה אוטומטית`))) return "השחזור בוטל";
+    return (await phoneAdminAction(callerPhone, { action: "restore-archive", key: archive.key })).message;
+  }
+  if (!(await confirmAction(call, `האם למחוק לצמיתות את הגיבוי ${archive.name}`))) return "מחיקת הגיבוי בוטלה";
+  return (await phoneAdminAction(callerPhone, { action: "delete-archive", key: archive.key })).message;
 }
 
 async function statusManagement(call, callerPhone) {
@@ -544,6 +612,7 @@ router.get("/recordings", async (call) => {
       { digit: 5, label: "הפעלה והשבתה של אלבומים שירים וזמרים" },
       { digit: 6, label: "ניהול מספרי מקליטים מורשים" },
       { digit: 7, label: "מצב המערכת ותוצאות" },
+      { digit: 8, label: "גיבויים איפוס הצבעות ופעולות מתקדמות" },
       { digit: 9, label: "לסיום" },
     ]);
     if (!section || section.digit === 9) {
@@ -558,6 +627,7 @@ router.get("/recordings", async (call) => {
       else if (section.digit === 5) lead = await contentManagement(call, callerPhone);
       else if (section.digit === 6) lead = await recordersManagement(call, callerPhone);
       else if (section.digit === 7) lead = await statusManagement(call, callerPhone);
+      else if (section.digit === 8) lead = await maintenanceManagement(call, callerPhone);
     } catch (error) {
       console.error("phone admin IVR error", error);
       lead = error instanceof Error ? error.message : "פעולת הניהול נכשלה נא לנסות שוב";
@@ -579,7 +649,7 @@ router.get("/", async (call) => {
     const { result: check } = await api(`/api/ballots/check?voterKey=${encodeURIComponent(voterPhone)}`);
     if (check.voted) {
       call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"), { prependToNextAction: true });
-      return call.routing_yemot(POST_VOTE_TRANSFER);
+      return finishCall(call);
     }
   } catch {}
 
@@ -598,9 +668,11 @@ router.get("/", async (call) => {
   let selectedAlbums = [], selectedArtists = [], songIdsByAlbum = {}, menuLead = [];
 
   if (saved) {
-    if (saved.albumIds?.length) selectedAlbums = (catalog.albums || []).filter((a) => saved.albumIds.includes(a.id));
-    if (saved.songIdsByAlbum) songIdsByAlbum = saved.songIdsByAlbum;
-    if (saved.artistIds?.length) selectedArtists = (catalog.artists || []).filter((a) => saved.artistIds.includes(a.id));
+    const sanitized = sanitizeProgress(saved, catalog, rules);
+    if (sanitized.albumIds.length) selectedAlbums = (catalog.albums || []).filter((a) => sanitized.albumIds.includes(a.id));
+    songIdsByAlbum = sanitized.songIdsByAlbum;
+    if (sanitized.artistIds.length) selectedArtists = (catalog.artists || []).filter((a) => sanitized.artistIds.includes(a.id));
+    if (progressChanged(saved, sanitized)) await saveProgress(voterPhone, sanitized);
     menuLead = prompt(prompts, "system:welcome_back", "ברוכים השבים ממשיכים מאיפה שהפסקתם");
   }
 
@@ -685,12 +757,17 @@ router.get("/", async (call) => {
   if (submission.response.status === 409) {
     await clearProgress(voterPhone);
     call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"), { prependToNextAction: true });
-    return call.routing_yemot(POST_VOTE_TRANSFER);
+    return finishCall(call);
+  }
+  if (submission.response.status === 400) {
+    await clearProgress(voterPhone);
+    call.id_list_message([text("רשימת הסקר השתנתה בזמן ההצבעה. הבחירות הישנות נוקו. נא לחייג שוב ולבחור מחדש")], { prependToNextAction: true });
+    return call.hangup();
   }
   if (!submission.response.ok) return call.id_list_message(prompt(prompts, "system:error", "שמירת ההצבעה נכשלה נא לנסות שוב מאוחר יותר"));
   await clearProgress(voterPhone);
   call.id_list_message(prompt(prompts, "system:success", "תודה הצבעתכם נקלטה בהצלחה"), { prependToNextAction: true });
-  return call.routing_yemot(POST_VOTE_TRANSFER);
+  return finishCall(call);
 });
 
 const app = express();

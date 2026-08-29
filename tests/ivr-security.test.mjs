@@ -3,10 +3,56 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import { normalizePhone as normalizeWorkerPhone } from "../worker/phone.js";
 import { ballotRateConfig, checkBallotRate } from "../worker/rate-limit.js";
+import { resolveCatalogPosition } from "../worker/catalog-position.js";
+import { hasStageChoices } from "../app/voting-stage.js";
 
 const require = createRequire(import.meta.url);
 const { normalizePhone: normalizeIvrPhone, phone } = require("../ivr-service/src/phone.js");
 const { continuousMenuInput, menuCode, menuReadOptions } = require("../ivr-service/src/menu-input.js");
+const { sanitizeProgress, progressChanged } = require("../ivr-service/src/progress.js");
+
+function ivrRecorderEnv(initial = []) {
+  const recorders = new Set();
+  const meta = new Map();
+  const legacy = [...initial];
+  const prepare = (sql) => {
+    const make = (args = []) => ({
+      _sql: sql,
+      _args: args,
+      bind(...next) { return make(next); },
+      async all() {
+        if (sql.includes("PRAGMA table_info(songs)")) return { results: [{ name: "cover_url" }] };
+        if (sql.includes("PRAGMA table_info(ballots)")) return { results: [{ name: "fingerprint" }] };
+        if (sql.includes("SELECT phone FROM ivr_recorders ORDER BY")) return { results: [...recorders].sort().map((phone) => ({ phone })) };
+        return { results: [] };
+      },
+      async first() {
+        if (sql.includes("SELECT value FROM ivr_store_meta")) return meta.has(args[0]) ? { value: meta.get(args[0]) } : null;
+        if (sql.includes("DELETE FROM ivr_recorders") && sql.includes("RETURNING")) {
+          if (recorders.has(args[0]) && recorders.size > 1) { recorders.delete(args[0]); return { phone: args[0] }; }
+          return null;
+        }
+        if (sql.includes("SELECT phone FROM ivr_recorders WHERE")) return recorders.has(args[0]) ? { phone: args[0] } : null;
+        return null;
+      },
+      async run() {
+        if (sql.includes("INSERT OR IGNORE INTO ivr_recorders")) recorders.add(args[0]);
+        if (sql.includes("INSERT OR REPLACE INTO ivr_store_meta")) meta.set(args[0], args[1]);
+        return { success: true };
+      },
+    });
+    return make();
+  };
+  const DB = {
+    prepare,
+    async exec() {},
+    async batch(statements) { for (const statement of statements) await statement.run(); return statements.map(() => ({ results: [] })); },
+  };
+  const MEDIA = {
+    async get(key) { return key === "ivr-prompts/recorders.json" ? { async json() { return legacy; } } : null; },
+  };
+  return { DB, MEDIA, recorders: () => [...recorders].sort() };
+}
 
 const phoneCases = [
   ["0501234567", "0501234567"],
@@ -25,6 +71,20 @@ test("phone numbers are canonical in both the Worker and IVR service", () => {
     assert.equal(normalizeWorkerPhone(input), expected, `Worker: ${input}`);
     assert.equal(normalizeIvrPhone(input), expected, `IVR: ${input}`);
   }
+});
+
+test("renaming a song preserves its existing position", () => {
+  assert.equal(resolveCatalogPosition(undefined, 17, 40), 17);
+  assert.equal(resolveCatalogPosition("", 17, 40), 17);
+  assert.equal(resolveCatalogPosition("3", 17, 40), 3);
+  assert.equal(resolveCatalogPosition(undefined, undefined, 40), 40);
+});
+
+test("an artists-only survey can advance without albums", () => {
+  const catalog = { albums: [], songs: [], artists: [{ id: "artist-1" }] };
+  assert.equal(hasStageChoices("artists", catalog, 0), true);
+  assert.equal(hasStageChoices("albums", catalog, 0), false);
+  assert.equal(hasStageChoices("summary", catalog, 0), true);
 });
 
 test("the IVR never falls back to a call id when caller id is missing", () => {
@@ -53,10 +113,15 @@ test("all long IVR menus use fixed-width codes without pages", () => {
 test("ballot rate limiting is persisted through D1", async () => {
   const buckets = new Map();
   const db = {
-    prepare() {
+    prepare(sql) {
       return {
         bind(bucket, resetAt, now) {
           return {
+            async run() {
+              if (sql.includes("DELETE FROM ballot_rate_limits")) {
+                for (const [key, current] of buckets) if (current.resetAt < bucket) buckets.delete(key);
+              }
+            },
             async first() {
               const current = buckets.get(bucket);
               const next = !current || current.resetAt <= now
@@ -225,17 +290,8 @@ test("phone administration requires both the IVR secret and an authorized caller
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("phone-admin-security-test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
-  let recorders = ["0501111111"];
-  const media = {
-    async get(key) {
-      if (key !== "ivr-prompts/recorders.json") return null;
-      return { async json() { return [...recorders]; } };
-    },
-    async put(key, value) {
-      if (key === "ivr-prompts/recorders.json") recorders = JSON.parse(String(value));
-    },
-  };
-  const env = { IVR_SECRET: "phone-admin-secret", MEDIA: media };
+  const store = ivrRecorderEnv(["0501111111"]);
+  const env = { IVR_SECRET: "phone-admin-secret", ...store };
   const ctx = { waitUntil() {}, passThroughOnException() {} };
   const request = (phone, headers = {}) => new Request("http://localhost/api/ivr/admin/action", {
     method: "POST",
@@ -248,26 +304,67 @@ test("phone administration requires both the IVR secret and an authorized caller
 
   const added = await worker.fetch(request("0501111111", { "x-ivr-secret": "phone-admin-secret" }), env, ctx);
   assert.equal(added.status, 200);
-  assert.deepEqual(recorders, ["0501111111", "0502222222"]);
+  assert.deepEqual(store.recorders(), ["0501111111", "0502222222"]);
 });
 
 test("phone administration never removes the last authorized recorder", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("last-recorder-test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
-  const recorders = ["0501111111"];
-  const env = {
-    IVR_SECRET: "phone-admin-secret",
-    MEDIA: {
-      async get(key) { return key === "ivr-prompts/recorders.json" ? { async json() { return recorders; } } : null; },
-      async put() { throw new Error("the last recorder must not be removed"); },
-    },
-  };
+  const store = ivrRecorderEnv(["0501111111"]);
+  const env = { IVR_SECRET: "phone-admin-secret", ...store };
   const response = await worker.fetch(new Request("http://localhost/api/ivr/admin/action", {
     method: "POST",
     headers: { "content-type": "application/json", "x-ivr-secret": "phone-admin-secret" },
     body: JSON.stringify({ phone: "0501111111", action: "remove-recorder", targetPhone: "0501111111" }),
   }), env, { waitUntil() {}, passThroughOnException() {} });
   assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /האחרון/);
+  assert.match((await response.json()).error, /אי אפשר להסיר/);
+  assert.deepEqual(store.recorders(), ["0501111111"]);
+});
+
+test("stale phone progress is filtered against the current catalog and quotas", () => {
+  const catalog = {
+    albums: [{ id: "a1" }, { id: "a2" }],
+    songs: [{ id: "s1", albumId: "a1" }, { id: "s2", albumId: "a1" }, { id: "s3", albumId: "a2" }],
+    artists: [{ id: "r1" }, { id: "r2" }],
+  };
+  const rules = { albumsEnabled: 1, albumsMax: 1, songsEnabled: 1, songsMax: 1, artistsEnabled: 1, artistsMax: 1 };
+  const saved = { albumIds: ["deleted", "a1", "a2"], songIdsByAlbum: { deleted: ["ghost"], a1: ["gone", "s2", "s1"], a2: ["s3"] }, artistIds: ["gone", "r2", "r1"] };
+  const sanitized = sanitizeProgress(saved, catalog, rules);
+  assert.deepEqual(sanitized, { albumIds: ["a1"], songIdsByAlbum: { a1: ["s2"] }, artistIds: ["r2"] });
+  assert.equal(progressChanged(saved, sanitized), true);
+  assert.equal(progressChanged(sanitized, sanitized), false);
+});
+
+test("two recorder additions do not overwrite each other", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("recorder-concurrency-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const store = ivrRecorderEnv(["0501111111"]);
+  const env = { IVR_SECRET: "phone-admin-secret", ...store };
+  const add = (targetPhone) => worker.fetch(new Request("http://localhost/api/ivr/admin/action", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ivr-secret": "phone-admin-secret" },
+    body: JSON.stringify({ phone: "0501111111", action: "add-recorder", targetPhone }),
+  }), env, { waitUntil() {}, passThroughOnException() {} });
+  const responses = await Promise.all([add("0502222222"), add("0503333333")]);
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.deepEqual(store.recorders(), ["0501111111", "0502222222", "0503333333"]);
+});
+
+test("prompt upload rechecks recorder authorization", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("revoked-recorder-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const store = ivrRecorderEnv(["0501111111"]);
+  const form = new FormData();
+  form.set("phone", "0509999999");
+  form.set("key", "system:main_menu");
+  form.set("label", "תפריט ראשי");
+  form.set("file", new File(["audio"], "prompt.wav", { type: "audio/wav" }));
+  const response = await worker.fetch(new Request("http://localhost/api/ivr/prompt", {
+    method: "POST", headers: { "x-ivr-secret": "phone-admin-secret" }, body: form,
+  }), { IVR_SECRET: "phone-admin-secret", ...store }, { waitUntil() {}, passThroughOnException() {} });
+  assert.equal(response.status, 403);
 });

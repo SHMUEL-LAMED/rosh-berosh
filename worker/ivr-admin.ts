@@ -1,5 +1,6 @@
-import { readIvrPrompts, readIvrRecorders, saveIvrPrompts, saveIvrRecorders } from "./ivr-prompts";
+import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrPrompts, readIvrRecorders, removeIvrRecorder } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
+import { createPollSnapshot, deleteCatalogItem, deletePollArchive, deleteSurveyData, listPollArchives, resetPollVotes, restorePollArchive } from "./admin";
 
 type IvrAdminEnv = { DB: D1Database; MEDIA: R2Bucket };
 type Settings = {
@@ -26,6 +27,7 @@ type ActionBody = {
   max?: number;
   key?: string;
   targetPhone?: string;
+  direction?: -1 | 1;
 };
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -146,7 +148,7 @@ async function overview(env: IvrAdminEnv, callerPhone: string): Promise<Response
     env.DB.prepare("SELECT a.name AS label,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.name LIMIT 5").bind(survey.id),
   ]);
   const currentSettings = (settings.results[0] as unknown as Settings | undefined) ?? DEFAULT_SETTINGS;
-  const [prompts, currentReadiness] = await Promise.all([readIvrPrompts(env), readiness(env, survey.id, currentSettings)]);
+  const [prompts, currentReadiness, archives] = await Promise.all([readIvrPrompts(env), readiness(env, survey.id, currentSettings), listPollArchives(env)]);
   return json({
     activeSurvey: survey,
     surveys: surveys.results,
@@ -159,6 +161,7 @@ async function overview(env: IvrAdminEnv, callerPhone: string): Promise<Response
     readiness: currentReadiness,
     prompts,
     recorders: access.recorders,
+    archives: archives.slice(0, 50),
   });
 }
 
@@ -169,21 +172,38 @@ async function action(env: IvrAdminEnv, body: ActionBody): Promise<Response> {
   if (body.action === "add-recorder") {
     const targetPhone = normalizePhone(body.targetPhone || "");
     if (!targetPhone) return json({ error: "מספר הטלפון שהוקש אינו תקין." }, 400);
-    const next = [...new Set([...access.recorders, targetPhone])].sort();
-    await saveIvrRecorders(env, next);
+    const next = await addIvrRecorder(env, targetPhone);
     return json({ ok: true, message: "המספר נוסף לרשימת המקליטים המורשים.", recorders: next });
   }
 
   if (body.action === "remove-recorder") {
     const targetPhone = normalizePhone(body.targetPhone || "");
     if (!targetPhone || !access.recorders.includes(targetPhone)) return json({ error: "המספר אינו נמצא ברשימת המקליטים." }, 404);
-    if (access.recorders.length <= 1) return json({ error: "אי אפשר להסיר את המספר המורשה האחרון." }, 400);
-    const next = access.recorders.filter((phone) => phone !== targetPhone);
-    await saveIvrRecorders(env, next);
-    return json({ ok: true, message: "הרשאת ההקלטה של המספר הוסרה.", recorders: next });
+    if (targetPhone === access.phone) return json({ error: "אי אפשר להסיר דרך השיחה את המספר שממנו אתם מנהלים כעת." }, 400);
+    const removed = await removeIvrRecorder(env, targetPhone);
+    if (!removed.removed) return json({ error: removed.reason === "last" ? "אי אפשר להסיר את המספר המורשה האחרון." : "המספר אינו נמצא ברשימת המקליטים." }, removed.reason === "last" ? 400 : 404);
+    return json({ ok: true, message: "הרשאת ההקלטה של המספר הוסרה.", recorders: removed.recorders });
   }
 
   const survey = await activeSurvey(env);
+
+  if (body.action === "create-survey") {
+    const total = await env.DB.prepare("SELECT COUNT(*) AS total FROM surveys").first<{ total: number }>();
+    const id = crypto.randomUUID();
+    const name = `סקר טלפוני ${Number(total?.total || 0) + 1}`;
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO surveys (id,name,active) VALUES (?,?,0)").bind(id, name),
+      env.DB.prepare("INSERT INTO poll_settings (id,voting_open) VALUES (?,0)").bind(id),
+    ]);
+    return json({ ok: true, message: `${name} נוצר כטיוטה.`, id });
+  }
+
+  if (body.action === "delete-survey") {
+    const id = String(body.id || "").trim();
+    try { await deleteSurveyData(env, id); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : "מחיקת הסקר נכשלה." }, 400); }
+    return json({ ok: true, message: "הסקר נמחק." });
+  }
 
   if (body.action === "set-voting-open") {
     const settings = await readSettings(env, survey.id);
@@ -201,6 +221,11 @@ async function action(env: IvrAdminEnv, body: ActionBody): Promise<Response> {
     const id = String(body.id || "").trim();
     const target = id ? await env.DB.prepare("SELECT id,name FROM surveys WHERE id=?").bind(id).first<{ id: string; name: string }>() : null;
     if (!target) return json({ error: "הסקר לא נמצא." }, 404);
+    const targetSettings = await readSettings(env, id);
+    if (targetSettings.votingOpen) {
+      const targetReadiness = await readiness(env, id, targetSettings);
+      if (!targetReadiness.ready) return json({ error: `אי אפשר להפעיל סקר פתוח שאינו מוכן: ${targetReadiness.warnings.join(", ")}.` }, 400);
+    }
     await env.DB.batch([
       env.DB.prepare("UPDATE surveys SET active=0"),
       env.DB.prepare("UPDATE surveys SET active=1 WHERE id=?").bind(id),
@@ -245,8 +270,9 @@ async function action(env: IvrAdminEnv, body: ActionBody): Promise<Response> {
     const item = await env.DB.prepare(lookups[kind]).bind(id, survey.id).first<{ id: string; label: string; active: number }>();
     if (!item) return json({ error: "הפריט לא נמצא בסקר הפעיל." }, 404);
     const nextActive = body.value ? 1 : 0;
-    await env.DB.prepare(`UPDATE ${tables[kind]} SET active=? WHERE id=?`).bind(nextActive, id).run();
     const settings = await readSettings(env, survey.id);
+    if (!nextActive && settings.votingOpen) return json({ error: "כדי להשבית פריט יש לסגור קודם את ההצבעה." }, 409);
+    await env.DB.prepare(`UPDATE ${tables[kind]} SET active=? WHERE id=?`).bind(nextActive, id).run();
     if (settings.votingOpen) {
       const currentReadiness = await readiness(env, survey.id, settings);
       if (!currentReadiness.ready) {
@@ -257,14 +283,73 @@ async function action(env: IvrAdminEnv, body: ActionBody): Promise<Response> {
     return json({ ok: true, message: `${item.label} ${nextActive ? "הופעל" : "הושבת"}.` });
   }
 
+  if (body.action === "delete-item") {
+    const kind = body.kind, id = String(body.id || "").trim();
+    if (!kind || !id) return json({ error: "הפריט לא נבחר." }, 400);
+    try { await deleteCatalogItem(env, survey.id, kind, id); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : "מחיקת הפריט נכשלה." }, 400); }
+    return json({ ok: true, message: "הפריט נמחק." });
+  }
+
+  if (body.action === "move-item") {
+    const kind = body.kind, id = String(body.id || "").trim(), direction = body.direction === -1 ? -1 : body.direction === 1 ? 1 : 0;
+    if (!kind || !id || !direction) return json({ error: "הפריט או כיוון ההזזה אינם תקינים." }, 400);
+    const settings = await readSettings(env, survey.id);
+    if (settings.votingOpen) return json({ error: "כדי לשנות סדר יש לסגור קודם את ההצבעה." }, 409);
+    let rows: { id: string }[] = [];
+    if (kind === "album") rows = (await env.DB.prepare("SELECT id FROM albums WHERE survey_id=? ORDER BY position,title").bind(survey.id).all<{ id: string }>()).results;
+    else if (kind === "artist") rows = (await env.DB.prepare("SELECT id FROM artists WHERE survey_id=? ORDER BY position,name").bind(survey.id).all<{ id: string }>()).results;
+    else {
+      const song = await env.DB.prepare("SELECT s.album_id AS albumId FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.id=? AND a.survey_id=?").bind(id, survey.id).first<{ albumId: string }>();
+      if (!song) return json({ error: "השיר לא נמצא." }, 404);
+      rows = (await env.DB.prepare("SELECT id FROM songs WHERE album_id=? ORDER BY position,title").bind(song.albumId).all<{ id: string }>()).results;
+    }
+    const index = rows.findIndex((row) => row.id === id), target = index + direction;
+    if (index < 0 || target < 0 || target >= rows.length) return json({ error: "אי אפשר להזיז את הפריט בכיוון הזה." }, 400);
+    [rows[index], rows[target]] = [rows[target], rows[index]];
+    const table = kind === "album" ? "albums" : kind === "artist" ? "artists" : "songs";
+    await env.DB.batch(rows.map((row, position) => env.DB.prepare(`UPDATE ${table} SET position=? WHERE id=?`).bind(position, row.id)));
+    return json({ ok: true, message: direction < 0 ? "הפריט הוזז למעלה." : "הפריט הוזז למטה." });
+  }
+
+  if (body.action === "reset-votes") {
+    const settings = await readSettings(env, survey.id);
+    if (settings.votingOpen) return json({ error: "כדי לאפס הצבעות יש לסגור קודם את ההצבעה." }, 409);
+    const deleted = await resetPollVotes(env, survey.id);
+    return json({ ok: true, message: `${deleted} הצבעות נמחקו.` });
+  }
+
+  if (body.action === "create-archive") {
+    let archive;
+    try { archive = await createPollSnapshot(env, "ארכיון שנוצר דרך הטלפון", survey.id); }
+    catch (error) { console.error("phone archive failed", error); return json({ error: "הגיבוי בוטל כי אחד מקובצי המדיה חסר." }, 500); }
+    return json({ ok: true, message: "נוצר גיבוי מלא של הסקר בארכיון.", archive: { key: archive.key, name: archive.name } });
+  }
+
+  if (body.action === "restore-archive") {
+    const key = String(body.key || "");
+    const settings = await readSettings(env, survey.id);
+    if (settings.votingOpen) return json({ error: "כדי לשחזר ארכיון יש לסגור קודם את ההצבעה." }, 409);
+    try { await restorePollArchive(env, key, survey.id); }
+    catch (error) { console.error("phone archive restore failed", error); return json({ error: "שחזור הארכיון נכשל והמצב הקודם נשמר." }, 500); }
+    return json({ ok: true, message: "הארכיון שוחזר כטיוטה." });
+  }
+
+  if (body.action === "delete-archive") {
+    const key = String(body.key || "");
+    if (!key.startsWith("poll-archives/") || !key.endsWith(".json")) return json({ error: "הארכיון אינו תקין." }, 400);
+    await deletePollArchive(env, key);
+    return json({ ok: true, message: "הארכיון נמחק." });
+  }
+
   if (body.action === "delete-prompt") {
     const key = String(body.key || "").trim();
     if (!/^[a-z0-9:_-]+$/i.test(key)) return json({ error: "סוג הקריינות אינו תקין." }, 400);
     const prompts = await readIvrPrompts(env);
     const current = prompts.find((prompt) => prompt.key === key);
     if (!current) return json({ error: "אין קריינות מוקלטת למחיקה." }, 404);
-    if (current.audioUrl.startsWith("/media/")) await env.MEDIA.delete(decodeURIComponent(current.audioUrl.slice(7)));
-    await saveIvrPrompts(env, prompts.filter((prompt) => prompt.key !== key));
+    await deleteIvrPrompt(env, key);
+    await deleteIvrAudioIfUnreferenced(env, current.audioUrl);
     return json({ ok: true, message: "הקריינות נמחקה והקו יחזור לקריינות האוטומטית." });
   }
 
@@ -280,7 +365,13 @@ export async function ivrAdminApi(request: Request, env: IvrAdminEnv): Promise<R
     let body: ActionBody;
     try { body = await request.json<ActionBody>(); }
     catch { return json({ error: "בקשת הניהול אינה תקינה." }, 400); }
-    return action(env, body);
+    const response = await action(env, body);
+    try {
+      const target = body.targetPhone || body.id || body.key || body.stage || body.kind || null;
+      await env.DB.prepare("INSERT INTO ivr_admin_audit (id,phone,action,target,status) VALUES (?,?,?,?,?)")
+        .bind(crypto.randomUUID(), normalizePhone(body.phone || "") || "unknown", String(body.action || "unknown"), target, response.status).run();
+    } catch (error) { console.error("phone admin audit failed", error); }
+    return response;
   }
   return json({ error: "הפעולה לא נמצאה." }, 404);
 }
