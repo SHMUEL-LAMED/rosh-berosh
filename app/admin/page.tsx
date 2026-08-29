@@ -185,6 +185,10 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
   const rows = (items: { key: string; label: string }[]) => <div className="prompt-list">{items.map((item) => <PromptRow key={item.key} item={item} prompt={promptFor(item.key)} ttsAvailable={data.ttsAvailable} onSaved={onSaved} onMessage={onMessage} />)}</div>;
   const activeAlbums = data.albums.filter((album) => album.active);
   const activeArtists = data.artists.filter((artist) => artist.active);
+  const activeSurveyId = data.activeSurvey?.id;
+  const hasLivePrompt = (key: string) => Boolean(promptFor(key)?.yemotPath);
+  const hasFullAlbumsPrompt = Boolean(activeSurveyId && hasLivePrompt(`albums-menu:${activeSurveyId}`));
+  const hasFullArtistsPrompt = Boolean(activeSurveyId && hasLivePrompt(`artists-menu:${activeSurveyId}`));
   const codeWidth = (count: number) => count > 9 ? String(count).length : 1;
   const itemCode = (index: number, count: number) => String(index + 1).padStart(codeWidth(count), "0");
   const menuRows = (baseKey: string, label: string, items: { id: string }[]) => {
@@ -215,13 +219,13 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
       </div>
     </details>
 
-    <details className="ivr-section">
+    {!hasFullAlbumsPrompt && <details className="ivr-section">
       <summary><span>אלבום בודד</span><small>{activeAlbums.length} אלבומים — גיבוי לתפריט המלא</small></summary>
       <div className="ivr-section-body">
         <p className="panel-help">אפשר להקליט כל אלבום בנפרד. אמרו רק את שם האלבום; הקו יוסיף את קוד ההקשה המתאים.</p>
         {rows(activeAlbums.map((album) => ({ key: `album:${album.id}`, label: album.title })))}
       </div>
-    </details>
+    </details>}
 
     <details className="ivr-section">
       <summary><span>שירים לפי אלבום</span><small>{activeAlbums.length} אלבומים — פותחים רק את האלבום שרוצים</small></summary>
@@ -234,10 +238,10 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
               { key: `album-name:${album.id}`, label: `שם האלבום לפני בחירת השירים — ${album.title}` },
               ...menuRows(`songs-menu:${album.id}`, `כל שירי „${album.title}” ומספרי ההקשה`, albumSongs),
             ])}
-            <details className="prompt-order-details"><summary>הקלטת שירים בודדים</summary>
+            {!hasLivePrompt(`songs-menu:${album.id}`) && <details className="prompt-order-details"><summary>הקלטת שירים בודדים</summary>
               <p className="panel-help">בהקלטת שיר בודד אמרו רק את שם השיר; הקו יוסיף את מספר ההקשה.</p>
               {rows(albumSongs.map((song) => ({ key: `song:${song.id}`, label: song.title })))}
-            </details>
+            </details>}
           </details>;
         })}
       </div>
@@ -248,10 +252,10 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
       <div className="ivr-section-body">{rows(SYSTEM_PROMPTS)}</div>
     </details>
 
-    <details className="ivr-section">
+    {!hasFullArtistsPrompt && <details className="ivr-section">
       <summary><span>הקלטת זמר בודד</span><small>אפשרות נוספת — לא נדרשת כשיש תפריט זמרים מלא</small></summary>
       <div className="ivr-section-body"><p className="panel-help">אמרו רק את שם הזמר; הקו יוסיף את קוד ההקשה המתאים.</p>{rows(activeArtists.map((artist) => ({ key: `artist:${artist.id}`, label: artist.name })))}</div>
-    </details>
+    </details>}
   </AdminSection>;
 }
 

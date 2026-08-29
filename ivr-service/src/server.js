@@ -274,6 +274,7 @@ async function readNumberWithHash(call, message, maxDigits = 2) {
 }
 
 async function chooseRecordingTarget(call, catalog, section) {
+  const hasLivePrompt = (key) => (catalog.ivrPrompts || []).some((item) => item.key === key && item.yemotPath);
   if (section.digit === 1) {
     return adminChoice(call, "בחרו הודעת מערכת", [
       ...RECORDABLE_SYSTEM_PROMPTS.map((item, index) => ({ ...item, digit: index + 1 })),
@@ -281,9 +282,10 @@ async function chooseRecordingTarget(call, catalog, section) {
     ]);
   }
   if (section.digit === 2) {
+    const fullMenuKey = `albums-menu:${catalog.surveyId}`;
     const albumMode = await adminChoice(call, "בחרו סוג קריינות לאלבומים", [
-      { digit: 1, key: `albums-menu:${catalog.surveyId}`, label: "כל רשימת האלבומים ומספרי ההקשה ברצף" },
-      { digit: 2, key: "", label: "אלבום בודד" },
+      { digit: 1, key: fullMenuKey, label: "כל רשימת האלבומים ומספרי ההקשה ברצף" },
+      ...(!hasLivePrompt(fullMenuKey) ? [{ digit: 2, key: "", label: "אלבום בודד" }] : []),
       { digit: 0, key: "", label: "לחזרה" },
     ]);
     if (albumMode?.digit === 1) return menuRecordingTarget(call, albumMode.key, "רשימת האלבומים ומספרי ההקשה", catalog.albums || []);
@@ -301,10 +303,11 @@ async function chooseRecordingTarget(call, catalog, section) {
       { digit: 0, id: "", label: "לחזרה" },
     ]);
     if (!album?.id) return null;
+    const fullSongsKey = `songs-menu:${album.id}`;
     const songTarget = await adminChoice(call, `בחרו קריינות עבור האלבום ${album.title}`, [
       { digit: 1, key: `album-name:${album.id}`, label: "שם האלבום לפני בחירת השירים" },
-      { digit: 2, key: `songs-menu:${album.id}`, label: "כל השירים ומספרי ההקשה ברצף" },
-      { digit: 3, key: "", label: "שיר בודד" },
+      { digit: 2, key: fullSongsKey, label: "כל השירים ומספרי ההקשה ברצף" },
+      ...(!hasLivePrompt(fullSongsKey) ? [{ digit: 3, key: "", label: "שיר בודד" }] : []),
       { digit: 0, key: "", label: "לחזרה" },
     ]);
     if (songTarget?.digit === 2) {
@@ -322,9 +325,10 @@ async function chooseRecordingTarget(call, catalog, section) {
     }
   }
   if (section.digit === 4) {
+    const fullMenuKey = `artists-menu:${catalog.surveyId}`;
     const artistMode = await adminChoice(call, "בחרו סוג קריינות לזמרים", [
-      { digit: 1, key: `artists-menu:${catalog.surveyId}`, label: "כל רשימת הזמרים ומספרי ההקשה ברצף" },
-      { digit: 2, key: "", label: "זמר בודד" },
+      { digit: 1, key: fullMenuKey, label: "כל רשימת הזמרים ומספרי ההקשה ברצף" },
+      ...(!hasLivePrompt(fullMenuKey) ? [{ digit: 2, key: "", label: "זמר בודד" }] : []),
       { digit: 0, key: "", label: "לחזרה" },
     ]);
     if (artistMode?.digit === 1) return menuRecordingTarget(call, artistMode.key, "רשימת הזמרים ומספרי ההקשה", catalog.artists || []);
