@@ -203,6 +203,7 @@ test("phone ballot flow canonicalizes the voter before the unique check", async 
       bind(...nextArgs) { return make(nextArgs); },
       async first() { return statement(sql).first(); },
       async all() { return statement(sql).all(); },
+      async run() { return { success: true }; },
     });
     return make();
   };

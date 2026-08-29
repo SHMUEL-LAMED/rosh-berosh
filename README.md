@@ -24,6 +24,8 @@ npm run dev
 
 יש להחיל את הקובץ `drizzle/0000_polite_devos.sql` על מסד D1 לפני הפעלת ההצבעה. כאשר הרשימות הסופיות יתקבלו, יש להזין אלבומים לטבלת `albums`, שירים לטבלת `songs` וזמרים לטבלת `artists`.
 
+התוספות שאחריה — `ballot_rate_limits`, טבלאות ה־IVR (`ivr_recorders`, `ivr_prompts`, `ivr_store_meta`, `ivr_admin_audit`), העמודות `songs.cover_url` ו־`ballots.fingerprint` והאינדקסים — נוצרות גם אוטומטית בבקשה הראשונה על ידי `worker/schema-statements.js`. כל משפט SQL שם רץ בנפרד דרך `prepare`, כי `D1Database.exec()` מפצל את הקלט לפי שורות ואינו יכול להריץ משפט הפרוס על כמה שורות.
+
 שירות הטלפון דורש `SITE_API_BASE_URL` ומופעל בנפרד מתוך `ivr-service/`.
 
 ## קריינות התפריטים בקו
