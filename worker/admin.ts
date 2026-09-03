@@ -4,7 +4,7 @@ import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrP
 import { normalizePhone } from "./phone";
 import { resolveCatalogPosition } from "./catalog-position.js";
 
-type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; ADMIN_EMAILS?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
+export type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; ADMIN_EMAILS?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const ARCHIVE_PREFIX = "poll-archives/";
 
@@ -44,8 +44,8 @@ const text = (value: unknown) => String(value ?? "").trim();
 const number = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const flag = (value: unknown) => value === true || value === 1 || value === "1" || value === "true" || value === "on";
 const DEFAULT_SETTINGS = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
-const mediaUrl = (key: string) => `/media/${key.split("/").map(encodeURIComponent).join("/")}`;
-const safeName = (name: string) => name.normalize("NFKD").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 110) || "file";
+export const mediaUrl = (key: string) => `/media/${key.split("/").map(encodeURIComponent).join("/")}`;
+export const safeName = (name: string) => name.normalize("NFKD").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 110) || "file";
 const keyFromMediaUrl = (url?: string | null) => url?.startsWith("/media/") ? decodeURIComponent(url.slice(7)) : null;
 
 function extractCoverFromAudio(buffer: ArrayBuffer): { data: Uint8Array; mime: string } | null {
@@ -385,7 +385,7 @@ const AI_MAX_BYTES = 25 * 1024 * 1024; // external transcription APIs cap upload
 // Detects the chorus of a song with an external, OpenAI-compatible AI service:
 // transcribe the audio with segment timestamps, then let a language model pick the
 // repeated hook and return a short excerpt. Throws on any failure so callers can fall back.
-async function suggestChorusAI(env: AdminEnv, audioUrl: string): Promise<{ start: number; end: number }> {
+export async function suggestChorusAI(env: AdminEnv, audioUrl: string): Promise<{ start: number; end: number }> {
   const key = env.AI_API_KEY;
   if (!key) throw new Error("שירות ה-AI אינו מוגדר (חסר AI_API_KEY).");
   const mediaKey = keyFromMediaUrl(audioUrl);
@@ -482,13 +482,13 @@ async function googleAccessToken(saKeyJson: string): Promise<string> {
   return token.access_token;
 }
 
-function ttsConfigured(env: AdminEnv): boolean {
+export function ttsConfigured(env: AdminEnv): boolean {
   if (env.TTS_PROVIDER === "google") return Boolean(env.GOOGLE_SA_KEY);
   if (env.TTS_PROVIDER === "elevenlabs") return Boolean(env.ELEVENLABS_API_KEY);
   return Boolean(env.AI_API_KEY);
 }
 
-async function generateTtsAudio(env: AdminEnv, inputText: string): Promise<ArrayBuffer> {
+export async function generateTtsAudio(env: AdminEnv, inputText: string): Promise<ArrayBuffer> {
   if (env.TTS_PROVIDER === "google") {
     if (!env.GOOGLE_SA_KEY) throw new Error("שירות ה-TTS אינו מוגדר (חסר GOOGLE_SA_KEY).");
     const accessToken = await googleAccessToken(env.GOOGLE_SA_KEY);
@@ -1005,30 +1005,34 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/extract-covers") {
-    const songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.audio_url AS audioUrl FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? AND s.audio_url IS NOT NULL AND s.audio_url<>'' AND (s.cover_url IS NULL OR s.cover_url='')").bind(surveyId).all<{ id: string; albumId: string; audioUrl: string }>();
-    let extracted = 0;
-    const albumCovers = new Map<string, string>();
-    for (const song of songs.results) {
-      const key = keyFromMediaUrl(song.audioUrl);
-      if (!key) continue;
-      const obj = await env.MEDIA.get(key);
-      if (!obj) continue;
-      const buf = await obj.arrayBuffer();
-      const cover = extractCoverFromAudio(buf);
-      if (!cover) continue;
-      const coverKey = `albums/${song.albumId}/cover-${song.id}-${crypto.randomUUID()}.jpg`;
-      const coverUrl = mediaUrl(coverKey);
-      await env.MEDIA.put(coverKey, cover.data, { httpMetadata: { contentType: cover.mime, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { songId: song.id, albumId: song.albumId } });
-      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE id=?").bind(coverUrl, song.id).run();
-      if (!albumCovers.has(song.albumId)) albumCovers.set(song.albumId, coverUrl);
-      extracted++;
-    }
-    for (const [albumId, coverUrl] of albumCovers) {
-      await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
-      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
-    }
-    return json({ ok: true, total: songs.results.length, extracted });
+    return json({ ok: true, ...(await extractSurveyCovers(env, surveyId)) });
   }
 
   return json({ error: "Not Found" }, 404);
+}
+
+export async function extractSurveyCovers(env: AdminEnv, surveyId: string): Promise<{ total: number; extracted: number }> {
+  const songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.audio_url AS audioUrl FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? AND s.audio_url IS NOT NULL AND s.audio_url<>'' AND (s.cover_url IS NULL OR s.cover_url='')").bind(surveyId).all<{ id: string; albumId: string; audioUrl: string }>();
+  let extracted = 0;
+  const albumCovers = new Map<string, string>();
+  for (const song of songs.results) {
+    const key = keyFromMediaUrl(song.audioUrl);
+    if (!key) continue;
+    const obj = await env.MEDIA.get(key);
+    if (!obj) continue;
+    const buf = await obj.arrayBuffer();
+    const cover = extractCoverFromAudio(buf);
+    if (!cover) continue;
+    const coverKey = `albums/${song.albumId}/cover-${song.id}-${crypto.randomUUID()}.jpg`;
+    const coverUrl = mediaUrl(coverKey);
+    await env.MEDIA.put(coverKey, cover.data, { httpMetadata: { contentType: cover.mime, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { songId: song.id, albumId: song.albumId } });
+    await env.DB.prepare("UPDATE songs SET cover_url=? WHERE id=?").bind(coverUrl, song.id).run();
+    if (!albumCovers.has(song.albumId)) albumCovers.set(song.albumId, coverUrl);
+    extracted++;
+  }
+  for (const [albumId, coverUrl] of albumCovers) {
+    await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
+    await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
+  }
+  return { total: songs.results.length, extracted };
 }

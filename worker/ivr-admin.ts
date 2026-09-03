@@ -1,8 +1,11 @@
-import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrPrompts, readIvrRecorders, removeIvrRecorder } from "./ivr-prompts";
+import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrPrompts, readIvrRecorders, removeIvrRecorder, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
-import { createPollSnapshot, deleteCatalogItem, deletePollArchive, deleteSurveyData, listPollArchives, resetPollVotes, restorePollArchive } from "./admin";
+import { reorderIds, shiftIds } from "./reorder.js";
+import { readAdminEmails, saveAdminEmails } from "./auth";
+import type { AdminEnv } from "./admin";
+import { createPollSnapshot, deleteCatalogItem, deletePollArchive, deleteSurveyData, extractSurveyCovers, generateTtsAudio, listPollArchives, mediaUrl, resetPollVotes, restorePollArchive, safeName, suggestChorusAI, ttsConfigured } from "./admin";
 
-type IvrAdminEnv = { DB: D1Database; MEDIA: R2Bucket };
+type IvrAdminEnv = AdminEnv;
 type Settings = {
   votingOpen: number;
   albumsEnabled: number;
@@ -26,8 +29,15 @@ type ActionBody = {
   min?: number;
   max?: number;
   key?: string;
+  label?: string;
   targetPhone?: string;
   direction?: -1 | 1;
+  albumId?: string;
+  position?: number;
+  start?: number;
+  end?: number;
+  email?: string;
+  limit?: number;
 };
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -140,7 +150,7 @@ async function overview(env: IvrAdminEnv, callerPhone: string): Promise<Response
     env.DB.prepare("SELECT s.id,s.name,s.active,COALESCE(p.voting_open,0) AS votingOpen FROM surveys s LEFT JOIN poll_settings p ON p.id=s.id ORDER BY s.active DESC,s.created_at DESC"),
     env.DB.prepare("SELECT voting_open AS votingOpen,albums_enabled AS albumsEnabled,albums_min AS albumsMin,albums_max AS albumsMax,songs_enabled AS songsEnabled,songs_min AS songsMin,songs_max AS songsMax,artists_enabled AS artistsEnabled,artists_min AS artistsMin,artists_max AS artistsMax FROM poll_settings WHERE id=?").bind(survey.id),
     env.DB.prepare("SELECT id,title,artist_name AS artistName,active FROM albums WHERE survey_id=? ORDER BY position,title").bind(survey.id),
-    env.DB.prepare("SELECT s.id,s.album_id AS albumId,s.title,s.active FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? ORDER BY s.album_id,s.position,s.title").bind(survey.id),
+    env.DB.prepare("SELECT s.id,s.album_id AS albumId,s.title,s.active,s.preview_start AS previewStart,s.preview_end AS previewEnd,s.audio_url AS audioUrl FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? ORDER BY s.album_id,s.position,s.title").bind(survey.id),
     env.DB.prepare("SELECT id,name,active FROM artists WHERE survey_id=? ORDER BY position,name").bind(survey.id),
     env.DB.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN channel='phone' THEN 1 ELSE 0 END) AS phone,SUM(CASE WHEN channel='site' THEN 1 ELSE 0 END) AS site FROM ballots WHERE survey_id=?").bind(survey.id),
     env.DB.prepare("SELECT a.title AS label,COUNT(v.album_id) AS votes FROM albums a LEFT JOIN album_votes v ON v.album_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.title LIMIT 5").bind(survey.id),
@@ -148,7 +158,7 @@ async function overview(env: IvrAdminEnv, callerPhone: string): Promise<Response
     env.DB.prepare("SELECT a.name AS label,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.name LIMIT 5").bind(survey.id),
   ]);
   const currentSettings = (settings.results[0] as unknown as Settings | undefined) ?? DEFAULT_SETTINGS;
-  const [prompts, currentReadiness, archives] = await Promise.all([readIvrPrompts(env), readiness(env, survey.id, currentSettings), listPollArchives(env)]);
+  const [prompts, currentReadiness, archives, managers] = await Promise.all([readIvrPrompts(env), readiness(env, survey.id, currentSettings), listPollArchives(env), readAdminEmails(env)]);
   return json({
     activeSurvey: survey,
     surveys: surveys.results,
@@ -161,8 +171,52 @@ async function overview(env: IvrAdminEnv, callerPhone: string): Promise<Response
     readiness: currentReadiness,
     prompts,
     recorders: access.recorders,
+    managers,
     archives: archives.slice(0, 50),
+    services: { tts: ttsConfigured(env), ai: Boolean(env.AI_API_KEY) },
   });
+}
+
+async function orderedItems(env: IvrAdminEnv, surveyId: string, kind: "album" | "song" | "artist", id: string): Promise<{ id: string }[] | null> {
+  if (kind === "album") return (await env.DB.prepare("SELECT id FROM albums WHERE survey_id=? ORDER BY position,title").bind(surveyId).all<{ id: string }>()).results;
+  if (kind === "artist") return (await env.DB.prepare("SELECT id FROM artists WHERE survey_id=? ORDER BY position,name").bind(surveyId).all<{ id: string }>()).results;
+  const song = await env.DB.prepare("SELECT s.album_id AS albumId FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.id=? AND a.survey_id=?").bind(id, surveyId).first<{ albumId: string }>();
+  if (!song) return null;
+  return (await env.DB.prepare("SELECT id FROM songs WHERE album_id=? ORDER BY position,title").bind(song.albumId).all<{ id: string }>()).results;
+}
+
+async function saveOrder(env: IvrAdminEnv, kind: "album" | "song" | "artist", ids: string[]): Promise<void> {
+  const table = kind === "album" ? "albums" : kind === "artist" ? "artists" : "songs";
+  await env.DB.batch(ids.map((id, position) => env.DB.prepare(`UPDATE ${table} SET position=? WHERE id=?`).bind(position, id)));
+}
+
+// A prompt key names the item it narrates, so the phone never has to dictate text.
+async function promptLabel(env: IvrAdminEnv, surveyId: string, key: string): Promise<string> {
+  const [kind, id] = key.split(":");
+  if (!id) return "";
+  if (kind === "album" || kind === "album-name") {
+    const album = await env.DB.prepare("SELECT title FROM albums WHERE id=? AND survey_id=?").bind(id, surveyId).first<{ title: string }>();
+    return album?.title ?? "";
+  }
+  if (kind === "artist" || kind === "artist-name") {
+    const artist = await env.DB.prepare("SELECT name FROM artists WHERE id=? AND survey_id=?").bind(id, surveyId).first<{ name: string }>();
+    return artist?.name ?? "";
+  }
+  if (kind === "song" || kind === "song-name") {
+    const song = await env.DB.prepare("SELECT s.title FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.id=? AND a.survey_id=?").bind(id, surveyId).first<{ title: string }>();
+    return song?.title ?? "";
+  }
+  return "";
+}
+
+async function saveTtsPrompt(env: IvrAdminEnv, key: string, label: string): Promise<void> {
+  const audio = await generateTtsAudio(env, label);
+  const mediaKey = `ivr-prompts/${safeName(key)}-${crypto.randomUUID()}-tts.mp3`;
+  await env.MEDIA.put(mediaKey, audio, { httpMetadata: { contentType: "audio/mpeg", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { promptKey: key } });
+  const sync = await syncPromptToYemot(env, key, new File([audio], "tts.mp3", { type: "audio/mpeg" }));
+  const prompts = await readIvrPrompts(env), previous = prompts.find((prompt) => prompt.key === key);
+  await upsertIvrPrompt(env, { key, label, audioUrl: mediaUrl(mediaKey), yemotPath: sync.path || previous?.yemotPath || "", updatedAt: Date.now() });
+  if (previous?.audioUrl !== mediaUrl(mediaKey)) await deleteIvrAudioIfUnreferenced(env, previous?.audioUrl);
 }
 
 async function action(env: IvrAdminEnv, body: ActionBody): Promise<Response> {
@@ -296,19 +350,11 @@ async function action(env: IvrAdminEnv, body: ActionBody): Promise<Response> {
     if (!kind || !id || !direction) return json({ error: "הפריט או כיוון ההזזה אינם תקינים." }, 400);
     const settings = await readSettings(env, survey.id);
     if (settings.votingOpen) return json({ error: "כדי לשנות סדר יש לסגור קודם את ההצבעה." }, 409);
-    let rows: { id: string }[] = [];
-    if (kind === "album") rows = (await env.DB.prepare("SELECT id FROM albums WHERE survey_id=? ORDER BY position,title").bind(survey.id).all<{ id: string }>()).results;
-    else if (kind === "artist") rows = (await env.DB.prepare("SELECT id FROM artists WHERE survey_id=? ORDER BY position,name").bind(survey.id).all<{ id: string }>()).results;
-    else {
-      const song = await env.DB.prepare("SELECT s.album_id AS albumId FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.id=? AND a.survey_id=?").bind(id, survey.id).first<{ albumId: string }>();
-      if (!song) return json({ error: "השיר לא נמצא." }, 404);
-      rows = (await env.DB.prepare("SELECT id FROM songs WHERE album_id=? ORDER BY position,title").bind(song.albumId).all<{ id: string }>()).results;
-    }
-    const index = rows.findIndex((row) => row.id === id), target = index + direction;
-    if (index < 0 || target < 0 || target >= rows.length) return json({ error: "אי אפשר להזיז את הפריט בכיוון הזה." }, 400);
-    [rows[index], rows[target]] = [rows[target], rows[index]];
-    const table = kind === "album" ? "albums" : kind === "artist" ? "artists" : "songs";
-    await env.DB.batch(rows.map((row, position) => env.DB.prepare(`UPDATE ${table} SET position=? WHERE id=?`).bind(position, row.id)));
+    const rows = await orderedItems(env, survey.id, kind, id);
+    if (!rows) return json({ error: "השיר לא נמצא." }, 404);
+    const ordered = shiftIds(rows.map((row) => row.id), id, direction);
+    if (!ordered) return json({ error: "אי אפשר להזיז את הפריט בכיוון הזה." }, 400);
+    await saveOrder(env, kind, ordered);
     return json({ ok: true, message: direction < 0 ? "הפריט הוזז למעלה." : "הפריט הוזז למטה." });
   }
 
@@ -351,6 +397,112 @@ async function action(env: IvrAdminEnv, body: ActionBody): Promise<Response> {
     await deleteIvrPrompt(env, key);
     await deleteIvrAudioIfUnreferenced(env, current.audioUrl);
     return json({ ok: true, message: "הקריינות נמחקה והקו יחזור לקריינות האוטומטית." });
+  }
+
+  if (body.action === "create-item") {
+    const kind = body.kind;
+    if (!kind) return json({ error: "סוג הפריט אינו תקין." }, 400);
+    const settings = await readSettings(env, survey.id);
+    if (settings.votingOpen) return json({ error: "כדי להוסיף פריט יש לסגור קודם את ההצבעה." }, 409);
+    const id = crypto.randomUUID();
+    if (kind === "album") {
+      const total = await env.DB.prepare("SELECT COUNT(*) AS total FROM albums WHERE survey_id=?").bind(survey.id).first<{ total: number }>();
+      const title = `אלבום ${Number(total?.total || 0) + 1}`;
+      const position = Number((await env.DB.prepare("SELECT COALESCE(MAX(position),-1)+1 AS position FROM albums WHERE survey_id=?").bind(survey.id).first<{ position: number }>())?.position || 0);
+      await env.DB.prepare("INSERT INTO albums (id,survey_id,title,artist_name,position,active) VALUES (?,?,?,?,?,0)").bind(id, survey.id, title, "טרם עודכן", position).run();
+      return json({ ok: true, id, title, promptKey: `album:${id}`, message: `${title} נוסף כמושבת. הקליטו את שמו והפעילו אותו.` });
+    }
+    if (kind === "artist") {
+      const total = await env.DB.prepare("SELECT COUNT(*) AS total FROM artists WHERE survey_id=?").bind(survey.id).first<{ total: number }>();
+      const title = `זמר ${Number(total?.total || 0) + 1}`;
+      const position = Number((await env.DB.prepare("SELECT COALESCE(MAX(position),-1)+1 AS position FROM artists WHERE survey_id=?").bind(survey.id).first<{ position: number }>())?.position || 0);
+      await env.DB.prepare("INSERT INTO artists (id,survey_id,name,position,active) VALUES (?,?,?,?,0)").bind(id, survey.id, title, position).run();
+      return json({ ok: true, id, title, promptKey: `artist:${id}`, message: `${title} נוסף כמושבת. הקליטו את שמו והפעילו אותו.` });
+    }
+    const albumId = String(body.albumId || "").trim();
+    const album = albumId ? await env.DB.prepare("SELECT id,title FROM albums WHERE id=? AND survey_id=?").bind(albumId, survey.id).first<{ id: string; title: string }>() : null;
+    if (!album) return json({ error: "האלבום לא נמצא בסקר הפעיל." }, 404);
+    const total = await env.DB.prepare("SELECT COUNT(*) AS total FROM songs WHERE album_id=?").bind(albumId).first<{ total: number }>();
+    const title = `שיר ${Number(total?.total || 0) + 1}`;
+    const position = Number((await env.DB.prepare("SELECT COALESCE(MAX(position),-1)+1 AS position FROM songs WHERE album_id=?").bind(albumId).first<{ position: number }>())?.position || 0);
+    await env.DB.prepare("INSERT INTO songs (id,album_id,title,position,active) VALUES (?,?,?,?,0)").bind(id, albumId, title, position).run();
+    return json({ ok: true, id, title, promptKey: `song:${id}`, message: `${title} נוסף לאלבום ${album.title} כמושבת. הקליטו את שמו והפעילו אותו.` });
+  }
+
+  if (body.action === "set-position") {
+    const kind = body.kind, id = String(body.id || "").trim(), position = Number(body.position);
+    if (!kind || !id || !Number.isInteger(position) || position < 1) return json({ error: "הפריט או המקום אינם תקינים." }, 400);
+    const settings = await readSettings(env, survey.id);
+    if (settings.votingOpen) return json({ error: "כדי לשנות סדר יש לסגור קודם את ההצבעה." }, 409);
+    const rows = await orderedItems(env, survey.id, kind, id);
+    if (!rows) return json({ error: "הפריט לא נמצא בסקר הפעיל." }, 404);
+    const ordered = reorderIds(rows.map((row) => row.id), id, position);
+    if (!ordered) return json({ error: `אפשר לבחור מקום בין 1 ל ${rows.length}.` }, 400);
+    await saveOrder(env, kind, ordered);
+    return json({ ok: true, message: `הפריט הועבר למקום ${position}.` });
+  }
+
+  if (body.action === "set-preview" || body.action === "suggest-preview") {
+    const id = String(body.id || "").trim();
+    const song = id ? await env.DB.prepare("SELECT s.id,s.title,s.audio_url AS audioUrl FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.id=? AND a.survey_id=?").bind(id, survey.id).first<{ id: string; title: string; audioUrl?: string }>() : null;
+    if (!song) return json({ error: "השיר לא נמצא בסקר הפעיל." }, 404);
+    let start = Number(body.start), end = Number(body.end);
+    if (body.action === "suggest-preview") {
+      if (!song.audioUrl) return json({ error: "לשיר אין קובץ שמע לניתוח." }, 400);
+      try { ({ start, end } = await suggestChorusAI(env, song.audioUrl)); }
+      catch (error) { return json({ error: error instanceof Error ? error.message : "ניתוח הפזמון נכשל." }, 502); }
+    }
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start) return json({ error: "זמני הקטע אינם תקינים." }, 400);
+    await env.DB.prepare("UPDATE songs SET preview_start=?,preview_end=? WHERE id=?").bind(start, end, id).run();
+    return json({ ok: true, start, end, message: `קטע ההשמעה של ${song.title} מתחיל בשנייה ${start} ומסתיים בשנייה ${end}.` });
+  }
+
+  if (body.action === "generate-tts") {
+    const key = String(body.key || "").trim();
+    if (!/^[a-z0-9:_-]+$/i.test(key)) return json({ error: "סוג הקריינות אינו תקין." }, 400);
+    if (!ttsConfigured(env)) return json({ error: "שירות הקריינות האוטומטית אינו מוגדר." }, 503);
+    const label = String(body.label || "").trim() || await promptLabel(env, survey.id, key);
+    if (!label) return json({ error: "לא נמצא טקסט לקריינות." }, 404);
+    try { await saveTtsPrompt(env, key, label); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : "יצירת הקריינות נכשלה." }, 502); }
+    return json({ ok: true, message: "נוצרה קריינות אוטומטית והיא פעילה בקו." });
+  }
+
+  if (body.action === "generate-missing-tts") {
+    if (!ttsConfigured(env)) return json({ error: "שירות הקריינות האוטומטית אינו מוגדר." }, 503);
+    const limit = Math.min(Math.max(Number(body.limit) || 10, 1), 20);
+    const existing = new Set((await readIvrPrompts(env)).map((prompt) => prompt.key));
+    const [albums, artists, songs] = await env.DB.batch<{ id: string; label: string }>([
+      env.DB.prepare("SELECT id,title AS label FROM albums WHERE survey_id=? ORDER BY position,title").bind(survey.id),
+      env.DB.prepare("SELECT id,name AS label FROM artists WHERE survey_id=? ORDER BY position,name").bind(survey.id),
+      env.DB.prepare("SELECT s.id,s.title AS label FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? ORDER BY s.album_id,s.position,s.title").bind(survey.id),
+    ]);
+    const pending = [
+      ...albums.results.map((row) => ({ key: `album:${row.id}`, label: String(row.label) })),
+      ...artists.results.map((row) => ({ key: `artist:${row.id}`, label: String(row.label) })),
+      ...songs.results.map((row) => ({ key: `song:${row.id}`, label: String(row.label) })),
+    ].filter((item) => !existing.has(item.key));
+    let created = 0;
+    for (const item of pending.slice(0, limit)) {
+      try { await saveTtsPrompt(env, item.key, item.label); created++; }
+      catch (error) { console.error("phone tts generation failed", item.key, error); break; }
+    }
+    const remaining = Math.max(pending.length - created, 0);
+    return json({ ok: true, created, remaining, message: remaining ? `נוצרו ${created} קריינויות, נשארו ${remaining}.` : `נוצרו ${created} קריינויות. לכל הפריטים יש קריינות.` });
+  }
+
+  if (body.action === "extract-covers") {
+    const result = await extractSurveyCovers(env, survey.id);
+    return json({ ok: true, ...result, message: `נבדקו ${result.total} שירים ונשמרו ${result.extracted} עטיפות.` });
+  }
+
+  if (body.action === "remove-manager") {
+    const email = String(body.email || "").trim().toLowerCase();
+    const managers = await readAdminEmails(env);
+    if (!email || !managers.includes(email)) return json({ error: "מנהל האתר לא נמצא ברשימה." }, 404);
+    if (managers.length <= 1) return json({ error: "אי אפשר להסיר את מנהל האתר האחרון." }, 400);
+    const next = await saveAdminEmails(env, managers.filter((item) => item !== email));
+    return json({ ok: true, managers: next, message: "ההרשאה של מנהל האתר הוסרה." });
   }
 
   return json({ error: "פעולת הניהול אינה מוכרת." }, 400);

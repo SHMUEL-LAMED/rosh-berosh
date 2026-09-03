@@ -176,128 +176,140 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
   return new Response(request.method === "HEAD" ? null : object.body, { status, headers });
 }
 
+async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
+
+  if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
+  if (url.pathname === "/api/auth/google" && request.method === "POST") {
+    try {
+      const { credential } = await request.json<{ credential?: string }>();
+      if (!credential) return json({ error: "חסר אישור Google." }, 400);
+      const user = await verifyGoogleCredential(credential, env);
+      const response = json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } });
+      response.headers.set("set-cookie", sessionCookie(credential));
+      return response;
+    } catch (error) { console.error("google auth error", error); return json({ error: "ההתחברות באמצעות Google נכשלה." }, 401); }
+  }
+  if (url.pathname === "/api/auth/me" && request.method === "GET") {
+    const user = await readSession(request, env);
+    return user ? json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } }) : json({ user: null }, 401);
+  }
+  if (url.pathname === "/api/auth/logout" && request.method === "POST") { const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
+  if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
+  if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
+  if (url.pathname === "/api/ivr/recorders/check" && request.method === "GET") {
+    if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+    await ensureRuntimeSchema(env);
+    const phone = normalizePhone(url.searchParams.get("phone") || "");
+    const recorders = await readIvrRecorders(env);
+    return json({ allowed: !!phone && recorders.includes(phone) });
+  }
+  if (url.pathname.startsWith("/api/ivr/admin/")) {
+    if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+    await ensureRuntimeSchema(env);
+    return ivrAdminApi(request, env);
+  }
+  if (url.pathname === "/api/ivr/prompt" && request.method === "POST") {
+    if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+    await ensureRuntimeSchema(env);
+    const form = await request.formData();
+    const file = form.get("file"), key = String(form.get("key") || "").trim(), label = String(form.get("label") || "").trim();
+    const phone = normalizePhone(form.get("phone"));
+    const recorders = await readIvrRecorders(env);
+    if (!phone || !recorders.includes(phone)) return json({ error: "מספר הטלפון אינו מורשה עוד להקליט." }, 403);
+    if (!(file instanceof File) || !/^[a-z0-9:_-]+$/i.test(key) || !label || label.length > 300) {
+      return json({ error: "פרטי הקריינות אינם תקינים." }, 400);
+    }
+    if (!file.type.startsWith("audio/") && !/\.(wav|mp3|m4a|ogg)$/i.test(file.name)) return json({ error: "יש לשלוח קובץ שמע." }, 415);
+    if (file.size > 25 * 1024 * 1024) return json({ error: "קובץ הקריינות גדול מ־25MB." }, 413);
+    const sync = await syncPromptToYemot(env, key, file);
+    if (!sync.path) return json({ error: sync.warning || "העברת הקריינות לקו ההצבעה נכשלה." }, 502);
+    const mediaKey = `ivr-prompts/${key.replace(/[^a-z0-9_-]+/gi, "-")}-${crypto.randomUUID()}-phone.wav`;
+    await env.MEDIA.put(mediaKey, file.stream(), {
+      httpMetadata: { contentType: file.type || "audio/wav", cacheControl: "public, max-age=31536000, immutable" },
+      customMetadata: { originalName: file.name, promptKey: key, source: "phone" },
+    });
+    const prompts = await readIvrPrompts(env);
+    const previous = prompts.find((item) => item.key === key);
+    const audioUrl = `/media/${mediaKey.split("/").map(encodeURIComponent).join("/")}`;
+    await upsertIvrPrompt(env, { key, label, audioUrl, yemotPath: sync.path, updatedAt: Date.now() });
+    if (previous?.audioUrl !== audioUrl) await deleteIvrAudioIfUnreferenced(env, previous?.audioUrl);
+    return json({ ok: true, prompt: { key, label, audioUrl, yemotPath: sync.path } });
+  }
+  if (url.pathname === "/api/ballots/check" && request.method === "GET") {
+    const isIvr = verifyIvrSecret(request, env);
+    if (!isIvr) {
+      const user = await readSession(request, env);
+      if (!user) return json({ error: "אין הרשאה." }, 401);
+    }
+    const rawVoterKey = url.searchParams.get("voterKey")?.trim().toLowerCase() || "";
+    const voterKey = isIvr ? normalizePhone(rawVoterKey) : rawVoterKey;
+    if (!voterKey) return json({ voted: false });
+    const surveyId = await activeSurveyId(env);
+    const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first();
+    return json({ voted: !!existing });
+  }
+  if (url.pathname === "/api/ballots/progress" && verifyIvrSecret(request, env)) {
+    const surveyId = await activeSurveyId(env);
+    const voterKey = normalizePhone(url.searchParams.get("voterKey") || "");
+    if (!voterKey) return json({ error: "חסר מזהה מצביע." }, 400);
+    const progressKey = `ivr-progress/${surveyId}/${voterKey}.json`;
+    if (request.method === "GET") {
+      const obj = await env.MEDIA.get(progressKey);
+      if (!obj) return json({ progress: null });
+      return json({ progress: await obj.json() });
+    }
+    if (request.method === "POST") {
+      const body = await request.json<Record<string, unknown>>();
+      await env.MEDIA.put(progressKey, JSON.stringify(body), { httpMetadata: { contentType: "application/json", cacheControl: "no-store" } });
+      return json({ ok: true });
+    }
+    if (request.method === "DELETE") {
+      await env.MEDIA.delete(progressKey);
+      return json({ ok: true });
+    }
+  }
+  if (url.pathname === "/api/ballots" && request.method === "POST") {
+    // Every phone ballot reaches us from the single IVR server, so the per-IP
+    // limit would reject callers past the fifth in a minute. Trust the shared
+    // secret instead; a request claiming "phone" without it is still rejected.
+    const fromIvr = verifyIvrSecret(request, env);
+    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+    if (!fromIvr) {
+      await ensureRuntimeSchema(env);
+      if (!(await checkBallotRate(env.DB, clientIp))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
+    }
+    let original: Submission;
+    try { original = await request.json<Submission>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
+    if (original.channel === "phone") {
+      if (!fromIvr) return json({ error: "אין הרשאה לערוץ טלפוני." }, 403);
+      return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
+    }
+    const user = await readSession(request, env);
+    if (!user) return json({ error: "יש להתחבר באמצעות Google." }, 401);
+    return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub }) }), env);
+  }
+  if (url.pathname === "/_vinext/image") {
+    return handleImageOptimization(request, {
+      fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
+      transformImage: async (body, { width, format, quality }) => (await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality })).response(),
+    }, [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES]);
+  }
+  return handler.fetch(request, env, ctx);
+}
+
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
-
-    if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
-    if (url.pathname === "/api/auth/google" && request.method === "POST") {
-      try {
-        const { credential } = await request.json<{ credential?: string }>();
-        if (!credential) return json({ error: "חסר אישור Google." }, 400);
-        const user = await verifyGoogleCredential(credential, env);
-        const response = json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } });
-        response.headers.set("set-cookie", sessionCookie(credential));
-        return response;
-      } catch (error) { console.error("google auth error", error); return json({ error: "ההתחברות באמצעות Google נכשלה." }, 401); }
+    try {
+      return await route(request, env, ctx);
+    } catch (error) {
+      // בלי זה חריגה לא צפויה חוזרת כ-500 ריק, וקו הטלפון מפרש אותה כחוסר הרשאה.
+      const { pathname } = new URL(request.url);
+      console.error("unhandled worker error", pathname, error);
+      if (pathname.startsWith("/api/")) return json({ error: "שגיאה בשרת." }, 500);
+      throw error;
     }
-    if (url.pathname === "/api/auth/me" && request.method === "GET") {
-      const user = await readSession(request, env);
-      return user ? json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } }) : json({ user: null }, 401);
-    }
-    if (url.pathname === "/api/auth/logout" && request.method === "POST") { const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
-    if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
-    if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
-    if (url.pathname === "/api/ivr/recorders/check" && request.method === "GET") {
-      if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-      await ensureRuntimeSchema(env);
-      const phone = normalizePhone(url.searchParams.get("phone") || "");
-      const recorders = await readIvrRecorders(env);
-      return json({ allowed: !!phone && recorders.includes(phone) });
-    }
-    if (url.pathname.startsWith("/api/ivr/admin/")) {
-      if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-      await ensureRuntimeSchema(env);
-      return ivrAdminApi(request, env);
-    }
-    if (url.pathname === "/api/ivr/prompt" && request.method === "POST") {
-      if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-      await ensureRuntimeSchema(env);
-      const form = await request.formData();
-      const file = form.get("file"), key = String(form.get("key") || "").trim(), label = String(form.get("label") || "").trim();
-      const phone = normalizePhone(form.get("phone"));
-      const recorders = await readIvrRecorders(env);
-      if (!phone || !recorders.includes(phone)) return json({ error: "מספר הטלפון אינו מורשה עוד להקליט." }, 403);
-      if (!(file instanceof File) || !/^[a-z0-9:_-]+$/i.test(key) || !label || label.length > 300) {
-        return json({ error: "פרטי הקריינות אינם תקינים." }, 400);
-      }
-      if (!file.type.startsWith("audio/") && !/\.(wav|mp3|m4a|ogg)$/i.test(file.name)) return json({ error: "יש לשלוח קובץ שמע." }, 415);
-      if (file.size > 25 * 1024 * 1024) return json({ error: "קובץ הקריינות גדול מ־25MB." }, 413);
-      const sync = await syncPromptToYemot(env, key, file);
-      if (!sync.path) return json({ error: sync.warning || "העברת הקריינות לקו ההצבעה נכשלה." }, 502);
-      const mediaKey = `ivr-prompts/${key.replace(/[^a-z0-9_-]+/gi, "-")}-${crypto.randomUUID()}-phone.wav`;
-      await env.MEDIA.put(mediaKey, file.stream(), {
-        httpMetadata: { contentType: file.type || "audio/wav", cacheControl: "public, max-age=31536000, immutable" },
-        customMetadata: { originalName: file.name, promptKey: key, source: "phone" },
-      });
-      const prompts = await readIvrPrompts(env);
-      const previous = prompts.find((item) => item.key === key);
-      const audioUrl = `/media/${mediaKey.split("/").map(encodeURIComponent).join("/")}`;
-      await upsertIvrPrompt(env, { key, label, audioUrl, yemotPath: sync.path, updatedAt: Date.now() });
-      if (previous?.audioUrl !== audioUrl) await deleteIvrAudioIfUnreferenced(env, previous?.audioUrl);
-      return json({ ok: true, prompt: { key, label, audioUrl, yemotPath: sync.path } });
-    }
-    if (url.pathname === "/api/ballots/check" && request.method === "GET") {
-      const isIvr = verifyIvrSecret(request, env);
-      if (!isIvr) {
-        const user = await readSession(request, env);
-        if (!user) return json({ error: "אין הרשאה." }, 401);
-      }
-      const rawVoterKey = url.searchParams.get("voterKey")?.trim().toLowerCase() || "";
-      const voterKey = isIvr ? normalizePhone(rawVoterKey) : rawVoterKey;
-      if (!voterKey) return json({ voted: false });
-      const surveyId = await activeSurveyId(env);
-      const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first();
-      return json({ voted: !!existing });
-    }
-    if (url.pathname === "/api/ballots/progress" && verifyIvrSecret(request, env)) {
-      const surveyId = await activeSurveyId(env);
-      const voterKey = normalizePhone(url.searchParams.get("voterKey") || "");
-      if (!voterKey) return json({ error: "חסר מזהה מצביע." }, 400);
-      const progressKey = `ivr-progress/${surveyId}/${voterKey}.json`;
-      if (request.method === "GET") {
-        const obj = await env.MEDIA.get(progressKey);
-        if (!obj) return json({ progress: null });
-        return json({ progress: await obj.json() });
-      }
-      if (request.method === "POST") {
-        const body = await request.json<Record<string, unknown>>();
-        await env.MEDIA.put(progressKey, JSON.stringify(body), { httpMetadata: { contentType: "application/json", cacheControl: "no-store" } });
-        return json({ ok: true });
-      }
-      if (request.method === "DELETE") {
-        await env.MEDIA.delete(progressKey);
-        return json({ ok: true });
-      }
-    }
-    if (url.pathname === "/api/ballots" && request.method === "POST") {
-      // Every phone ballot reaches us from the single IVR server, so the per-IP
-      // limit would reject callers past the fifth in a minute. Trust the shared
-      // secret instead; a request claiming "phone" without it is still rejected.
-      const fromIvr = verifyIvrSecret(request, env);
-      const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-      if (!fromIvr) {
-        await ensureRuntimeSchema(env);
-        if (!(await checkBallotRate(env.DB, clientIp))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
-      }
-      let original: Submission;
-      try { original = await request.json<Submission>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
-      if (original.channel === "phone") {
-        if (!fromIvr) return json({ error: "אין הרשאה לערוץ טלפוני." }, 403);
-        return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(original) }), env);
-      }
-      const user = await readSession(request, env);
-      if (!user) return json({ error: "יש להתחבר באמצעות Google." }, 401);
-      return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub }) }), env);
-    }
-    if (url.pathname === "/_vinext/image") {
-      return handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
-        transformImage: async (body, { width, format, quality }) => (await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality })).response(),
-      }, [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES]);
-    }
-    return handler.fetch(request, env, ctx);
   },
 };
 
