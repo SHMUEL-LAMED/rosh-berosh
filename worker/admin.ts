@@ -604,7 +604,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
 
   if (request.method === "GET" && url.pathname === "/api/admin/overview") {
     try {
-      const [albums, songs, artists, ballots, settings, albumResults, songResults, artistResults] = await env.DB.batch([
+      const [albums, songs, artists, ballots, settings, albumResults, songResults, artistResults, hourlyVotes, dailyVotes] = await env.DB.batch([
         env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl, position, active FROM albums WHERE survey_id=? ORDER BY position, title").bind(surveyId),
         env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, s.cover_url AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd, s.position, s.active FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? ORDER BY s.album_id, s.position, s.title").bind(surveyId),
         env.DB.prepare("SELECT id, name, image_url AS imageUrl, position, active FROM artists WHERE survey_id=? ORDER BY position, name").bind(surveyId),
@@ -613,6 +613,8 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
         env.DB.prepare("SELECT a.id,a.title,COUNT(v.album_id) AS votes FROM albums a LEFT JOIN album_votes v ON v.album_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.title").bind(surveyId),
         env.DB.prepare("SELECT s.id,s.title,a.title AS albumTitle,COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id WHERE a.survey_id=? GROUP BY s.id ORDER BY votes DESC,s.title").bind(surveyId),
         env.DB.prepare("SELECT a.id,a.name,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.name").bind(surveyId),
+        env.DB.prepare("SELECT CAST(created_at/3600 AS INTEGER)*3600 AS bucket,channel,COUNT(*) AS votes FROM ballots WHERE survey_id=? AND created_at>=unixepoch()-86400 GROUP BY bucket,channel ORDER BY bucket").bind(surveyId),
+        env.DB.prepare("SELECT CAST(created_at/86400 AS INTEGER)*86400 AS bucket,channel,COUNT(*) AS votes FROM ballots WHERE survey_id=? AND created_at>=unixepoch()-2592000 GROUP BY bucket,channel ORDER BY bucket").bind(surveyId),
       ]);
       const [ivrPrompts, ivrRecorders, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readIvrRecorders(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
       const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
@@ -621,7 +623,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
         const dupFp = await env.DB.prepare("SELECT fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(voter_key, ', ') AS voters FROM ballots WHERE survey_id=? AND fingerprint IS NOT NULL AND fingerprint != '' GROUP BY fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string }>();
         suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", ") }));
       } catch { /* fingerprint column may not exist yet */ }
-      return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, ivrRecorders, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
+      return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, voteTimeline: { hourly: hourlyVotes.results, daily: dailyVotes.results }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, ivrRecorders, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
     } catch (error) {
       console.error("overview error", error);
       return json({ error: `שגיאה בטעינת הנתונים: ${error instanceof Error ? error.message : String(error)}` }, 500);
@@ -899,6 +901,17 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       return json({ ok: true, url: coverUrl });
     }
     if (!albumId || kind !== "audio") return json({ error: "קובץ או אלבום חסרים." }, 400);
+    const uploadId = text(form.get("uploadId"));
+    const requestedSurveyId = text(form.get("surveyId"));
+    if (uploadId && (!/^[0-9a-f-]{36}$/i.test(uploadId) || requestedSurveyId !== surveyId)) return json({ error: "מזהה ההעלאה אינו תקין או שייך לסקר אחר." }, 400);
+    const album = await env.DB.prepare("SELECT id FROM albums WHERE id=? AND survey_id=?").bind(albumId, surveyId).first();
+    if (!album) return json({ error: "האלבום אינו שייך לסקר הפעיל." }, 404);
+    if (uploadId) {
+      const existingUpload = await env.DB.prepare("SELECT u.song_id AS songId,s.audio_url AS audioUrl,s.cover_url AS coverUrl FROM media_uploads u JOIN songs s ON s.id=u.song_id WHERE u.id=? AND u.survey_id=? AND u.album_id=?")
+        .bind(uploadId, surveyId, albumId).first<{ songId: string; audioUrl?: string; coverUrl?: string }>();
+      if (existingUpload) return json({ ok: true, id: existingUpload.songId, url: existingUpload.audioUrl, coverUrl: existingUpload.coverUrl, reused: true });
+      await env.DB.prepare("DELETE FROM media_uploads WHERE id=?").bind(uploadId).run();
+    }
     if (!file.type.startsWith("audio/") && !/\.(mp3|m4a|wav|ogg|flac|aac|wma)$/i.test(file.name)) return json({ error: "יש לבחור קובץ שמע." }, 415);
     if (file.size > 75 * 1024 * 1024) return json({ error: "הקובץ גדול מ־75MB." }, 413);
     const audioBuffer = await file.arrayBuffer();
@@ -918,8 +931,20 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const nextPosition = requestedPosition === ""
       ? Number((await env.DB.prepare("SELECT COALESCE(MAX(position),-1)+1 AS position FROM songs WHERE album_id=?").bind(albumId).first<{ position: number }>())?.position || 0)
       : number(requestedPosition);
-    await env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,cover_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,0,0,?,1)")
-      .bind(songId, albumId, title, audioUrl, coverUrl, nextPosition).run();
+    try {
+      const statements = [env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,cover_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,0,0,?,1)")
+        .bind(songId, albumId, title, audioUrl, coverUrl, nextPosition)];
+      if (uploadId) statements.push(env.DB.prepare("INSERT INTO media_uploads (id,survey_id,album_id,song_id) VALUES (?,?,?,?)").bind(uploadId, surveyId, albumId, songId));
+      await env.DB.batch(statements);
+    } catch (error) {
+      const cleanupKeys = [key, keyFromMediaUrl(coverUrl)].filter((value): value is string => !!value);
+      if (cleanupKeys.length) await env.MEDIA.delete(cleanupKeys).catch(() => undefined);
+      if (uploadId) {
+        const existingUpload = await env.DB.prepare("SELECT u.song_id AS songId,s.audio_url AS audioUrl,s.cover_url AS coverUrl FROM media_uploads u JOIN songs s ON s.id=u.song_id WHERE u.id=?").bind(uploadId).first<{ songId: string; audioUrl?: string; coverUrl?: string }>();
+        if (existingUpload) return json({ ok: true, id: existingUpload.songId, url: existingUpload.audioUrl, coverUrl: existingUpload.coverUrl, reused: true });
+      }
+      throw error;
+    }
     if (coverUrl) {
       await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
       await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();

@@ -1,7 +1,7 @@
 /** Cloudflare Worker entry point. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { clearSessionCookie, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
+import { clearSessionCookie, createSession, destroySession, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import { adminApi } from "./admin";
 import { ivrAdminApi } from "./ivr-admin";
 import { ensureRuntimeSchema } from "./schema";
@@ -136,6 +136,9 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   ];
   try {
     await env.DB.batch(statements);
+    if (channel === "site") {
+      await env.DB.prepare("DELETE FROM site_ballot_progress WHERE survey_id=? AND user_sub=?").bind(surveyId, voterKey).run().catch((error) => console.error("progress cleanup error", error));
+    }
     return json({ ok: true, ballotId }, 201);
   } catch (error) {
     if (String(error).includes("UNIQUE")) return json({ error: "כבר התקבלה הצבעה מהמזהה הזה." }, 409);
@@ -179,6 +182,7 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
+  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/ballots/check" || url.pathname === "/api/ballots/progress") await ensureRuntimeSchema(env);
 
   if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
   if (url.pathname === "/api/auth/google" && request.method === "POST") {
@@ -186,8 +190,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       const { credential } = await request.json<{ credential?: string }>();
       if (!credential) return json({ error: "חסר אישור Google." }, 400);
       const user = await verifyGoogleCredential(credential, env);
+      const token = await createSession(env, user);
       const response = json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } });
-      response.headers.set("set-cookie", sessionCookie(credential));
+      response.headers.set("set-cookie", sessionCookie(token));
       return response;
     } catch (error) { console.error("google auth error", error); return json({ error: "ההתחברות באמצעות Google נכשלה." }, 401); }
   }
@@ -195,7 +200,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const user = await readSession(request, env);
     return user ? json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } }) : json({ user: null }, 401);
   }
-  if (url.pathname === "/api/auth/logout" && request.method === "POST") { const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
+  if (url.pathname === "/api/auth/logout" && request.method === "POST") { await destroySession(request, env); const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
   if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
   if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
   if (url.pathname === "/api/ivr/recorders/check" && request.method === "GET") {
@@ -239,21 +244,47 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
   if (url.pathname === "/api/ballots/check" && request.method === "GET") {
     const isIvr = verifyIvrSecret(request, env);
+    let siteVoterKey = "";
     if (!isIvr) {
       const user = await readSession(request, env);
       if (!user) return json({ error: "אין הרשאה." }, 401);
+      siteVoterKey = user.sub;
     }
     const rawVoterKey = url.searchParams.get("voterKey")?.trim().toLowerCase() || "";
-    const voterKey = isIvr ? normalizePhone(rawVoterKey) : rawVoterKey;
+    const voterKey = isIvr ? normalizePhone(rawVoterKey) : siteVoterKey;
     if (!voterKey) return json({ voted: false });
     const surveyId = await activeSurveyId(env);
     const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first();
     return json({ voted: !!existing });
   }
-  if (url.pathname === "/api/ballots/progress" && verifyIvrSecret(request, env)) {
+  if (url.pathname === "/api/ballots/progress") {
     const surveyId = await activeSurveyId(env);
-    const voterKey = normalizePhone(url.searchParams.get("voterKey") || "");
+    const isIvr = verifyIvrSecret(request, env);
+    const user = isIvr ? null : await readSession(request, env);
+    if (!isIvr && !user) return json({ error: "אין הרשאה." }, 401);
+    const voterKey = isIvr ? normalizePhone(url.searchParams.get("voterKey") || "") : user!.sub;
     if (!voterKey) return json({ error: "חסר מזהה מצביע." }, 400);
+    if (!isIvr) {
+      if (request.method === "GET") {
+        const row = await env.DB.prepare("SELECT data_json AS dataJson FROM site_ballot_progress WHERE survey_id=? AND user_sub=?").bind(surveyId, voterKey).first<{ dataJson: string }>();
+        if (!row) return json({ progress: null });
+        try { return json({ progress: JSON.parse(row.dataJson) }); }
+        catch { return json({ progress: null }); }
+      }
+      if (request.method === "POST") {
+        const body = await request.json<Record<string, unknown>>();
+        const data = JSON.stringify(body);
+        if (data.length > 64_000) return json({ error: "ההתקדמות גדולה מדי." }, 413);
+        await env.DB.prepare("INSERT INTO site_ballot_progress (survey_id,user_sub,data_json,updated_at) VALUES (?,?,?,unixepoch()) ON CONFLICT(survey_id,user_sub) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at")
+          .bind(surveyId, voterKey, data).run();
+        return json({ ok: true });
+      }
+      if (request.method === "DELETE") {
+        await env.DB.prepare("DELETE FROM site_ballot_progress WHERE survey_id=? AND user_sub=?").bind(surveyId, voterKey).run();
+        return json({ ok: true });
+      }
+      return json({ error: "שיטה לא נתמכת." }, 405);
+    }
     const progressKey = `ivr-progress/${surveyId}/${voterKey}.json`;
     if (request.method === "GET") {
       const obj = await env.MEDIA.get(progressKey);

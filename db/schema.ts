@@ -123,3 +123,31 @@ export const ivrAdminAudit = sqliteTable("ivr_admin_audit", {
   status: integer("status").notNull(),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 }, (table) => [index("ivr_admin_audit_created_idx").on(table.createdAt)]);
+
+export const authSessions = sqliteTable("auth_sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userSub: text("user_sub").notNull(),
+  email: text("email").notNull(),
+  name: text("name").notNull(),
+  picture: text("picture"),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [index("auth_sessions_expires_idx").on(table.expiresAt)]);
+
+export const siteBallotProgress = sqliteTable("site_ballot_progress", {
+  surveyId: text("survey_id").notNull().references(() => surveys.id, { onDelete: "cascade" }),
+  userSub: text("user_sub").notNull(),
+  dataJson: text("data_json").notNull(),
+  updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  uniqueIndex("site_ballot_progress_unique").on(table.surveyId, table.userSub),
+  index("site_ballot_progress_updated_idx").on(table.updatedAt),
+]);
+
+export const mediaUploads = sqliteTable("media_uploads", {
+  id: text("id").primaryKey(),
+  surveyId: text("survey_id").notNull().references(() => surveys.id, { onDelete: "cascade" }),
+  albumId: text("album_id").notNull().references(() => albums.id, { onDelete: "cascade" }),
+  songId: text("song_id").notNull().references(() => songs.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [index("media_uploads_created_idx").on(table.createdAt)]);
