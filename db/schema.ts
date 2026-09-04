@@ -151,3 +151,18 @@ export const mediaUploads = sqliteTable("media_uploads", {
   songId: text("song_id").notNull().references(() => songs.id, { onDelete: "cascade" }),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 }, (table) => [index("media_uploads_created_idx").on(table.createdAt)]);
+
+export const subscribers = sqliteTable("subscribers", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  name: text("name"),
+  source: text("source").notNull().default("site"),
+  surveyId: text("survey_id"),
+  userSub: text("user_sub"),
+  consentedAt: integer("consented_at").notNull().default(sql`(unixepoch())`),
+  unsubscribedAt: integer("unsubscribed_at"),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  uniqueIndex("subscribers_email_unique").on(table.email),
+  index("subscribers_created_idx").on(table.createdAt),
+]);

@@ -91,3 +91,29 @@ export function downloadAllResultsXlsx(sheets: { rows: ExportRow[]; heading: str
   ];
   downloadXlsx(files, filename);
 }
+
+type SubscriberRow = { email: string; name?: string | null; source?: string | null; createdAt?: number | null; unsubscribedAt?: number | null };
+
+const SUBSCRIBER_SHEET_XML = (sheetRows: string) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0"/></sheetViews><cols><col min="1" max="1" width="38" customWidth="1"/><col min="2" max="2" width="26" customWidth="1"/><col min="3" max="3" width="14" customWidth="1"/><col min="4" max="4" width="20" customWidth="1"/><col min="5" max="5" width="14" customWidth="1"/></cols><sheetData>${sheetRows}</sheetData></worksheet>`;
+
+const sourceLabel = (source?: string | null) => source === "import" ? "ייבוא" : source === "admin" ? "הוספה ידנית" : "האתר";
+const stamp = (value?: number | null) => value ? new Date(value < 1_000_000_000_000 ? value * 1000 : value).toLocaleString("he-IL") : "";
+
+export function downloadSubscribersXlsx(rows: SubscriberRow[], filename: string) {
+  const sheetRows = [
+    `<row r="1">${textCell("A1", "כתובת דוא״ל", 1)}${textCell("B1", "שם", 1)}${textCell("C1", "מקור", 1)}${textCell("D1", "תאריך הרשמה", 1)}${textCell("E1", "סטטוס", 1)}</row>`,
+    ...rows.map((row, index) => {
+      const line = index + 2;
+      return `<row r="${line}">${textCell(`A${line}`, row.email)}${textCell(`B${line}`, row.name || "")}${textCell(`C${line}`, sourceLabel(row.source))}${textCell(`D${line}`, stamp(row.createdAt))}${textCell(`E${line}`, row.unsubscribedAt ? "הוסר" : "פעיל")}</row>`;
+    }),
+  ].join("");
+  const files = [
+    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
+    { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+    { name: "xl/workbook.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="רשימת תפוצה" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+    { name: "xl/styles.xml", content: STYLES_XML },
+    { name: "xl/worksheets/sheet1.xml", content: SUBSCRIBER_SHEET_XML(sheetRows) },
+  ];
+  downloadXlsx(files, filename);
+}

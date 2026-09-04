@@ -125,6 +125,19 @@ const TABLES = [
     song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+  // רשימת התפוצה. הכתובת נשמרת תמיד באותיות קטנות, כדי שהאינדקס
+  // הייחודי למטה ימנע כפילויות בלי צורך בהשוואה חסרת רישיות בשאילתה.
+  `CREATE TABLE IF NOT EXISTS subscribers (
+    id TEXT PRIMARY KEY NOT NULL,
+    email TEXT NOT NULL,
+    name TEXT,
+    source TEXT NOT NULL DEFAULT 'site',
+    survey_id TEXT,
+    user_sub TEXT,
+    consented_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    unsubscribed_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
 ];
 
 const COLUMNS = [
@@ -161,6 +174,8 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS auth_sessions_expires_idx ON auth_sessions(expires_at)",
   "CREATE INDEX IF NOT EXISTS site_ballot_progress_updated_idx ON site_ballot_progress(updated_at)",
   "CREATE INDEX IF NOT EXISTS media_uploads_created_idx ON media_uploads(created_at)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS subscribers_email_unique ON subscribers(email)",
+  "CREATE INDEX IF NOT EXISTS subscribers_created_idx ON subscribers(created_at)",
 ];
 
 const SEEDS = [
