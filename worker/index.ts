@@ -203,6 +203,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return user ? json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } }) : json({ user: null }, 401);
   }
   if (url.pathname === "/api/auth/logout" && request.method === "POST") { await destroySession(request, env); const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
+  if (url.pathname.startsWith("/api/admin/subscribers")) {
+    const handled = await subscribersAdminApi(request, env);
+    if (handled) return handled;
+  }
   if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
   if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
   if (url.pathname === "/api/ivr/recorders/check" && request.method === "GET") {
@@ -303,11 +307,6 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       return json({ ok: true });
     }
   }
-  if (url.pathname.startsWith("/api/admin/subscribers")) {
-    const handled = await subscribersAdminApi(request, env);
-    if (handled) return handled;
-  }
-
   if (url.pathname === "/api/subscribers" && request.method === "POST") {
     // ההרשמה פתוחה גם למי שאינו מחובר, כי הקישור לאתר מגיע לאנשים
     // שלא נכנסו מעולם. מגבלת הקצב יושבת על דלי נפרד מזה של ההצבעות,
