@@ -3,11 +3,13 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { clearSessionCookie, createSession, destroySession, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import { adminApi } from "./admin";
+import { subscribersAdminApi } from "./subscribers-admin";
 import { ivrAdminApi } from "./ivr-admin";
 import { ensureRuntimeSchema } from "./schema";
 import { deleteIvrAudioIfUnreferenced, readIvrPrompts, readIvrRecorders, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
 import { checkBallotRate } from "./rate-limit";
+import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 
 interface Env {
   ASSETS: Fetcher;
@@ -182,7 +184,7 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
-  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/ballots/check" || url.pathname === "/api/ballots/progress") await ensureRuntimeSchema(env);
+  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/ballots/check" || url.pathname === "/api/ballots/progress" || url.pathname === "/api/subscribers") await ensureRuntimeSchema(env);
 
   if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
   if (url.pathname === "/api/auth/google" && request.method === "POST") {
@@ -301,6 +303,43 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       return json({ ok: true });
     }
   }
+  if (url.pathname.startsWith("/api/admin/subscribers")) {
+    const handled = await subscribersAdminApi(request, env);
+    if (handled) return handled;
+  }
+
+  if (url.pathname === "/api/subscribers" && request.method === "POST") {
+    // ההרשמה פתוחה גם למי שאינו מחובר, כי הקישור לאתר מגיע לאנשים
+    // שלא נכנסו מעולם. מגבלת הקצב יושבת על דלי נפרד מזה של ההצבעות,
+    // כדי שהרשמה לא תבזבז את המכסה של המצביע ולהיפך.
+    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+    if (!(await checkBallotRate(env.DB, `subscribe:${clientIp}`))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
+    let body: { email?: string; name?: string };
+    try { body = await request.json<{ email?: string; name?: string }>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
+    const user = await readSession(request, env);
+    const email = normalizeEmail(body.email || user?.email || "");
+    if (!isValidEmail(email)) return json({ error: "כתובת הדוא״ל אינה תקינה." }, 400);
+    const name = normalizeName(body.name || user?.name || "");
+    const surveyId = await activeSurveyId(env);
+    try {
+      // ההרשמה חוזרת על עצמה בכל רענון של מסך התודה, ולכן היא idempotent:
+      // כתובת קיימת רק מתעדכנת, וכתובת שהוסרה בעבר חוזרת לרשימה.
+      await env.DB.prepare(`
+        INSERT INTO subscribers (id, email, name, source, survey_id, user_sub, consented_at)
+        VALUES (?, ?, ?, 'site', ?, ?, unixepoch())
+        ON CONFLICT(email) DO UPDATE SET
+          name = CASE WHEN excluded.name != '' THEN excluded.name ELSE subscribers.name END,
+          user_sub = COALESCE(excluded.user_sub, subscribers.user_sub),
+          consented_at = unixepoch(),
+          unsubscribed_at = NULL
+      `).bind(crypto.randomUUID(), email, name, surveyId, user?.sub ?? null).run();
+      return json({ ok: true, email });
+    } catch (error) {
+      console.error("subscriber insert error", error);
+      return json({ error: "ההרשמה נכשלה. נסו שוב." }, 500);
+    }
+  }
+
   if (url.pathname === "/api/ballots" && request.method === "POST") {
     // Every phone ballot reaches us from the single IVR server, so the per-IP
     // limit would reject callers past the fifth in a minute. Trust the shared
