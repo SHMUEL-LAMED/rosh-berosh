@@ -64,6 +64,7 @@ export default function Home() {
   const [done, setDone] = useState(false);
   const [voted, setVoted] = useState<boolean | null>(null);
   const [voteCheckFailed, setVoteCheckFailed] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
   const progressReady = useRef(false);
 
   const loadCatalog = useCallback(async () => {
@@ -212,7 +213,7 @@ export default function Home() {
   return <main className={`voting-shell ${player ? "with-player" : ""}`} dir="rtl">
     <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>החלפת חשבון</button></nav></header>
     <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1 className="parade-title"><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider" aria-hidden="true"></span><span className="hero-line2"><b>25</b><small>שנות מוזיקה</small></span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
-    {voted ? <section className="vote-card"><div className="empty-catalog"><p className="kicker">ההצבעה כבר נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><p>עדיין אפשר להאזין לכל השירים, ומנהלים יכולים להיכנס למערכת הניהול מהכפתור למעלה.</p></div></section> : catalog && !catalog.rules.votingOpen ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
+    {voted ? <section className="voted-card"><span className="voted-seal" aria-hidden="true">✓</span><p className="kicker"><span>ההצבעה נקלטה</span></p><h2>כבר הצבעתם במצעד</h2><p className="voted-lead">תודה שהשתתפתם! הבחירות שלכם נשמרו במערכת. אפשר להצביע פעם אחת בלבד, אבל עדיין אפשר להאזין לכל השירים המתמודדים.</p>{catalog && catalog.songs.length > 0 && <button type="button" className="voted-listen" onClick={() => setBrowseOpen(true)}><span aria-hidden="true">♫</span>שמיעת השירים המתמודדים</button>}</section> : catalog && !catalog.rules.votingOpen ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
         {!catalog && !loadFailed && <div className="loading">טוענים את רשימת המצעד…</div>}
@@ -233,15 +234,14 @@ export default function Home() {
         {catalog && stageHasChoices && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
       </section>
     </>}
-    {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} />}
+    {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} open={browseOpen} setOpen={setBrowseOpen} />}
   </main>;
 }
 
 function Title({ kicker, title, count }: { kicker: string; title: string; count?: string }) { return <div className="section-title"><div><p className="kicker">{kicker}</p><h2>{title}</h2></div>{count && <strong>{count}</strong>}</div>; }
 
-function BrowsePanel({ catalog }: { catalog: Catalog }) {
+function BrowsePanel({ catalog, open, setOpen }: { catalog: Catalog; open: boolean; setOpen: (value: boolean) => void }) {
   const { song: currentSong, play, setSiblings } = usePlayer();
-  const [open, setOpen] = useState(false);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const songsByAlbum = useMemo(() => {
     const map = new Map<string, Song[]>();

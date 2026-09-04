@@ -24,7 +24,7 @@ test("site vote checks and progress use the authenticated Google subject", () =>
 test("a returning voter keeps the site header, account controls and song browser", () => {
   const page = source("app/page.tsx");
   assert.doesNotMatch(page, /if \(voted\) return/);
-  assert.match(page, /voted \? <section className="vote-card"/);
+  assert.match(page, /voted \? <section className="voted-card"/);
   assert.match(page, /החלפת חשבון/);
   assert.match(page, /<BrowsePanel catalog=\{catalog\}/);
 });
