@@ -1,3 +1,4 @@
+@@ -0,0 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -19,6 +20,14 @@ test("site vote checks and progress use the authenticated Google subject", () =>
   assert.match(worker, /siteVoterKey = user\.sub/);
   assert.match(worker, /site_ballot_progress/);
   assert.match(worker, /DELETE FROM site_ballot_progress WHERE survey_id=\? AND user_sub=\?/);
+});
+
+test("a returning voter keeps the site header, account controls and song browser", () => {
+  const page = source("app/page.tsx");
+  assert.doesNotMatch(page, /if \(voted\) return/);
+  assert.match(page, /voted \? <section className="vote-card"/);
+  assert.match(page, /החלפת חשבון/);
+  assert.match(page, /<BrowsePanel catalog=\{catalog\}/);
 });
 
 test("audio uploads have a persisted retry queue and idempotency key", () => {
