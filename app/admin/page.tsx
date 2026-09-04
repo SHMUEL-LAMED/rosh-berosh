@@ -6,6 +6,7 @@ import Link from "next/link";
 import { LoginScreen, logout, useCurrentUser } from "../auth-ui";
 import { useNotice } from "../notice";
 import { blobToWav, fromDirectory, fromZip, splitAlbumFiles, suggestChorus, type UploadFile } from "./upload-utils";
+import { useUploadQueue } from "./upload-queue";
 import { downloadResultsXlsx, downloadAllResultsXlsx } from "./xlsx-export";
 import systemPrompts from "../../ivr-service/src/ivr-system-prompts.json";
 
@@ -19,7 +20,8 @@ type Readiness = { ready: boolean; warnings: string[]; counts: { albums: number;
 type PollArchive = { key: string; name: string; createdAt: number; votes: number; albums: number; songs: number; artists: number };
 type Survey = { id: string; name: string; active: number; createdAt: number; votingOpen: number; albums: number; songs: number; artists: number; votes: number };
 type SuspiciousVote = { fingerprint: string; count: number; voters: string[] };
-type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
+type TimelinePoint = { bucket: number; channel: "site" | "phone"; votes: number };
+type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; voteTimeline: { hourly: TimelinePoint[]; daily: TimelinePoint[] }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
 type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "managers" | "results" | "archives" | "voters";
 type Voter = { id: string; voterKey: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
@@ -33,10 +35,11 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
   const [albumOrderOverride, setAlbumOrder] = useState<Album[] | null>(null);
   const [artistOrderOverride, setArtistOrder] = useState<Artist[] | null>(null);
-  const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`); setAlbumOrder(null); setArtistOrder(null); setData(body); }).catch((err) => notify(err?.message || "לא הצלחנו לטעון את נתוני הניהול.")), []);
+  const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`); setAlbumOrder(null); setArtistOrder(null); setData(body); }).catch((err) => notify(err?.message || "לא הצלחנו לטעון את נתוני הניהול.")), [notify]);
   useEffect(() => { if (user?.isAdmin) load(); }, [user, load]);
   const albumOrder = useMemo(() => albumOrderOverride ?? data?.albums ?? [], [albumOrderOverride, data]);
   const artistOrder = useMemo(() => artistOrderOverride ?? data?.artists ?? [], [artistOrderOverride, data]);
+  const uploadQueue = useUploadQueue({ onCompleted: load, onMessage: notify });
 
   if (user === undefined) return <main className="login-shell"><div className="loading">בודקים הרשאות…</div></main>;
   if (!user) return <LoginScreen />;
@@ -60,32 +63,25 @@ export default function AdminPage() {
     try { await api("/api/admin/catalog", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id }) }); notify("נמחק בהצלחה."); await load(); }
     catch (error) { notify(error instanceof Error ? error.message : "המחיקה נכשלה."); }
   };
-  const uploadMedia = async (albumId: string, file: File, position?: number) => {
-    const form = new FormData(); form.set("albumId", albumId); form.set("kind", "audio"); form.set("file", file); form.set("title", file.name.replace(/\.[^.]+$/, "").replace(/^\d+[\s._-]*/, ""));
-    if (position !== undefined) form.set("position", String(position));
-    await api("/api/admin/media", { method: "POST", body: form });
-  };
   const uploadAlbum = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setUploading(true); notify("מכינים את האלבום…");
-    let createdAlbumId = "";
     try {
       const form = event.currentTarget, values = new FormData(form), title = String(values.get("title") || "").trim(), artistName = String(values.get("artistName") || "").trim();
       const folderInput = form.elements.namedItem("folder") as HTMLInputElement, zipInput = form.elements.namedItem("zip") as HTMLInputElement;
       const files: UploadFile[] = folderInput.files?.length ? fromDirectory(folderInput.files) : zipInput.files?.[0] ? await fromZip(zipInput.files[0]) : [];
       const split = splitAlbumFiles(files);
       if (!title || !artistName || !split.audio.length) throw new Error("יש להזין שם, אמן ולבחור תיקייה או ZIP עם קובצי שמע.");
+      if (!data?.activeSurvey?.id) throw new Error("לא נמצא סקר פעיל.");
       const { id } = await api("/api/admin/catalog", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "album", title, artistName }) });
-      createdAlbumId = id;
-      for (let index = 0; index < split.audio.length; index++) { notify(`מעלים שיר ${index + 1} מתוך ${split.audio.length}…`); await uploadMedia(id, split.audio[index], index); }
-      form.reset(); notify(`האלבום הועלה בהצלחה עם ${split.audio.length} שירים.`); await load();
+      await uploadQueue.enqueue(data.activeSurvey.id, id, split.audio.map((file, position) => ({ file, position })));
+      form.reset(); await load();
     } catch (error) {
-      if (createdAlbumId) await fetch("/api/admin/catalog", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "album", id: createdAlbumId, cleanup: true }) }).catch(() => {});
-      notify(error instanceof Error ? `${error.message} האלבום החלקי נוקה.` : "העלאת האלבום נכשלה והאלבום החלקי נוקה.");
+      notify(error instanceof Error ? error.message : "יצירת האלבום נכשלה.");
     } finally { setUploading(false); }
   };
   const addFiles = async (albumId: string, files: FileList | null) => {
     if (!files?.length) return; setUploading(true);
-    try { const split = splitAlbumFiles(fromDirectory(files)); const start = (data?.songs.filter((song) => song.albumId === albumId).reduce((max, song) => Math.max(max, song.position), -1) ?? -1) + 1; for (let i = 0; i < split.audio.length; i++) { notify(`מעלים קובץ ${i + 1} מתוך ${split.audio.length}…`); await uploadMedia(albumId, split.audio[i], start + i); } notify("הקבצים נוספו לאלבום."); await load(); }
+    try { const split = splitAlbumFiles(fromDirectory(files)); const start = (data?.songs.filter((song) => song.albumId === albumId).reduce((max, song) => Math.max(max, song.position), -1) ?? -1) + 1; if (!data?.activeSurvey?.id) throw new Error("לא נמצא סקר פעיל."); await uploadQueue.enqueue(data.activeSurvey.id, albumId, split.audio.map((file, index) => ({ file, position: start + index }))); }
     catch (error) { notify(error instanceof Error ? error.message : "ההעלאה נכשלה."); } finally { setUploading(false); }
   };
   const uploadArtistImage = async (artistId: string, file: File) => {
@@ -146,7 +142,7 @@ export default function AdminPage() {
       {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={notify} />}
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
       {tab === "archives" && <ArchivesPanel onChanged={load} onMessage={notify} />}
-      {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP עם קובצי שמע. אפשר להעלות תמונת אלבום ידנית או לתת לה להישלף אוטומטית מה־metadata של השירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מעלה…" : "יצירת האלבום"}</button></form></AdminSection><AdminSection title="שליפת תמונות מקבצי שמע"><p className="panel-help">שליפת עטיפות אלבום מה־metadata של שירים שכבר עלו אך אין להם תמונה.</p><button className="continue" style={{width:"100%"}} disabled={uploading} onClick={async()=>{setUploading(true);notify("");try{const r=await fetch("/api/admin/extract-covers",{method:"POST"});const d=await r.json();if(r.ok)notify(`נשלפו ${d.extracted} תמונות מתוך ${d.total} שירים ללא תמונה.`);else notify(d.error||"השליפה נכשלה.");}catch{notify("השליפה נכשלה.");}finally{setUploading(false);await load();}}}>שליפת תמונות חסרות</button></AdminSection><div className="album-admin-grid">{albumOrder.map((album, index) => <div key={album.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("album", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === albumOrder.length - 1} onClick={() => moveItem("album", index, 1)} aria-label="הזז למטה">▼</button></div><AlbumEditor album={album} songs={data?.songs.filter((song) => song.albumId === album.id) ?? []} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onFiles={(files) => addFiles(album.id, files)} onUploadCover={uploadAlbumCover} onRemoveCover={removeAlbumCover} /></div>)}</div></>}
+      {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP עם קובצי שמע. אפשר להעלות תמונת אלבום ידנית או לתת לה להישלף אוטומטית מה־metadata של השירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מכין…" : "יצירת האלבום"}</button></form></AdminSection>{uploadQueue.panel}<AdminSection title="שליפת תמונות מקבצי שמע"><p className="panel-help">שליפת עטיפות אלבום מה־metadata של שירים שכבר עלו אך אין להם תמונה.</p><button className="continue" style={{width:"100%"}} disabled={uploading} onClick={async()=>{setUploading(true);notify("");try{const r=await fetch("/api/admin/extract-covers",{method:"POST"});const d=await r.json();if(r.ok)notify(`נשלפו ${d.extracted} תמונות מתוך ${d.total} שירים ללא תמונה.`);else notify(d.error||"השליפה נכשלה.");}catch{notify("השליפה נכשלה.");}finally{setUploading(false);await load();}}}>שליפת תמונות חסרות</button></AdminSection><div className="album-admin-grid">{albumOrder.map((album, index) => <div key={album.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("album", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === albumOrder.length - 1} onClick={() => moveItem("album", index, 1)} aria-label="הזז למטה">▼</button></div><AlbumEditor album={album} songs={data?.songs.filter((song) => song.albumId === album.id) ?? []} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onFiles={(files) => addFiles(album.id, files)} onUploadCover={uploadAlbumCover} onRemoveCover={removeAlbumCover} /></div>)}</div></>}
       {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{artistOrder.map((item, index) => <div key={item.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("artist", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === artistOrder.length - 1} onClick={() => moveItem("artist", index, 1)} aria-label="הזז למטה">▼</button></div><ArtistRow item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} /></div>)}</div></AdminSection>}
       {tab === "managers" && data && <ManagersPanel managers={data.managers} currentEmail={user.email} onSaved={load} onMessage={notify} />}
       {tab === "results" && data && <Results data={data.results} />}
@@ -155,7 +151,25 @@ export default function AdminPage() {
   </main>;
 }
 
-function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab: Tab): void }) { return <><div className="dashboard-grid"><button onClick={() => onNavigate("surveys")}><b>{data?.surveys.length ?? 0}</b><span>סקרים</span><small>{data?.activeSurvey ? `פעיל: ${data.activeSurvey.name}` : "בחירה והפעלה"}</small></button><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>{data?.suspicious && data.suspicious.length > 0 && <AdminSection title="הצבעות חשודות"><p className="panel-help">הצבעות שבוצעו מאותו דפדפן/מחשב עם חשבונות שונים. זה לא בהכרח הונאה — יכול להיות מחשב משותף.</p><div className="suspicious-list">{data.suspicious.map((item) => <div key={item.fingerprint} className="suspicious-row"><span className="suspicious-count">{item.count} הצבעות</span><span className="suspicious-fp">{item.fingerprint.slice(0, 12)}…</span><div className="suspicious-voters">{item.voters.map((v) => <small key={v}>{v}</small>)}</div></div>)}</div></AdminSection>}</>; }
+function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab: Tab): void }) { return <><div className="dashboard-grid"><button onClick={() => onNavigate("surveys")}><b>{data?.surveys.length ?? 0}</b><span>סקרים</span><small>{data?.activeSurvey ? `פעיל: ${data.activeSurvey.name}` : "בחירה והפעלה"}</small></button><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>{data && <VoteCharts timeline={data.voteTimeline} />}{data?.suspicious && data.suspicious.length > 0 && <AdminSection title="הצבעות חשודות"><p className="panel-help">הצבעות שבוצעו מאותו דפדפן/מחשב עם חשבונות שונים. זה לא בהכרח הונאה — יכול להיות מחשב משותף.</p><div className="suspicious-list">{data.suspicious.map((item) => <div key={item.fingerprint} className="suspicious-row"><span className="suspicious-count">{item.count} הצבעות</span><span className="suspicious-fp">{item.fingerprint.slice(0, 12)}…</span><div className="suspicious-voters">{item.voters.map((v) => <small key={v}>{v}</small>)}</div></div>)}</div></AdminSection>}</>; }
+
+function VoteCharts({ timeline }: { timeline: Overview["voteTimeline"] }) {
+  const [mode, setMode] = useState<"hourly" | "daily">("hourly");
+  const [now] = useState(() => Date.now());
+  const seconds = mode === "hourly" ? 3600 : 86400;
+  const count = mode === "hourly" ? 24 : 30;
+  const end = Math.floor(now / 1000 / seconds) * seconds;
+  const values = new Map(timeline[mode].map((item) => [`${item.bucket}:${item.channel}`, Number(item.votes)]));
+  const points = Array.from({ length: count }, (_, index) => {
+    const bucket = end - (count - index - 1) * seconds;
+    return { bucket, site: values.get(`${bucket}:site`) || 0, phone: values.get(`${bucket}:phone`) || 0 };
+  });
+  const maximum = Math.max(1, ...points.map((item) => item.site + item.phone));
+  const label = (bucket: number) => mode === "hourly"
+    ? new Date(bucket * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })
+    : new Date(bucket * 1000).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" });
+  return <AdminSection title="הצבעות לאורך זמן"><div className="chart-toolbar"><div><span className="chart-key site">אתר</span><span className="chart-key phone">טלפון</span></div><div><button className={mode === "hourly" ? "active" : ""} onClick={() => setMode("hourly")}>לפי שעה</button><button className={mode === "daily" ? "active" : ""} onClick={() => setMode("daily")}>לפי יום</button></div></div><div className="vote-chart-wrapper"><div className="vote-chart" dir="ltr">{points.map((point, index) => <div className="chart-column" key={point.bucket} title={`${label(point.bucket)} — אתר: ${point.site}, טלפון: ${point.phone}`}><div className="chart-value">{point.site + point.phone || ""}</div><div className="chart-bar" style={{ height: `${Math.max(2, (point.site + point.phone) / maximum * 180)}px` }}><i className="phone" style={{ flex: point.phone }} /><i className="site" style={{ flex: point.site }} /></div>{(mode === "daily" || index % 3 === 0) && <small>{label(point.bucket)}</small>}</div>)}</div></div></AdminSection>;
+}
 
 function RecorderAccessPanel({ recorders, onSaved, onMessage }: { recorders: string[]; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const add = async (event: FormEvent<HTMLFormElement>) => {

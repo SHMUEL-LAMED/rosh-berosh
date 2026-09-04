@@ -14,6 +14,7 @@ const EXPECTED_TABLES = [
   "surveys", "albums", "songs", "artists", "ballots",
   "album_votes", "song_votes", "artist_votes", "poll_settings",
   "ballot_rate_limits", "ivr_recorders", "ivr_prompts", "ivr_store_meta", "ivr_admin_audit",
+  "auth_sessions", "site_ballot_progress", "media_uploads",
 ];
 
 function fakeDb({ existingColumns = {}, fail = () => false } = {}) {

@@ -102,6 +102,29 @@ const TABLES = [
     status INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+  `CREATE TABLE IF NOT EXISTS auth_sessions (
+    token_hash TEXT PRIMARY KEY NOT NULL,
+    user_sub TEXT NOT NULL,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL,
+    picture TEXT,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  `CREATE TABLE IF NOT EXISTS site_ballot_progress (
+    survey_id TEXT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+    user_sub TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (survey_id, user_sub)
+  )`,
+  `CREATE TABLE IF NOT EXISTS media_uploads (
+    id TEXT PRIMARY KEY NOT NULL,
+    survey_id TEXT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+    album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
 ];
 
 const COLUMNS = [
@@ -135,6 +158,9 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS artist_votes_artist_idx ON artist_votes(artist_id)",
   "CREATE INDEX IF NOT EXISTS ballot_rate_limits_reset_idx ON ballot_rate_limits(reset_at)",
   "CREATE INDEX IF NOT EXISTS ivr_admin_audit_created_idx ON ivr_admin_audit(created_at)",
+  "CREATE INDEX IF NOT EXISTS auth_sessions_expires_idx ON auth_sessions(expires_at)",
+  "CREATE INDEX IF NOT EXISTS site_ballot_progress_updated_idx ON site_ballot_progress(updated_at)",
+  "CREATE INDEX IF NOT EXISTS media_uploads_created_idx ON media_uploads(created_at)",
 ];
 
 const SEEDS = [

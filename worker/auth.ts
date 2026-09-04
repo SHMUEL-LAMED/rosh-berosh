@@ -9,8 +9,9 @@ export type SessionUser = {
   exp: number;
 };
 
-type AuthEnv = { MEDIA?: R2Bucket; ADMIN_EMAILS?: string };
+type AuthEnv = { DB?: D1Database; MEDIA?: R2Bucket; ADMIN_EMAILS?: string };
 const ADMIN_LIST_KEY = "settings/admin-emails.json";
+const SESSION_SECONDS = 60 * 60 * 24 * 30;
 
 function configuredAdminEmails(env?: AuthEnv): string[] {
   return String(env?.ADMIN_EMAILS || "")
@@ -82,6 +83,20 @@ export async function readSession(request: Request, env?: AuthEnv): Promise<Sess
   const cookie = request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith("rosh_session="));
   const token = cookie?.slice("rosh_session=".length);
   if (!token) return null;
+  if (env?.DB && !token.includes(".")) {
+    try {
+      const tokenHash = await hashToken(token);
+      const row = await env.DB.prepare("SELECT user_sub AS sub,email,name,picture,expires_at AS exp FROM auth_sessions WHERE token_hash=? AND expires_at>unixepoch()")
+        .bind(tokenHash).first<Omit<SessionUser, "isAdmin">>();
+      if (!row) return null;
+      const admins = await readAdminEmails(env);
+      return { ...row, isAdmin: admins.includes(row.email.toLowerCase()) };
+    } catch (error) {
+      console.error("session read error", error);
+      return null;
+    }
+  }
+  // Accept the old one-hour Google-token cookie during the rollout window.
   try {
     return await verifyGoogleCredential(token, env);
   } catch {
@@ -89,5 +104,35 @@ export async function readSession(request: Request, env?: AuthEnv): Promise<Sess
   }
 }
 
-export const sessionCookie = (token: string) => `rosh_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=3600`;
+function base64Url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function hashToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(token));
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+export async function createSession(env: AuthEnv, user: SessionUser): Promise<string> {
+  if (!env.DB) throw new Error("session database unavailable");
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = base64Url(bytes);
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM auth_sessions WHERE expires_at<=unixepoch()"),
+    env.DB.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,picture,expires_at) VALUES (?,?,?,?,?,?)")
+      .bind(await hashToken(token), user.sub, user.email, user.name, user.picture || null, expiresAt),
+  ]);
+  return token;
+}
+
+export async function destroySession(request: Request, env: AuthEnv): Promise<void> {
+  if (!env.DB) return;
+  const cookie = request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith("rosh_session="));
+  const token = cookie?.slice("rosh_session=".length);
+  if (!token || token.includes(".")) return;
+  await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash=?").bind(await hashToken(token)).run();
+}
+
+export const sessionCookie = (token: string) => `rosh_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_SECONDS}`;
 export const clearSessionCookie = "rosh_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0";
