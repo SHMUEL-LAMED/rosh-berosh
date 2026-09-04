@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { isValidEmail, normalizeEmail, normalizeName, parseSubscriberLine, parseSubscriberList } from "../worker/subscribers.js";
 
 test("כתובת מנורמלת לאותיות קטנות ובלי רווחים", () => {
@@ -51,4 +52,15 @@ test("רשימה בלי אף כתובת תקינה חוזרת ריקה", () => {
   const { entries, skipped } = parseSubscriberList("שלום\nעולם");
   assert.deepEqual(entries, []);
   assert.equal(skipped, 2);
+});
+
+// רגרסיה: `adminApi` מחזיר 404 לכל נתיב שאינו מוכר לו, ולכן הוא חייב לרוץ
+// אחרי מודול רשימת התפוצה. כשהסדר התהפך, לשונית הניהול נכשלה בטעינה.
+test("ניתוב /api/admin/subscribers קודם לנתב הניהול הכללי", () => {
+  const worker = readFileSync(new URL("../worker/index.ts", import.meta.url), "utf8");
+  const subscribers = worker.indexOf('startsWith("/api/admin/subscribers")');
+  const catchAll = worker.indexOf('startsWith("/api/admin/")) return adminApi');
+  assert.ok(subscribers !== -1, "חסר ניתוב ל-/api/admin/subscribers");
+  assert.ok(catchAll !== -1, "חסר הנתב הכללי של הניהול");
+  assert.ok(subscribers < catchAll, "מודול רשימת התפוצה חייב להיבדק לפני הנתב הכללי");
 });
