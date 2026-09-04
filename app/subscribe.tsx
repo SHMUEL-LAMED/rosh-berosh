@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import "./subscribe.css";
 
 type Props = { defaultEmail?: string; defaultName?: string; heading?: string; blurb?: string };
 
