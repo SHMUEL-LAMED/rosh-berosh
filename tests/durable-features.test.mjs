@@ -24,9 +24,20 @@ test("site vote checks and progress use the authenticated Google subject", () =>
 test("a returning voter keeps the site header, account controls and song browser", () => {
   const page = source("app/page.tsx");
   assert.doesNotMatch(page, /if \(voted\) return/);
-  assert.match(page, /voted \? <section className="vote-card"/);
+  assert.match(page, /voted \? <section className="vote-card voted-card"/);
+  assert.doesNotMatch(page, /עדיין אפשר להאזין לכל השירים/);
   assert.match(page, /החלפת חשבון/);
   assert.match(page, /<BrowsePanel catalog=\{catalog\}/);
+});
+
+test("voting controls and the song browser expose accessible state and dialog behavior", () => {
+  const page = source("app/page.tsx");
+  assert.match(page, /aria-pressed=\{albums\.includes\(album\.id\)\}/);
+  assert.match(page, /aria-pressed=\{artists\.includes\(artist\.id\)\}/);
+  assert.match(page, /role="dialog" aria-modal="true"/);
+  assert.match(page, /event\.key === "Escape"/);
+  assert.match(page, /event\.key !== "Tab"/);
+  assert.match(page, /triggerRef\.current\?\.focus\(\)/);
 });
 
 test("audio uploads have a persisted retry queue and idempotency key", () => {
