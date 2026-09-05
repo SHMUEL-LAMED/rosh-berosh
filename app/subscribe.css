@@ -1,17 +1,13 @@
-/* רשימת התפוצה — כרטיס ההרשמה באתר ולוח הניהול */
+/* רשימת התפוצה — כרטיס ההרשמה באתר */
 .subscribe-card{width:min(560px,100%);margin:26px auto 0;padding:22px;border:1px solid rgba(184,149,48,.28);border-radius:18px;text-align:right;background:var(--panel2)}
 .success-card .subscribe-card,.empty-catalog .subscribe-card{margin-top:30px}
 .subscribe-copy b{display:block;font-size:17px}
 .subscribe-copy small{display:block;margin-top:7px;color:var(--muted);font-size:12px;line-height:1.65}
-.subscribe-form{display:flex;gap:9px;margin-top:16px}
-.subscribe-form input{flex:1;min-width:0;height:48px;padding:0 14px;border:1px solid rgba(0,0,0,.14);border-radius:13px;outline:0;color:var(--text);background:var(--panel)}
-.subscribe-form input:focus{border-color:var(--violet)}
-.subscribe-form .continue{min-height:48px;padding:0 22px;border-radius:13px;cursor:pointer;white-space:nowrap}
-.subscribe-form .continue:disabled{opacity:.55;cursor:default}
+.subscribe-card .continue{width:100%;min-height:48px;margin-top:16px;padding:0 22px;border-radius:13px;cursor:pointer}
+.subscribe-card .continue:disabled{opacity:.55;cursor:default}
 .subscribe-note{margin:12px 0 0;color:var(--muted);font-size:11px}
 .subscribe-error{margin:12px 0 0;color:#b3245c;font-size:12px}
 .subscribe-card.done{display:flex;align-items:center;gap:14px;text-align:right}
 .subscribe-mark{width:42px;height:42px;display:grid;flex:none;place-items:center;border-radius:50%;color:#137863;background:#def4ed;font-size:20px}
 .subscribe-card.done b{display:block}
-.subscribe-card.done small{display:block;margin-top:4px;color:var(--muted);font-size:12px;direction:ltr;text-align:right}
-@media(max-width:580px){.subscribe-form{flex-direction:column}.subscribe-form .continue{width:100%}}
+.subscribe-card.done small{display:block;margin-top:4px;color:var(--muted);font-size:12px}

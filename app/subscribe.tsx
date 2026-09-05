@@ -1,58 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./subscribe.css";
 
-type Props = { defaultEmail?: string; defaultName?: string; heading?: string; blurb?: string };
+type Props = { heading?: string; blurb?: string };
 
 /**
- * הרשמה לרשימת התפוצה. הלחיצה על הכפתור היא ההסכמה המפורשת שהחוק דורש,
- * ולכן אין כאן תיבת סימון מסומנת מראש ואין הרשמה אוטומטית בעקבות ההצבעה.
+ * הרשמה לרשימת התפוצה בלחיצה אחת. הכתובת נלקחת מהחשבון המחובר, ולכן
+ * אין כאן שדה להקלדה. הלחיצה על הכפתור היא ההסכמה המפורשת שהחוק דורש,
+ * ולכן אין תיבת סימון מסומנת מראש ואין הרשמה אוטומטית בעקבות ההצבעה.
+ * מי שכבר רשום לא רואה את הכרטיס בכלל, כדי שלא נבקש ממנו שוב.
  */
-export function SubscribeCard({ defaultEmail = "", defaultName = "", heading = "רוצים לשמוע מאיתנו?", blurb = "הצטרפו לרשימת התפוצה של ראש בראש ותקבלו עדכון על תוצאות המצעד ועל התוכניות הבאות." }: Props) {
-  const [email, setEmail] = useState(defaultEmail);
+export function SubscribeCard({ heading = "רוצים לשמוע מאיתנו?", blurb = "הצטרפו לרשימת התפוצה של ראש בראש ותקבלו עדכון על תוצאות המצעד ועל התוכניות הבאות." }: Props) {
+  const [state, setState] = useState<"checking" | "offer" | "done" | "hidden">("checking");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<"idle" | "done">("idle");
   const [error, setError] = useState("");
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  useEffect(() => {
+    let active = true;
+    fetch("/api/subscribers", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
+      .then((data) => { if (active) setState(data?.subscribed ? "hidden" : "offer"); })
+      // בלי תשובה מהשרת עדיף לא להציע הרשמה מאשר לבקש שוב ממי שכבר נרשם.
+      .catch(() => { if (active) setState("hidden"); });
+    return () => { active = false; };
+  }, []);
+
+  const subscribe = async () => {
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/subscribers", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), name: defaultName }),
-      });
+      const response = await fetch("/api/subscribers", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "ההרשמה נכשלה.");
-      setStatus("done");
+      setState("done");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "ההרשמה נכשלה.");
     } finally { setBusy(false); }
   };
 
-  if (status === "done") return <section className="subscribe-card done">
+  if (state === "checking" || state === "hidden") return null;
+
+  if (state === "done") return <section className="subscribe-card done">
     <span className="subscribe-mark">✓</span>
-    <div><b>נרשמתם לרשימת התפוצה</b><small>{email}</small></div>
+    <div><b>נרשמתם לרשימת התפוצה</b><small>נעדכן אתכם בדוא״ל של החשבון שאיתו התחברתם.</small></div>
   </section>;
 
   return <section className="subscribe-card">
     <div className="subscribe-copy"><b>{heading}</b><small>{blurb}</small></div>
-    <form className="subscribe-form" onSubmit={submit}>
-      <input
-        type="email"
-        inputMode="email"
-        dir="ltr"
-        required
-        placeholder="כתובת דוא״ל"
-        value={email}
-        onChange={(event) => { setEmail(event.target.value); setError(""); }}
-        aria-label="כתובת דוא״ל לרשימת התפוצה"
-      />
-      <button className="continue" disabled={busy || !email.trim()}>{busy ? "רושמים…" : "הרשמה"}</button>
-    </form>
+    <button className="continue" type="button" disabled={busy} onClick={subscribe}>{busy ? "רושמים…" : "הרשמה לרשימת התפוצה"}</button>
     {error && <p className="subscribe-error">{error}</p>}
-    <p className="subscribe-note">אפשר להסיר את הכתובת מהרשימה בכל עת.</p>
+    <p className="subscribe-note">נשתמש בכתובת החשבון שאיתו התחברתם. אפשר להסיר אותה מהרשימה בכל עת.</p>
   </section>;
 }

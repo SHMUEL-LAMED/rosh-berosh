@@ -307,35 +307,41 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
       return json({ ok: true });
     }
   }
-  if (url.pathname === "/api/subscribers" && request.method === "POST") {
-    // ההרשמה פתוחה גם למי שאינו מחובר, כי הקישור לאתר מגיע לאנשים
-    // שלא נכנסו מעולם. מגבלת הקצב יושבת על דלי נפרד מזה של ההצבעות,
-    // כדי שהרשמה לא תבזבז את המכסה של המצביע ולהיפך.
-    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-    if (!(await checkBallotRate(env.DB, `subscribe:${clientIp}`))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
-    let body: { email?: string; name?: string };
-    try { body = await request.json<{ email?: string; name?: string }>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
+  if (url.pathname === "/api/subscribers") {
+    // הכתובת נלקחת תמיד מהחשבון המחובר ולעולם לא מגוף הבקשה, כדי שאיש
+    // לא ירשום כתובת של מישהו אחר וכדי שהנרשם לא יצטרך להקליד דבר.
     const user = await readSession(request, env);
-    const email = normalizeEmail(body.email || user?.email || "");
-    if (!isValidEmail(email)) return json({ error: "כתובת הדוא״ל אינה תקינה." }, 400);
-    const name = normalizeName(body.name || user?.name || "");
-    const surveyId = await activeSurveyId(env);
-    try {
-      // ההרשמה חוזרת על עצמה בכל רענון של מסך התודה, ולכן היא idempotent:
-      // כתובת קיימת רק מתעדכנת, וכתובת שהוסרה בעבר חוזרת לרשימה.
-      await env.DB.prepare(`
-        INSERT INTO subscribers (id, email, name, source, survey_id, user_sub, consented_at)
-        VALUES (?, ?, ?, 'site', ?, ?, unixepoch())
-        ON CONFLICT(email) DO UPDATE SET
-          name = CASE WHEN excluded.name != '' THEN excluded.name ELSE subscribers.name END,
-          user_sub = COALESCE(excluded.user_sub, subscribers.user_sub),
-          consented_at = unixepoch(),
-          unsubscribed_at = NULL
-      `).bind(crypto.randomUUID(), email, name, surveyId, user?.sub ?? null).run();
-      return json({ ok: true, email });
-    } catch (error) {
-      console.error("subscriber insert error", error);
-      return json({ error: "ההרשמה נכשלה. נסו שוב." }, 500);
+    if (!user) return json({ error: "צריך להתחבר כדי להירשם לרשימת התפוצה." }, 401);
+    const email = normalizeEmail(user.email);
+    if (!isValidEmail(email)) return json({ error: "כתובת הדוא״ל של החשבון אינה תקינה." }, 400);
+
+    // מסך התודה שואל לפני שהוא מציג את הכרטיס, כדי לא לבקש שוב ממי שכבר נרשם.
+    if (request.method === "GET") {
+      const row = await env.DB.prepare("SELECT 1 AS one FROM subscribers WHERE email=? AND unsubscribed_at IS NULL").bind(email).first<{ one: number }>();
+      return json({ subscribed: !!row });
+    }
+
+    if (request.method === "POST") {
+      const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+      if (!(await checkBallotRate(env.DB, `subscribe:${clientIp}`))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
+      const name = normalizeName(user.name);
+      const surveyId = await activeSurveyId(env);
+      try {
+        // ההרשמה idempotent: כתובת קיימת רק מתעדכנת, וכתובת שהוסרה בעבר חוזרת לרשימה.
+        await env.DB.prepare(`
+          INSERT INTO subscribers (id, email, name, source, survey_id, user_sub, consented_at)
+          VALUES (?, ?, ?, 'site', ?, ?, unixepoch())
+          ON CONFLICT(email) DO UPDATE SET
+            name = CASE WHEN excluded.name != '' THEN excluded.name ELSE subscribers.name END,
+            user_sub = COALESCE(excluded.user_sub, subscribers.user_sub),
+            consented_at = unixepoch(),
+            unsubscribed_at = NULL
+        `).bind(crypto.randomUUID(), email, name, surveyId, user.sub ?? null).run();
+        return json({ ok: true, email });
+      } catch (error) {
+        console.error("subscriber insert error", error);
+        return json({ error: "ההרשמה נכשלה. נסו שוב." }, 500);
+      }
     }
   }
 
