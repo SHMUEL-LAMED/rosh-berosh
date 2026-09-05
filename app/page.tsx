@@ -213,23 +213,23 @@ export default function Home() {
   return <main className={`voting-shell ${player ? "with-player" : ""}`} dir="rtl">
     <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>החלפת חשבון</button></nav></header>
     <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1 className="parade-title"><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider" aria-hidden="true"></span><span className="hero-line2"><b>25</b><small>שנות מוזיקה</small></span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
-    {voted ? <section className="vote-card"><div className="empty-catalog"><p className="kicker">ההצבעה כבר נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><p>עדיין אפשר להאזין לכל השירים, ומנהלים יכולים להיכנס למערכת הניהול מהכפתור למעלה.</p><SubscribeCard defaultEmail={user.email} defaultName={user.name} /></div></section> : catalog && !catalog.rules.votingOpen ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
+    {voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><SubscribeCard defaultEmail={user.email} defaultName={user.name} /></div></section> : catalog && !catalog.rules.votingOpen ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
         {!catalog && !loadFailed && <div className="loading">טוענים את רשימת המצעד…</div>}
         {!catalog && loadFailed && <div className="empty-catalog"><h2>טעינת רשימת המצעד נכשלה</h2><p>בדקו את החיבור ונסו שוב.</p><button className="continue" onClick={loadCatalog}>ניסיון חוזר</button></div>}
         {catalog && stage === "albums" && catalog.albums.length === 0 && <div className="empty-catalog"><h2>רשימת האלבומים בהכנה</h2><p>האלבומים יעלו בקרוב.</p></div>}
         {catalog && stage === "artists" && catalog.artists.length === 0 && <div className="empty-catalog"><h2>רשימת הזמרים בהכנה</h2><p>הזמרים יעלו בקרוב.</p></div>}
-        {catalog && stage === "albums" && <><Title kicker="שלב ראשון" title={`בחרו ${rangeText(catalog.rules.albumsMin, catalog.rules.albumsMax, "אלבומים")}`} count={`${albums.length}/${catalog.rules.albumsMax}`} /><div className="album-grid">{catalog.albums.map((album) => <button type="button" key={album.id} className={`choice-card ${albums.includes(album.id) ? "selected" : ""}`} onClick={() => toggleAlbum(album.id)}>{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><b>{album.title}</b><small>{album.artistName}</small><i>{albums.includes(album.id) ? "✓" : "+"}</i></button>)}</div></>}
+        {catalog && stage === "albums" && <><Title kicker="שלב ראשון" title={`בחרו ${rangeText(catalog.rules.albumsMin, catalog.rules.albumsMax, "אלבומים")}`} count={`${albums.length}/${catalog.rules.albumsMax}`} /><div className="album-grid">{catalog.albums.map((album) => <button type="button" key={album.id} aria-pressed={albums.includes(album.id)} className={`choice-card ${albums.includes(album.id) ? "selected" : ""}`} onClick={() => toggleAlbum(album.id)}>{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><b>{album.title}</b><small>{album.artistName}</small><i aria-hidden="true">{albums.includes(album.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "songs" && (() => {
           const album = selectedAlbums[Math.min(songAlbumIndex, Math.max(0, selectedAlbums.length - 1))];
           if (!album) return <div className="empty-catalog"><h2>עדיין לא נבחרו אלבומים</h2><p>חזרו אחורה ובחרו אלבומים כדי לבחור מהם שירים.</p></div>;
           const chosen = songs[album.id]?.length ?? 0;
           return <><Title kicker={`שלב שני · אלבום ${songAlbumIndex + 1} מתוך ${selectedAlbums.length}`} title={`בחרו ${rangeText(catalog.rules.songsMin, catalog.rules.songsMax, "שירים")} מ״${album.title}״`} count={`${chosen}/${catalog.rules.songsMax}`} />
             <div className="song-progress"><span>{album.artistName}</span><div className="dots">{selectedAlbums.map((item, index) => <i key={item.id} className={index === songAlbumIndex ? "on" : index < songAlbumIndex ? "done" : ""} />)}</div></div>
-            <div className="song-groups"><fieldset><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button className="song-select" onClick={() => toggleSong(album.id, song.id)}><i>{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => { setSiblings(songsByAlbum(album.id).filter(s => s.audioUrl)); play(song); }}>{player?.id === song.id ? "■" : "▶"}</button>}</div>)}</fieldset></div></>;
+            <div className="song-groups"><fieldset><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button type="button" className="song-select" aria-pressed={songs[album.id]?.includes(song.id) ?? false} onClick={() => toggleSong(album.id, song.id)}><i aria-hidden="true">{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button type="button" className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => { setSiblings(songsByAlbum(album.id).filter(s => s.audioUrl)); play(song); }}>{player?.id === song.id ? "■" : "▶"}</button>}</div>)}</fieldset></div></>;
         })()}
-        {catalog && stage === "artists" && <><Title kicker="שלב שלישי" title={`בחרו ${rangeText(catalog.rules.artistsMin, catalog.rules.artistsMax, "זמרים")}`} count={`${artists.length}/${catalog.rules.artistsMax}`} /><div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b><i>{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div></>}
+        {catalog && stage === "artists" && <><Title kicker="שלב שלישי" title={`בחרו ${rangeText(catalog.rules.artistsMin, catalog.rules.artistsMax, "זמרים")}`} count={`${artists.length}/${catalog.rules.artistsMax}`} /><div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} aria-pressed={artists.includes(artist.id)} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b><i aria-hidden="true">{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "summary" && <><Title kicker="כמעט סיימנו" title="אישור ההצבעה" /><div className="summary">{catalog.rules.albumsEnabled ? <><h3>האלבומים והשירים שבחרתם</h3><div className="summary-albums">{selectedAlbums.map((album) => <div key={album.id} className="summary-album">{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><div><b>{album.title}</b><small>{album.artistName}</small><span>{selectedSongNames(album.id)}</span></div></div>)}</div></> : null}{catalog.rules.artistsEnabled ? <><h3>הזמרים שבחרתם</h3><div className="summary-artists">{selectedArtists.map((artist) => <div key={artist.id} className="summary-artist">{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b></div>)}</div></> : null}</div><div className="signed-voter"><span>ההצבעה תישמר עבור</span><b>{user.email}</b></div></>}
         {catalog && stageHasChoices && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
       </section>
@@ -244,6 +244,9 @@ function BrowsePanel({ catalog }: { catalog: Catalog }) {
   const { song: currentSong, play, setSiblings } = usePlayer();
   const [open, setOpen] = useState(false);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const songsByAlbum = useMemo(() => {
     const map = new Map<string, Song[]>();
     catalog.songs.forEach((song) => {
@@ -255,24 +258,45 @@ function BrowsePanel({ catalog }: { catalog: Catalog }) {
   }, [catalog.songs]);
   const selectedAlbum = catalog.albums.find((a) => a.id === selectedAlbumId);
   const selectedSongs = selectedAlbumId ? songsByAlbum.get(selectedAlbumId) || [] : [];
+  const closePanel = useCallback(() => {
+    setOpen(false);
+    setSelectedAlbumId(null);
+    window.setTimeout(() => triggerRef.current?.focus(), 0);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    closeRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); closePanel(); return; }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'));
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, closePanel]);
 
   return <>
-    <button className="browse-fab" onClick={() => setOpen(true)} aria-label="שמיעת השירים המתמודדים">
+    <button ref={triggerRef} type="button" className="browse-fab" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-expanded={open} aria-controls="songs-dialog" aria-label="שמיעת השירים המתמודדים">
       <span className="browse-fab-icon">♫</span>
       <span className="browse-fab-label">שמיעת השירים</span>
     </button>
-    {open && <div className="browse-backdrop" onClick={() => { setOpen(false); setSelectedAlbumId(null); }} />}
-    <div className={`browse-wrap ${open ? "open" : ""}`}>
+    {open && <><div className="browse-backdrop" aria-hidden="true" onClick={closePanel} />
+    <div ref={dialogRef} id="songs-dialog" className="browse-wrap open" role="dialog" aria-modal="true" aria-labelledby="songs-dialog-title">
       <aside className="browse-panel">
         <header className="browse-header">
-          <h3>השירים המתמודדים</h3>
-          <button className="browse-close" onClick={() => { setOpen(false); setSelectedAlbumId(null); }}>✕</button>
+          <h3 id="songs-dialog-title">השירים המתמודדים</h3>
+          <button ref={closeRef} type="button" className="browse-close" aria-label="סגירת חלון השירים" onClick={closePanel}>✕</button>
         </header>
         <div className="browse-body">
           {catalog.albums.map((album) => {
             const albumSongs = songsByAlbum.get(album.id) || [];
             const isSelected = selectedAlbumId === album.id;
-            return <button key={album.id} className={`browse-album-header ${isSelected ? "expanded" : ""}`} onClick={() => setSelectedAlbumId(isSelected ? null : album.id)}>
+            return <button type="button" key={album.id} aria-expanded={isSelected} className={`browse-album-header ${isSelected ? "expanded" : ""}`} onClick={() => setSelectedAlbumId(isSelected ? null : album.id)}>
               {album.coverUrl ? <img className="browse-album-cover" src={album.coverUrl} alt="" /> : <span className="browse-album-cover browse-cover-fallback">♫</span>}
               <div className="browse-album-info"><b>{album.title}</b><small>{album.artistName} · {albumSongs.length} שירים</small></div>
               <span className="browse-album-arrow">{isSelected ? "◂" : "◂"}</span>
@@ -282,7 +306,7 @@ function BrowsePanel({ catalog }: { catalog: Catalog }) {
       </aside>
       {selectedAlbumId && <aside className="browse-songs-panel">
         <header className="browse-header browse-songs-header">
-          <button className="browse-back" onClick={() => setSelectedAlbumId(null)}>▸</button>
+          <button type="button" className="browse-back" aria-label="חזרה לרשימת האלבומים" onClick={() => setSelectedAlbumId(null)}>▸</button>
           <div className="browse-songs-title">
             {selectedAlbum?.coverUrl && <img className="browse-album-cover" src={selectedAlbum.coverUrl} alt="" />}
             <div><b>{selectedAlbum?.title}</b><small>{selectedAlbum?.artistName}</small></div>
@@ -291,7 +315,7 @@ function BrowsePanel({ catalog }: { catalog: Catalog }) {
         <div className="browse-body">
           {selectedSongs.map((song) => {
             const isPlaying = currentSong?.id === song.id;
-            return <button key={song.id} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => { setSiblings(selectedSongs.filter(s => s.audioUrl)); play(song); }}>
+            return <button type="button" key={song.id} aria-pressed={isPlaying} aria-label={`${isPlaying ? "עצירת" : "השמעת"} ${song.title}`} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => { setSiblings(selectedSongs.filter(s => s.audioUrl)); play(song); }}>
               {song.coverUrl && <img className="browse-song-cover" src={song.coverUrl} alt="" />}
               <span className="browse-song-title">{song.title}</span>
               <span className="browse-song-action">{isPlaying ? "■" : "▶"}</span>
@@ -300,6 +324,6 @@ function BrowsePanel({ catalog }: { catalog: Catalog }) {
           {selectedSongs.length === 0 && <p className="browse-empty">אין שירים באלבום זה</p>}
         </div>
       </aside>}
-    </div>
+    </div></>}
   </>;
 }
