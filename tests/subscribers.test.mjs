@@ -64,3 +64,39 @@ test("ניתוב /api/admin/subscribers קודם לנתב הניהול הכלל�
   assert.ok(catchAll !== -1, "חסר הנתב הכללי של הניהול");
   assert.ok(subscribers < catchAll, "מודול רשימת התפוצה חייב להיבדק לפני הנתב הכללי");
 });
+
+const source = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+// הכתובת חייבת להגיע מהסשן בלבד. אילו נקראה מגוף הבקשה, כל אחד היה יכול
+// לרשום את הכתובת של מישהו אחר לרשימת התפוצה.
+test("ההרשמה לוקחת את הכתובת מהחשבון המחובר ולא מגוף הבקשה", () => {
+  const worker = source("worker/index.ts");
+  assert.match(worker, /normalizeEmail\(user\.email\)/);
+  assert.doesNotMatch(worker, /body\.email/);
+  assert.match(worker, /צריך להתחבר כדי להירשם לרשימת התפוצה/);
+});
+
+test("כרטיס ההרשמה אינו מבקש להקליד כתובת", () => {
+  const card = source("app/subscribe.tsx");
+  assert.doesNotMatch(card, /<input/);
+  assert.doesNotMatch(card, /defaultEmail/);
+});
+
+// מי שכבר רשום לא אמור לראות את הכרטיס, ולכן הכרטיס שואל את השרת לפני שהוא מוצג.
+test("מי שכבר רשום אינו מתבקש שוב", () => {
+  assert.match(source("worker/index.ts"), /SELECT 1 AS one FROM subscribers WHERE email=\? AND unsubscribed_at IS NULL/);
+  assert.match(source("app/subscribe.tsx"), /subscribed \? "hidden" : "offer"/);
+});
+
+test("מסך ההתחברות אינו מציע הרשמה, כי אין שם חשבון לקחת ממנו כתובת", () => {
+  assert.doesNotMatch(source("app/auth-ui.tsx"), /SubscribeCard/);
+});
+
+// הפאנל נועד להצגה ולייצוא בלבד: בלי חיפוש, הוספה ידנית או ייבוא מהממשק.
+test("פאנל הניהול מציג רשימה ומוריד לאקסל בלבד", () => {
+  const panel = source("app/admin/subscribers-panel.tsx");
+  assert.match(panel, /downloadSubscribersXlsx/);
+  assert.doesNotMatch(panel, /subscribers\/import/);
+  assert.doesNotMatch(panel, /method: "DELETE"/);
+  assert.doesNotMatch(panel, /method: "POST"/);
+});

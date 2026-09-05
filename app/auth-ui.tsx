@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { SubscribeCard } from "./subscribe";
 
 export type User = { email: string; name: string; picture?: string; isAdmin: boolean };
 
@@ -52,7 +51,7 @@ export function LoginScreen() {
     }).catch(() => setError("ההתחברות עדיין אינה מוגדרת. מנהל המערכת מטפל בכך."));
     return () => { active = false; };
   }, []);
-  return <main className="login-shell" dir="rtl"><section className="login-card"><img className="login-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">ראש בראש</p><h1>מתחברים ומצביעים</h1><p>כדי לשמור על הצבעה הוגנת, הכניסה מתבצעת באמצעות חשבון Google.</p><div ref={button} className="google-button" />{error && <p className="vote-error">{error}</p>}<small>לא נפרסם דבר בחשבון שלכם ולא נקבל את הסיסמה שלכם.</small></section><SubscribeCard heading="לא מצביעים? אפשר רק להתעדכן" blurb="השאירו כתובת דוא״ל ותקבלו עדכון על תוצאות המצעד ועל התוכניות הבאות. אין צורך להתחבר." /></main>;
+  return <main className="login-shell" dir="rtl"><section className="login-card"><img className="login-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">ראש בראש</p><h1>מתחברים ומצביעים</h1><p>כדי לשמור על הצבעה הוגנת, הכניסה מתבצעת באמצעות חשבון Google.</p><div ref={button} className="google-button" />{error && <p className="vote-error">{error}</p>}<small>לא נפרסם דבר בחשבון שלכם ולא נקבל את הסיסמה שלכם.</small></section></main>;
 }
 
 export async function logout() {

@@ -1,22 +1,12 @@
 /* רשימת התפוצה — לוח הניהול */
-.subscriber-stats{display:flex;gap:12px;margin-bottom:18px}
-.subscriber-stats div{flex:1;padding:16px;border:1px solid rgba(255,255,255,.07);border-radius:14px;background:var(--panel2)}
-.subscriber-stats b{display:block;font-size:26px}
-.subscriber-stats small{display:block;margin-top:5px;color:var(--muted);font-size:11px}
 .subscriber-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-bottom:16px}
-.subscriber-toolbar .subscriber-search{flex:1;min-width:200px;height:45px;padding:0 12px;border:1px solid rgba(0,0,0,.14);border-radius:11px;outline:0;color:var(--text);background:var(--panel)}
+.subscriber-count{flex:1;color:var(--muted);font-size:12px}
+.subscriber-count b{color:var(--text);font-size:22px}
 .subscriber-toolbar button{height:45px;padding:0 16px;border:1px solid rgba(184,149,48,.4);border-radius:11px;color:var(--text);background:transparent;cursor:pointer}
 .subscriber-toolbar button:disabled{opacity:.45;cursor:default}
-.subscriber-check{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;white-space:nowrap}
-.subscriber-check input{width:16px;height:16px}
 .subscriber-table-wrap{overflow-x:auto}
 .subscriber-table{width:100%;border-collapse:collapse;font-size:13px}
 .subscriber-table th{padding:10px;border-bottom:1px solid rgba(184,149,48,.3);text-align:right;color:var(--muted);font-size:11px;font-weight:700;white-space:nowrap}
 .subscriber-table td{padding:11px 10px;border-bottom:1px solid rgba(0,0,0,.06)}
-.subscriber-table tr.removed{opacity:.5}
-.subscriber-table tr.removed .subscriber-email{text-decoration:line-through}
 .subscriber-email{font-family:ui-monospace,Menlo,Consolas,monospace;text-align:right}
-.subscriber-actions{text-align:left;white-space:nowrap}
-.subscriber-actions button{padding:6px 12px;border:1px solid rgba(0,0,0,.14);border-radius:9px;color:var(--muted);background:transparent;cursor:pointer}
-.subscriber-actions button:hover{border-color:#b3245c;color:#b3245c}
 @media(max-width:580px){.subscriber-toolbar button{flex:1}}
