@@ -56,3 +56,13 @@ test("admin overview exposes hourly and daily vote channels", () => {
   assert.match(admin, /created_at\/86400/);
   assert.match(admin, /voteTimeline: \{ hourly: hourlyVotes\.results, daily: dailyVotes\.results \}/);
 });
+
+test("admin navigation groups permissions and omits the timeline chart", () => {
+  const page = source("app/admin/page.tsx");
+  assert.match(page, /setTab\("access"\).*?>הרשאות</s);
+  assert.match(page, /tab === "access".*?<ManagersPanel.*?<RecorderAccessPanel/s);
+  assert.doesNotMatch(page, /function VoteCharts/);
+  assert.doesNotMatch(page, /title="הצבעות לאורך זמן"/);
+  const ivrPanel = page.slice(page.indexOf("function IvrPanel"), page.indexOf("function PromptRow"));
+  assert.doesNotMatch(ivrPanel, /<RecorderAccessPanel/);
+});
