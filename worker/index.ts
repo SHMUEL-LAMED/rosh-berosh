@@ -10,6 +10,7 @@ import { deleteIvrAudioIfUnreferenced, readIvrPrompts, readIvrRecorders, syncPro
 import { normalizePhone } from "./phone";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
+import { placeholders } from "./sql.js";
 
 interface Env {
   ASSETS: Fetcher;
@@ -27,7 +28,6 @@ type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; alb
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
-const placeholders = (count: number) => Array(count).fill("?").join(",");
 
 function verifyIvrSecret(request: Request, env: Env): boolean {
   if (!env.IVR_SECRET) return false;
