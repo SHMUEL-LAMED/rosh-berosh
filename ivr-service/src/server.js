@@ -835,7 +835,7 @@ router.get("/recordings", async (call) => {
 });
 
 router.get("/", async (call) => {
-  const { response, result: catalog } = await api("/api/catalog");
+  const { response, result: catalog } = await api("/api/ivr/catalog");
   const prompts = promptMap(catalog);
   if (!response.ok || !catalog.rules?.votingOpen) return call.id_list_message(prompt(prompts, "system:voting_closed", "ההצבעה עדיין אינה פתוחה"));
 

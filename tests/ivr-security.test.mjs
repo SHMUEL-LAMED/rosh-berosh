@@ -4,6 +4,7 @@ import test from "node:test";
 import { normalizePhone as normalizeWorkerPhone } from "../worker/phone.js";
 import { ballotRateConfig, checkBallotRate } from "../worker/rate-limit.js";
 import { resolveCatalogPosition } from "../worker/catalog-position.js";
+import { readIvrCatalog } from "../worker/ivr-catalog.js";
 import { hasStageChoices } from "../app/voting-stage.js";
 
 const require = createRequire(import.meta.url);
@@ -90,6 +91,33 @@ test("an artists-only survey can advance without albums", () => {
 test("the IVR never falls back to a call id when caller id is missing", () => {
   assert.equal(phone({ callId: "shared-call-id" }), "");
   assert.equal(phone({ ApiPhone: "972501234567", callId: "ignored" }), "0501234567");
+});
+
+test("the protected IVR catalog keeps voting names but excludes website media", async () => {
+  const queries = [];
+  const rowsFor = (sql) => {
+    queries.push(sql);
+    if (sql.startsWith("SELECT COALESCE")) return [{ id: "survey-1" }];
+    if (sql.includes("FROM poll_settings")) return [{ votingOpen: 1, albumsEnabled: 1, albumsMin: 1, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 }];
+    if (sql.includes("FROM albums")) return [{ id: "album-1", title: "אלבום", artistName: "זמר" }];
+    if (sql.includes("FROM songs")) return [{ id: "song-1", albumId: "album-1", title: "שם השיר" }];
+    if (sql.includes("FROM artists")) return [{ id: "artist-1", name: "שם הזמר" }];
+    if (sql.includes("FROM ivr_prompts")) return [{ key: "song:song-1", yemotPath: "ivr2:/rb123.wav" }];
+    return [];
+  };
+  const db = {
+    prepare(sql) { return { sql }; },
+    async batch(statements) { return statements.map(({ sql }) => ({ results: rowsFor(sql) })); },
+  };
+  assert.deepEqual(await readIvrCatalog(db), {
+    surveyId: "survey-1",
+    albums: [{ id: "album-1", title: "אלבום", artistName: "זמר" }],
+    songs: [{ id: "song-1", albumId: "album-1", title: "שם השיר" }],
+    artists: [{ id: "artist-1", name: "שם הזמר" }],
+    rules: { votingOpen: 1, albumsEnabled: 1, albumsMin: 1, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 },
+    ivrPrompts: [{ key: "song:song-1", yemotPath: "ivr2:/rb123.wav" }],
+  });
+  assert.doesNotMatch(queries.join("\n"), /cover_url|image_url|audio_url|preview_start|preview_end/i);
 });
 
 test("all long IVR menus use fixed-width codes without pages", () => {
