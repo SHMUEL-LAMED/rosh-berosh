@@ -14,17 +14,20 @@ export const IVR_CATALOG_DEFAULTS = {
 // Keep the phone payload to one D1 round trip and include only data used by
 // the voting flow. Website image/audio URLs belong in /api/catalog, not here.
 export async function readIvrCatalog(db) {
-  const activeSurvey = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1), 'main')";
-  const [survey, settings, albums, songs, artists, prompts] = await db.batch([
-    db.prepare(`SELECT ${activeSurvey} AS id`),
-    db.prepare(`SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id = ${activeSurvey}`),
-    db.prepare(`SELECT id, title, artist_name AS artistName FROM albums WHERE active = 1 AND survey_id = ${activeSurvey} ORDER BY position, title`),
-    db.prepare(`SELECT s.id, s.album_id AS albumId, s.title FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.active = 1 AND a.survey_id = ${activeSurvey} ORDER BY a.position, s.position, s.title`),
-    db.prepare(`SELECT id, name FROM artists WHERE active = 1 AND survey_id = ${activeSurvey} ORDER BY position, name`),
-    db.prepare("SELECT key, yemot_path AS yemotPath FROM ivr_prompts WHERE yemot_path IS NOT NULL AND yemot_path != '' ORDER BY key"),
+  const survey = await db.prepare("SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1").first();
+  const surveyId = String(survey?.id || "main");
+  const [catalogResults, prompts] = await Promise.all([
+    db.batch([
+      db.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id = ?").bind(surveyId),
+      db.prepare("SELECT id, title, artist_name AS artistName FROM albums WHERE active = 1 AND survey_id = ? ORDER BY position, title").bind(surveyId),
+      db.prepare("SELECT s.id, s.album_id AS albumId, s.title FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.active = 1 AND a.survey_id = ? ORDER BY a.position, s.position, s.title").bind(surveyId),
+      db.prepare("SELECT id, name FROM artists WHERE active = 1 AND survey_id = ? ORDER BY position, name").bind(surveyId),
+    ]),
+    db.prepare("SELECT key, yemot_path AS yemotPath FROM ivr_prompts WHERE yemot_path IS NOT NULL AND yemot_path != '' ORDER BY key").all().catch(() => ({ results: [] })),
   ]);
+  const [settings, albums, songs, artists] = catalogResults;
   return {
-    surveyId: String(survey.results[0]?.id || "main"),
+    surveyId,
     albums: albums.results,
     songs: songs.results,
     artists: artists.results,

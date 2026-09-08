@@ -197,7 +197,11 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
-  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/ballots/check" || url.pathname === "/api/ballots/progress" || url.pathname === "/api/subscribers") await ensureRuntimeSchema(env);
+  // The voting line calls these two endpoints at the start of every call. Do not
+  // run the legacy full runtime-schema reconciliation here: on a cold isolate it
+  // issues dozens of D1 statements and makes Yemot time out before the caller
+  // reaches the menu. Production schema changes use deployment migrations.
+  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/subscribers") await ensureRuntimeSchema(env);
 
   if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
   if (url.pathname === "/api/auth/google" && request.method === "POST") {
