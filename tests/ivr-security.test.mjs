@@ -97,7 +97,6 @@ test("the protected IVR catalog keeps voting names but excludes website media", 
   const queries = [];
   const rowsFor = (sql) => {
     queries.push(sql);
-    if (sql.startsWith("SELECT COALESCE")) return [{ id: "survey-1" }];
     if (sql.includes("FROM poll_settings")) return [{ votingOpen: 1, albumsEnabled: 1, albumsMin: 1, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 }];
     if (sql.includes("FROM albums")) return [{ id: "album-1", title: "אלבום", artistName: "זמר" }];
     if (sql.includes("FROM songs")) return [{ id: "song-1", albumId: "album-1", title: "שם השיר" }];
@@ -106,7 +105,14 @@ test("the protected IVR catalog keeps voting names but excludes website media", 
     return [];
   };
   const db = {
-    prepare(sql) { return { sql }; },
+    prepare(sql) {
+      return {
+        sql,
+        bind() { return this; },
+        async first() { queries.push(sql); return sql.includes("FROM surveys") ? { id: "survey-1" } : null; },
+        async all() { return { results: rowsFor(sql) }; },
+      };
+    },
     async batch(statements) { return statements.map(({ sql }) => ({ results: rowsFor(sql) })); },
   };
   assert.deepEqual(await readIvrCatalog(db), {
