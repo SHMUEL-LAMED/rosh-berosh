@@ -10,6 +10,7 @@ import { deleteIvrAudioIfUnreferenced, readIvrPrompts, readIvrRecorders, syncPro
 import { normalizePhone } from "./phone";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
+import { readIvrCatalog } from "./ivr-catalog.js";
 
 interface Env {
   ASSETS: Fetcher;
@@ -87,6 +88,18 @@ async function catalog(env: Env): Promise<Response> {
   } catch (error) {
     console.error("catalog error", error);
     return json({ error: "לא ניתן לטעון את רשימת המצעד." }, 500);
+  }
+}
+
+// The phone service needs the names and identifiers used for voting, but none
+// of the website's image/audio metadata. Keep this endpoint to one D1 round
+// trip so an incoming call is not held up by the heavier website catalog.
+async function ivrCatalog(env: Env): Promise<Response> {
+  try {
+    return json(await readIvrCatalog(env.DB));
+  } catch (error) {
+    console.error("ivr catalog error", error);
+    return json({ error: "לא ניתן לטעון את רשימת המצעד לקו." }, 500);
   }
 }
 
@@ -184,7 +197,13 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
-  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/ballots/check" || url.pathname === "/api/ballots/progress" || url.pathname === "/api/subscribers") await ensureRuntimeSchema(env);
+  // The voting line calls these two endpoints at the start of every call.  Do
+  // not run the legacy, full runtime-schema reconciliation here: on a cold
+  // isolate it issues dozens of D1 statements and makes Yemot time out before
+  // the caller even reaches the menu.  Production schema changes are applied
+  // through the normal deployment migrations; these endpoints only read/write
+  // tables which already exist in the live database.
+  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/subscribers") await ensureRuntimeSchema(env);
 
   if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
   if (url.pathname === "/api/auth/google" && request.method === "POST") {
@@ -209,6 +228,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
   if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
   if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
+  if (url.pathname === "/api/ivr/catalog" && request.method === "GET") {
+    if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+    return ivrCatalog(env);
+  }
   if (url.pathname === "/api/ivr/recorders/check" && request.method === "GET") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
     await ensureRuntimeSchema(env);
