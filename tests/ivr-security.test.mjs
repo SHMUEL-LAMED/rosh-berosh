@@ -421,3 +421,71 @@ test("prompt upload rechecks recorder authorization", async () => {
   }), { IVR_SECRET: "phone-admin-secret", ...store }, { waitUntil() {}, passThroughOnException() {} });
   assert.equal(response.status, 403);
 });
+
+test("a stage with fewer active items than its minimum still accepts a ballot", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("short-catalog-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+
+  // The active survey holds one album and one singer, while the settings still
+  // ask for three of each - the state left behind when items are deactivated
+  // mid-poll. The caller can only ever offer what the list has.
+  const rows = (sql) => {
+    if (sql.includes("PRAGMA table_info(songs)")) return [{ name: "cover_url" }];
+    if (sql.includes("PRAGMA table_info(ballots)")) return [{ name: "fingerprint" }];
+    if (sql.includes("COUNT(*) AS total FROM albums")) return [{ total: 1 }];
+    if (sql.includes("COUNT(*) AS total FROM artists")) return [{ total: 1 }];
+    if (sql.includes("COUNT(*) AS total FROM songs")) return [{ albumId: "album-1", total: 1 }];
+    if (sql.includes("SELECT id FROM albums")) return [{ id: "album-1" }];
+    if (sql.includes("SELECT id FROM artists")) return [{ id: "artist-1" }];
+    if (sql.includes("SELECT s.id")) return [{ id: "song-1", albumId: "album-1" }];
+    return [];
+  };
+  const inserted = [];
+  const prepare = (sql) => {
+    const make = (args = []) => ({
+      _sql: sql,
+      _args: args,
+      bind(...next) { return make(next); },
+      async all() { return { results: rows(sql) }; },
+      async first() {
+        if (sql.includes("SELECT id FROM surveys")) return { id: "survey-1" };
+        if (sql.includes("SELECT voting_open AS votingOpen")) return {
+          votingOpen: 1,
+          albumsEnabled: 1, albumsMin: 3, albumsMax: 5,
+          songsEnabled: 1, songsMin: 1, songsMax: 1,
+          artistsEnabled: 1, artistsMin: 3, artistsMax: 5,
+        };
+        return rows(sql)[0] ?? null;
+      },
+      async run() { return { success: true }; },
+    });
+    return make();
+  };
+  const env = {
+    IVR_SECRET: "short-secret",
+    MEDIA: { async get() { return null; } },
+    DB: {
+      prepare,
+      async exec() {},
+      async batch(statements) {
+        for (const statement of statements) if (statement._sql.includes("INSERT INTO ballots")) inserted.push(statement._args[2]);
+        return statements.map((statement) => ({ results: rows(statement._sql) }));
+      },
+    },
+  };
+
+  const submit = (body) => worker.fetch(new Request("http://localhost/api/ballots", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ivr-secret": "short-secret" },
+    body: JSON.stringify({ channel: "phone", voterKey: "0501234567", ...body }),
+  }), env, { waitUntil() {}, passThroughOnException() {} });
+
+  const accepted = await submit({ albumIds: ["album-1"], songIdsByAlbum: { "album-1": ["song-1"] }, artistIds: ["artist-1"] });
+  assert.equal(accepted.status, 201);
+  assert.deepEqual(inserted, ["0501234567"]);
+
+  // Skipping a stage that does have something to offer is still rejected.
+  const rejected = await submit({ albumIds: [], songIdsByAlbum: {}, artistIds: ["artist-1"] });
+  assert.equal(rejected.status, 400);
+});

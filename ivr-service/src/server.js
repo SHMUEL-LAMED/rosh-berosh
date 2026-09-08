@@ -861,7 +861,9 @@ router.get("/", async (call) => {
   const artistMaximum = rules.artistsEnabled ? rules.artistsMax : 0;
   const albumMenuKey = catalog.surveyId ? `albums-menu:${catalog.surveyId}` : "system:albums_menu";
   const artistMenuKey = catalog.surveyId ? `artists-menu:${catalog.surveyId}` : "system:artists_menu";
-  if (rules.albumsEnabled && (!catalog.albums?.length || catalog.albums.length < albumMinimum)) return call.id_list_message(prompt(prompts, "system:not_ready", "רשימת האלבומים עדיין אינה מוכנה"));
+  // Only an empty list is really "not ready": a list shorter than albumsMin is
+  // handled by the quotas below, and the site accepts the shorter ballot too.
+  if (rules.albumsEnabled && !catalog.albums?.length) return call.id_list_message(prompt(prompts, "system:not_ready", "רשימת האלבומים עדיין אינה מוכנה"));
 
   const saved = await loadProgress(voterPhone);
   let selectedAlbums = [], selectedArtists = [], songIdsByAlbum = {}, menuLead = [];
