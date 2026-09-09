@@ -502,11 +502,20 @@ test("an unrecognized key does not end a selection round short", async () => {
   assert.deepEqual(items[Number("2") - 1], { id: "b" });
 });
 
-test("every phone menu waits longer than the seven second default", async () => {
+test("every voting menu waits longer than the seven second default", async () => {
   const { menuReadOptions, continuousMenuInput, SEC_WAIT } = require("../ivr-service/src/menu-input.js");
-  const { adminReadOptions } = require("../ivr-service/src/admin-menu.js");
   assert.ok(SEC_WAIT > 7, "callers were being cut off while the list was still playing");
   assert.equal(menuReadOptions([1, 2]).sec_wait, SEC_WAIT);
   assert.equal(continuousMenuInput(12).read.sec_wait, SEC_WAIT);
-  assert.equal(adminReadOptions().sec_wait, SEC_WAIT);
+});
+
+// בקו הניהול מקישים מספר טבעי (1 ולא 01), ולכן אחרי הספרה הראשונה הקו ממתין
+// רק רגע קצר לספרה שנייה. ההמתנה הארוכה של קו ההצבעה נשמרת שם, כדי שמתקשר
+// לא ינותק באמצע רשימה.
+test("the management line waits only briefly for a second digit", async () => {
+  const { MENU_SEC_WAIT, SEC_WAIT, naturalMenuInput } = require("../ivr-service/src/menu-input.js");
+  const { adminReadOptions } = require("../ivr-service/src/admin-menu.js");
+  assert.ok(MENU_SEC_WAIT >= 2 && MENU_SEC_WAIT < SEC_WAIT, `${MENU_SEC_WAIT} אינו המתנה קצרה סבירה`);
+  assert.equal(adminReadOptions().sec_wait, MENU_SEC_WAIT);
+  assert.equal(naturalMenuInput(30, true).read.sec_wait, MENU_SEC_WAIT);
 });

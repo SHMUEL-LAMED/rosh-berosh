@@ -13,6 +13,31 @@ function menuReadOptions(digits) {
   };
 }
 
+// אחרי הקשה ראשונה הקו ממתין רק את הזמן הזה כדי לראות אם באה עוד ספרה, וכך
+// אפשר להקיש 1 ולא 01. סולמית מסיימת מיד. אפשר לכוונן דרך IVR_MENU_SEC_WAIT.
+const MENU_SEC_WAIT = Math.min(Math.max(Number(process.env.IVR_MENU_SEC_WAIT) || 5, 2), 20);
+
+// תפריטי קו הניהול: המספר נאמר ומוקש כמספר טבעי, בלי ריפוד באפסים. בקו
+// ההצבעה נשאר אורך קבוע, כי הקריינויות המוקלטות של התפריטים אומרות את
+// הקודים המרופדים ("הקישו אפס אחת"), והחלפה כאן הייתה סותרת אותן.
+function naturalMenuInput(itemCount, allowFinish = false) {
+  const width = String(itemCount).length;
+  const digitsAllowed = Array.from({ length: itemCount }, (_, index) => String(index + 1));
+  if (allowFinish) digitsAllowed.unshift("0");
+  return {
+    width,
+    finishCode: "0",
+    code: (index) => String(index + 1),
+    read: {
+      min_digits: 1,
+      max_digits: width,
+      digits_allowed: digitsAllowed,
+      sec_wait: MENU_SEC_WAIT,
+      typing_playback_mode: "No",
+    },
+  };
+}
+
 function menuCodeWidth(itemCount) {
   return itemCount > 9 ? String(itemCount).length : 1;
 }
@@ -39,4 +64,4 @@ function continuousMenuInput(itemCount, allowFinish = false) {
   };
 }
 
-module.exports = { SEC_WAIT, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions };
+module.exports = { MENU_SEC_WAIT, SEC_WAIT, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput };

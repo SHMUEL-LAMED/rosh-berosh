@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import { reorderIds, shiftIds } from "../worker/reorder.js";
 
 const require = createRequire(import.meta.url);
-const { ADMIN_SECTIONS, HANGUP_CODE, MAIN_MENU_CODE, adminCodes, adminItems, adminReadOptions, resolveAdminCode } = require("../ivr-service/src/admin-menu.js");
+const { ADMIN_SECTIONS, HANGUP_CODE, MAIN_MENU_CODE, adminCodes, adminItems, adminReadOptions, resolveAdminCode, sectionShortcut } = require("../ivr-service/src/admin-menu.js");
+const { MENU_SEC_WAIT, continuousMenuInput, menuCode, naturalMenuInput } = require("../ivr-service/src/menu-input.js");
 const adminSpoken = () => [...ADMIN_SECTIONS, ...adminItems()];
 
 const source = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
@@ -24,11 +25,42 @@ test("every management action has its own two digit code", () => {
   assert.ok(codes.includes(MAIN_MENU_CODE) && codes.includes(HANGUP_CODE));
 });
 
-test("the admin line always reads exactly two digits, so no menu waits for a timeout", () => {
+test("a topic is reachable with one digit, and the full code still works", () => {
   const options = adminReadOptions();
-  assert.equal(options.min_digits, 2);
+  assert.equal(options.min_digits, 1);
   assert.equal(options.max_digits, 2);
-  assert.deepEqual(options.digits_allowed, adminCodes());
+  for (const section of ADMIN_SECTIONS) {
+    const shortcut = sectionShortcut(section);
+    assert.match(shortcut, /^[1-9]$/, section.code);
+    assert.ok(options.digits_allowed.includes(shortcut), shortcut);
+    const resolved = resolveAdminCode(shortcut);
+    assert.equal(resolved.type, "section");
+    assert.equal(resolved.section.code, section.code, `${shortcut} אינו מגיע לנושא ${section.code}`);
+  }
+  for (const code of adminCodes()) assert.ok(options.digits_allowed.includes(code), code);
+  // הקצור עולה על הקוד המלא רק כשהוא ספרה בודדת, ופעולות נשארות דו ספרתיות.
+  assert.equal(resolveAdminCode("51").type, "action");
+  assert.equal(resolveAdminCode("50").section.code, "50");
+});
+
+test("after one digit the line waits only a short moment for a second one", () => {
+  const options = adminReadOptions();
+  assert.ok(options.sec_wait >= 2 && options.sec_wait <= 20, `המתנה של ${options.sec_wait} שניות אינה קצרה`);
+  const list = naturalMenuInput(40, true);
+  assert.equal(list.read.min_digits, 1);
+  assert.equal(list.read.max_digits, 2);
+  assert.equal(list.read.sec_wait, MENU_SEC_WAIT);
+});
+
+test("a long management list is keyed as a natural number, not padded with a zero", () => {
+  const list = naturalMenuInput(40, true);
+  assert.equal(list.code(0), "1");
+  assert.equal(list.code(9), "10");
+  assert.equal(list.finishCode, "0");
+  assert.deepEqual(list.read.digits_allowed.slice(0, 4), ["0", "1", "2", "3"]);
+  // קו ההצבעה נשאר באורך קבוע, כי הקריינויות המוקלטות אומרות את הקודים המרופדים.
+  assert.equal(continuousMenuInput(40).read.min_digits, 2);
+  assert.equal(menuCode(0, 2), "01");
 });
 
 test("every code in the map is wired to a handler in the IVR", () => {
@@ -133,6 +165,13 @@ test("every topic and action has a spoken form the line can read naturally", () 
     assert.doesNotMatch(entry.spoken, /[.\-"'&|]/, `${entry.code} מכיל תו שימות המשיח מוחקת`);
     assert.doesNotMatch(entry.spoken, /\d/, `${entry.code}: הקוד נאמר בנפרד כספרות, לא בתוך הטקסט`);
   }
+});
+
+test("the main menu offers the one digit shortcut, and inside a topic the full code", () => {
+  const server = source("ivr-service/src/server.js");
+  const menu = server.slice(server.indexOf("async function readAdminCode"), server.indexOf('router.get("/recordings"'));
+  assert.match(menu, /keypad\(sectionItem\.spoken \|\| sectionItem\.label, sectionShortcut\(sectionItem\)\)/);
+  assert.match(menu, /keypad\(item\.spoken \|\| item\.label, item\.code\)/);
 });
 
 test("the menu reads the code as digits and never inside the sentence", () => {

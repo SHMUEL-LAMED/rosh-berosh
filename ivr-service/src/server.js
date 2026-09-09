@@ -2,10 +2,10 @@ const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { normalizePhone, phone } = require("./phone");
-const { SEC_WAIT, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions } = require("./menu-input");
+const { SEC_WAIT, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput } = require("./menu-input");
 const { sanitizeProgress, progressChanged } = require("./progress");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
-const { ADMIN_SECTIONS, adminReadOptions, resolveAdminCode } = require("./admin-menu");
+const { ADMIN_SECTIONS, adminReadOptions, resolveAdminCode, sectionShortcut } = require("./admin-menu");
 
 const SITE_API_BASE_URL = process.env.SITE_API_BASE_URL;
 const IVR_SECRET = process.env.IVR_SECRET;
@@ -173,9 +173,10 @@ async function adminChoice(call, intro, items) {
     return items.find((item) => String(item.digit) === String(answer)) || null;
   }
 
-  const input = continuousMenuInput(choices.length, Boolean(back));
+  // בקו הניהול מקישים את המספר הטבעי: פריט 1 הוא "1" ולא "01".
+  const input = naturalMenuInput(choices.length, Boolean(back));
   const messages = lines(intro);
-  choices.forEach((item, index) => messages.push(...keypad(item.label, menuCode(index, input.width))));
+  choices.forEach((item, index) => messages.push(...keypad(item.label, input.code(index))));
   if (back) messages.push(...keypad(back.label, input.finishCode));
   const answer = await call.read(messages, "tap", input.read);
   if (back && answer === input.finishCode) return back;
@@ -813,7 +814,7 @@ const ADMIN_ACTIONS = {
   "help-map": async (call) => {
     const messages = lines("מפת קודי הניהול", "אפשר להקיש כל קוד מכל תפריט");
     ADMIN_SECTIONS.forEach((section) => {
-      messages.push(...keypad(section.spoken || section.label, section.code));
+      messages.push(...keypad(section.spoken || section.label, sectionShortcut(section)));
       section.items.forEach((item) => messages.push(...keypad(item.spoken || item.label, item.code)));
     });
     messages.push(...keypad("לתפריט הראשי", "00"), ...keypad("לסיום השיחה", "99"));
@@ -851,7 +852,7 @@ async function readAdminCode(call, lead, section, { explain = false } = {}) {
   } else {
     messages.push(text("תפריט ניהול ראשי"));
     if (explain) messages.push(text("אפשר להקיש קוד פעולה ישיר מכל מקום בקו"));
-    ADMIN_SECTIONS.forEach((sectionItem) => messages.push(...keypad(sectionItem.spoken || sectionItem.label, sectionItem.code)));
+    ADMIN_SECTIONS.forEach((sectionItem) => messages.push(...keypad(sectionItem.spoken || sectionItem.label, sectionShortcut(sectionItem))));
   }
   messages.push(...keypad("לסיום השיחה", "99"));
   return String(await call.read(messages, "tap", adminReadOptions()) || "");
