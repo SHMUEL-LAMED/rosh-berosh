@@ -26,6 +26,8 @@ interface Env {
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
 type Submission = { voterKey?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string };
 type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; albumsMax: number; songsEnabled: number; songsMin: number; songsMax: number; artistsEnabled: number; artistsMin: number; artistsMax: number };
+const DEFAULT_RULES: Rules = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
+const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1), 'main')";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
@@ -46,26 +48,27 @@ async function activeSurveyId(env: Env): Promise<string> {
 }
 
 async function readRules(env: Env, surveyId: string): Promise<Rules> {
-  const defaults = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
   try {
-    return await env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id=?").bind(surveyId).first<Rules>() ?? defaults;
+    return await env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id=?").bind(surveyId).first<Rules>() ?? DEFAULT_RULES;
   } catch {
-    return defaults;
+    return DEFAULT_RULES;
   }
 }
 
 async function catalog(env: Env): Promise<Response> {
   try {
-    const surveyId = await activeSurveyId(env);
-    const rules = await readRules(env, surveyId);
-    const [albums, songs, artists] = await env.DB.batch([
-      env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl FROM albums WHERE active = 1 AND survey_id = ? ORDER BY position, title").bind(surveyId),
-      env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.active = 1 AND a.survey_id = ? ORDER BY a.position, s.position, s.title").bind(surveyId),
-      env.DB.prepare("SELECT id, name, image_url AS imageUrl FROM artists WHERE active = 1 AND survey_id = ? ORDER BY position, name").bind(surveyId),
+    // כל נתוני המסך הראשון נקראים בפנייה אחת ל-D1. בעבר זיהוי הסקר,
+    // הכללים והקטלוג בוצעו בשלוש פניות עוקבות והוסיפו כמה שניות לכניסה.
+    const [survey, settings, albums, songs, artists] = await env.DB.batch([
+      env.DB.prepare(`SELECT ${ACTIVE_SURVEY_SQL} AS id`),
+      env.DB.prepare(`SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id=${ACTIVE_SURVEY_SQL}`),
+      env.DB.prepare(`SELECT id, title, artist_name AS artistName, cover_url AS coverUrl FROM albums WHERE active = 1 AND survey_id = ${ACTIVE_SURVEY_SQL} ORDER BY position, title`),
+      env.DB.prepare(`SELECT s.id, s.album_id AS albumId, s.title FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.active = 1 AND a.survey_id = ${ACTIVE_SURVEY_SQL} ORDER BY a.position, s.position, s.title`),
+      env.DB.prepare(`SELECT id, name, image_url AS imageUrl FROM artists WHERE active = 1 AND survey_id = ${ACTIVE_SURVEY_SQL} ORDER BY position, name`),
     ]);
     // המסך הראשון צריך רק שמות ומזהים. כתובות שמע ועטיפות של מאות שירים,
     // וקריינויות הקו, נטענות בנפרד רק כשפותחים אלבום להאזנה.
-    return json({ surveyId, albums: albums.results, songs: songs.results, artists: artists.results, rules });
+    return json({ surveyId: String(survey.results[0]?.id || "main"), albums: albums.results, songs: songs.results, artists: artists.results, rules: settings.results[0] ?? DEFAULT_RULES });
   } catch (error) {
     console.error("catalog error", error);
     return json({ error: "לא ניתן לטעון את רשימת המצעד." }, 500);
@@ -77,8 +80,7 @@ async function catalogMedia(request: Request, env: Env): Promise<Response> {
   const albumIds = unique(requested).slice(0, 50);
   if (!albumIds.length) return json({ songs: [] });
   try {
-    const surveyId = await activeSurveyId(env);
-    const songs = await env.DB.prepare(`SELECT s.id, s.audio_url AS audioUrl, s.cover_url AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.active=1 AND a.survey_id=? AND a.id IN (${placeholders(albumIds.length)})`).bind(surveyId, ...albumIds).all();
+    const songs = await env.DB.prepare(`SELECT s.id, s.audio_url AS audioUrl, s.cover_url AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.active=1 AND a.survey_id=${ACTIVE_SURVEY_SQL} AND a.id IN (${placeholders(albumIds.length)})`).bind(...albumIds).all();
     return json({ songs: songs.results });
   } catch (error) {
     console.error("catalog media error", error);
