@@ -138,6 +138,8 @@ test("the phone line routes do not run the full schema bootstrap on every reques
   const worker = readFileSync(new URL("../worker/index.ts", import.meta.url), "utf8");
   const ivrRoutes = worker.slice(worker.indexOf('/api/ivr/recorders/check'), worker.indexOf('/api/ballots'));
   assert.doesNotMatch(ivrRoutes, /ensureRuntimeSchema/);
+  const readRules = worker.slice(worker.indexOf("async function readRules"), worker.indexOf("async function catalog"));
+  assert.doesNotMatch(readRules, /ensureRuntimeSchema/, "reading voting rules must stay on the fast path");
 });
 
 test("a missing phone table is rebuilt and the read is retried, instead of failing the call", () => {
