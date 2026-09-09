@@ -2,7 +2,7 @@ const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { normalizePhone, phone } = require("./phone");
-const { continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions } = require("./menu-input");
+const { SEC_WAIT, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions } = require("./menu-input");
 const { sanitizeProgress, progressChanged } = require("./progress");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 const { ADMIN_SECTIONS, adminReadOptions, resolveAdminCode } = require("./admin-menu");
@@ -14,7 +14,9 @@ const RECORDINGS_YEMOT_API_BASE = String(process.env.RECORDINGS_YEMOT_API_BASE |
 const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().replace(/\/$/, "");
 const PORT = process.env.PORT || 3000;
 const POST_VOTE_TRANSFER = String(process.env.POST_VOTE_TRANSFER || "").replace(/\D/g, "");
-const REQUEST_TIMEOUT_MS = 8000;
+// האתר רץ על Cloudflare Workers מול D1, ובקשה ראשונה אחרי חוסר פעילות
+// יכולה לקחת יותר משמונה שניות. פסק זמן קצר מדי ניתק את המתקשר מיד.
+const REQUEST_TIMEOUT_MS = Number(process.env.IVR_REQUEST_TIMEOUT_MS) || 15000;
 // קו הניהול נושא בקשות כבדות בהרבה מקו ההצבעה: מסך המצב טוען את כל הקטלוג,
 // ופעולות כמו גיבוי, שחזור, חילוץ עטיפות וקריינות אוטומטית לוקחות עשרות שניות.
 // עם זמן ההמתנה הרגיל כל אלה נכשלו, והמנהל שמע "אירעה שגיאה" בכל פעולה.
@@ -94,7 +96,9 @@ async function chooseOne(call, messages, items, label, kind, prompts, menuPrompt
   }
   const answer = await call.read(full, "tap", input.read);
   if (allowFinish && answer === input.finishCode) return null;
-  return items[Number(answer) - 1] || null;
+  // null הוא "סיימתי"; הקשה שלא מתאימה לשום פריט חוזרת כ-undefined, כדי
+  // שהיא לא תיראה כמו סיום ותקצר את מספר הבחירות בלי שהמתקשר ביקש.
+  return items[Number(answer) - 1];
 }
 
 // A list shorter than the requested amount (a song deactivated mid-poll, say)
@@ -122,7 +126,11 @@ async function chooseMany(call, intro, items, minimum, maximum, label, kind, pro
     lead = [];
     showIntro = false;
     const choice = await chooseOne(call, messages, items, label, kind, prompts, menuPromptKey, canFinish);
-    if (!choice) break;
+    if (choice === null) break;
+    if (!choice) {
+      lead = prompt(prompts, "system:invalid_choice", "הבחירה לא נקלטה נא לבחור שוב");
+      continue;
+    }
     if (selectedIds.has(choice.id)) {
       lead = prompt(prompts, "system:already_selected", "כבר הצבעתם לזה בחרו אפשרות אחרת");
       continue;
@@ -294,6 +302,7 @@ async function readNumberWithHash(call, message, maxDigits = 2) {
   const answer = await call.read([text(message), text("לסיום הקישו סולמית לביטול הקישו 0 וסולמית")], "tap", {
     min_digits: 1,
     max_digits: maxDigits,
+    sec_wait: SEC_WAIT,
     typing_playback_mode: "No",
   });
   return String(answer || "");
@@ -880,9 +889,21 @@ router.get("/recordings", async (call) => {
 });
 
 router.get("/", async (call) => {
-  const { response, result: catalog } = await api("/api/ivr/catalog");
+  // עד כאן כל תקלה - סוד לא תואם, שגיאת שרת או אתר שלא עונה - נשמעה למתקשר
+  // בדיוק כמו "ההצבעה אינה פתוחה", והשיחה נותקה מיד בלי שום דרך לדעת מה קרה.
+  let response, catalog;
+  try {
+    ({ response, result: catalog } = await api("/api/ivr/catalog"));
+  } catch (error) {
+    console.error("catalog request failed", error.message);
+    return call.id_list_message([text("יש תקלה זמנית בחיבור למערכת ההצבעה נא לנסות שוב בעוד כמה דקות")]);
+  }
+  if (!response.ok) {
+    console.error("catalog request rejected", response.status, catalog?.error || "");
+    return call.id_list_message([text("יש תקלה זמנית בחיבור למערכת ההצבעה נא לנסות שוב בעוד כמה דקות")]);
+  }
   const prompts = promptMap(catalog);
-  if (!response.ok || !catalog.rules?.votingOpen) return call.id_list_message(prompt(prompts, "system:voting_closed", "ההצבעה עדיין אינה פתוחה"));
+  if (!catalog.rules?.votingOpen) return call.id_list_message(prompt(prompts, "system:voting_closed", "ההצבעה עדיין אינה פתוחה"));
 
   const voterPhone = phone(call);
   if (!voterPhone) {
@@ -906,7 +927,9 @@ router.get("/", async (call) => {
   const artistMaximum = rules.artistsEnabled ? rules.artistsMax : 0;
   const albumMenuKey = catalog.surveyId ? `albums-menu:${catalog.surveyId}` : "system:albums_menu";
   const artistMenuKey = catalog.surveyId ? `artists-menu:${catalog.surveyId}` : "system:artists_menu";
-  if (rules.albumsEnabled && (!catalog.albums?.length || catalog.albums.length < albumMinimum)) return call.id_list_message(prompt(prompts, "system:not_ready", "רשימת האלבומים עדיין אינה מוכנה"));
+  // Only an empty list is really "not ready": a list shorter than albumsMin is
+  // handled by the quotas below, and the site accepts the shorter ballot too.
+  if (rules.albumsEnabled && !catalog.albums?.length) return call.id_list_message(prompt(prompts, "system:not_ready", "רשימת האלבומים עדיין אינה מוכנה"));
 
   const saved = await loadProgress(voterPhone);
   let selectedAlbums = [], selectedArtists = [], songIdsByAlbum = {}, menuLead = [];
@@ -968,14 +991,14 @@ router.get("/", async (call) => {
       continue;
     }
     const fallback = "לבחירת אלבומים הקישו 1 לבחירת שירים מתוך האלבומים שבחרתם הקישו 2 לבחירת זמרים הקישו 3";
-    const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", { min_digits: 1, max_digits: 1, digits_allowed: allowed, typing_playback_mode: "No" });
+    const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", { min_digits: 1, max_digits: 1, digits_allowed: allowed, sec_wait: SEC_WAIT, typing_playback_mode: "No" });
     menuLead = [];
-    if (answer === "1" && rules.albumsEnabled) {
+    if (answer === "1" && allowed.includes(1)) {
       selectedAlbums = await chooseMany(call, prompt(prompts, "system:albums_intro", `בחרו בין ${albumMinQuota} ל ${albumMaxQuota} אלבומים`), catalog.albums || [], albumMinimum, albumMaximum, "לאלבום", "album", prompts, albumMenuKey);
       songIdsByAlbum = {};
       await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       menuLead = prompt(prompts, "system:section_saved", "בחירת האלבומים נשמרה חוזרים לתפריט הראשי");
-    } else if (answer === "2" && rules.songsEnabled) {
+    } else if (answer === "2" && allowed.includes(2)) {
       if (!selectedAlbums.length) { menuLead = prompt(prompts, "system:need_albums", "כדי לבחור שירים יש לבחור קודם אלבומים בשלוחה 1"); continue; }
       for (const album of selectedAlbums) {
         if ((songIdsByAlbum[album.id] || []).length >= songMinQuotaOf(album)) continue;
@@ -986,7 +1009,7 @@ router.get("/", async (call) => {
         await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       }
       menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה חוזרים לתפריט הראשי");
-    } else if (answer === "3" && rules.artistsEnabled) {
+    } else if (answer === "3" && allowed.includes(3)) {
       selectedArtists = await chooseMany(call, prompt(prompts, "system:artists_intro", `בחרו בין ${artistMinQuota} ל ${artistMaxQuota} זמרים`), catalog.artists || [], artistMinimum, artistMaximum, "לזמר", "artist", prompts, artistMenuKey);
       await saveProgress(voterPhone, { albumIds: selectedAlbums.map((a) => a.id), songIdsByAlbum, artistIds: selectedArtists.map((a) => a.id) });
       menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה חוזרים לתפריט הראשי");
@@ -1017,4 +1040,30 @@ router.get("/", async (call) => {
 const app = express();
 app.use(router);
 app.get("/healthz", (_request, response) => response.send("ok"));
+
+// "הקו לא עובד" אפשר לאבחן מכאן בלי להתקשר: כאן רואים אם האתר בכלל עונה,
+// אם הסוד המשותף מתקבל, ואם ההצבעה פתוחה.
+app.get("/diag", async (_request, response) => {
+  const diagnosis = { site: SITE_API_BASE_URL, secWait: SEC_WAIT, requestTimeoutMs: REQUEST_TIMEOUT_MS };
+  try {
+    const { response: siteResponse, result } = await api("/api/ivr/catalog");
+    diagnosis.status = siteResponse.status;
+    diagnosis.ok = siteResponse.ok;
+    if (siteResponse.ok) {
+      diagnosis.votingOpen = Boolean(result?.rules?.votingOpen);
+      diagnosis.albums = (result?.albums || []).length;
+      diagnosis.songs = (result?.songs || []).length;
+      diagnosis.artists = (result?.artists || []).length;
+      diagnosis.prompts = (result?.ivrPrompts || []).length;
+    } else {
+      diagnosis.error = result?.error || "";
+      diagnosis.hint = siteResponse.status === 401 ? "IVR_SECRET בשירות אינו זהה לזה שבאתר" : "האתר החזיר שגיאה";
+    }
+  } catch (error) {
+    diagnosis.ok = false;
+    diagnosis.error = error.message;
+    diagnosis.hint = "האתר לא ענה בזמן או שהכתובת ב SITE_API_BASE_URL שגויה";
+  }
+  response.json(diagnosis);
+});
 app.listen(PORT, () => console.log(`IVR listening on ${PORT}`));
