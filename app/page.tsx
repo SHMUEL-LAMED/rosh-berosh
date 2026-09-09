@@ -66,18 +66,39 @@ export default function Home() {
   const [voted, setVoted] = useState<boolean | null>(null);
   const [voteCheckFailed, setVoteCheckFailed] = useState(false);
   const progressReady = useRef(false);
+  const loadedMediaAlbums = useRef(new Set<string>());
+  const loadingMediaAlbums = useRef(new Set<string>());
 
   const loadCatalog = useCallback(async () => {
     setLoadFailed(false);
     try {
       const response = await fetch("/api/catalog", { cache: "no-store" });
       if (!response.ok) throw new Error();
+      loadedMediaAlbums.current.clear();
+      loadingMediaAlbums.current.clear();
       setCatalog(await response.json());
     } catch {
       setLoadFailed(true);
       notify("לא הצלחנו לטעון את רשימת המצעד.", "error");
     }
   }, [notify]);
+  const loadSongMedia = useCallback(async (albumIds: string[]) => {
+    const wanted = [...new Set(albumIds)].filter((id) => !loadedMediaAlbums.current.has(id) && !loadingMediaAlbums.current.has(id));
+    if (!wanted.length) return;
+    wanted.forEach((id) => loadingMediaAlbums.current.add(id));
+    try {
+      const response = await fetch(`/api/catalog/media?albumIds=${encodeURIComponent(wanted.join(","))}`, { cache: "no-store" });
+      if (!response.ok) throw new Error();
+      const body = await response.json() as { songs?: Array<Pick<Song, "id" | "audioUrl" | "coverUrl" | "previewStart" | "previewEnd">> };
+      const media = new Map((body.songs || []).map((song) => [song.id, song]));
+      setCatalog((current) => current ? { ...current, songs: current.songs.map((song) => ({ ...song, ...media.get(song.id) })) } : current);
+      wanted.forEach((id) => loadedMediaAlbums.current.add(id));
+    } catch {
+      wanted.forEach((id) => loadedMediaAlbums.current.delete(id));
+    } finally {
+      wanted.forEach((id) => loadingMediaAlbums.current.delete(id));
+    }
+  }, []);
   const checkVote = useCallback(async () => {
     setVoted(null); setVoteCheckFailed(false);
     try {
@@ -137,6 +158,10 @@ export default function Home() {
   const stageHasChoices = hasStageChoices(stage, catalog, selectedAlbums.length);
   const songsByAlbum = (albumId: string) => catalog?.songs.filter((song) => song.albumId === albumId) ?? [];
   const selectedSongNames = (albumId: string) => catalog?.songs.filter((song) => songs[albumId]?.includes(song.id)).map((song) => song.title).join(" · ") || "לא נבחר";
+
+  useEffect(() => {
+    if (stage === "songs") void loadSongMedia(selectedAlbums.map((album) => album.id));
+  }, [stage, selectedAlbums, loadSongMedia]);
 
   const toggleLimited = (items: string[], id: string, max: number, set: (next: string[]) => void, message: string) => {
     clearNotice();
@@ -239,13 +264,13 @@ export default function Home() {
         {catalog && stageHasChoices && <footer className="vote-actions">{(stageIndex > 0 || songAlbumIndex > 0) && <button className="back" onClick={back}>חזרה</button>}<button className="continue" disabled={busy} onClick={stage === "summary" ? submit : next}>{busy ? "שומרים…" : stage === "summary" ? "שליחת ההצבעה" : "המשך"} <span>←</span></button></footer>}
       </section>
     </>}
-    {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} />}
+    {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} loadSongMedia={loadSongMedia} />}
   </main>;
 }
 
 function Title({ kicker, title, count }: { kicker: string; title: string; count?: string }) { return <div className="section-title"><div><p className="kicker">{kicker}</p><h2>{title}</h2></div>{count && <strong>{count}</strong>}</div>; }
 
-function BrowsePanel({ catalog }: { catalog: Catalog }) {
+function BrowsePanel({ catalog, loadSongMedia }: { catalog: Catalog; loadSongMedia(albumIds: string[]): Promise<void> }) {
   const { song: currentSong, play, setSiblings } = usePlayer();
   const [open, setOpen] = useState(false);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
@@ -263,6 +288,7 @@ function BrowsePanel({ catalog }: { catalog: Catalog }) {
   }, [catalog.songs]);
   const selectedAlbum = catalog.albums.find((a) => a.id === selectedAlbumId);
   const selectedSongs = selectedAlbumId ? songsByAlbum.get(selectedAlbumId) || [] : [];
+  useEffect(() => { if (selectedAlbumId) void loadSongMedia([selectedAlbumId]); }, [selectedAlbumId, loadSongMedia]);
   const closePanel = useCallback(() => {
     setOpen(false);
     setSelectedAlbumId(null);

@@ -14,6 +14,7 @@ const RECORDINGS_YEMOT_API_BASE = String(process.env.RECORDINGS_YEMOT_API_BASE |
 const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().replace(/\/$/, "");
 const PORT = process.env.PORT || 3000;
 const POST_VOTE_TRANSFER = String(process.env.POST_VOTE_TRANSFER || "").replace(/\D/g, "");
+const DEPLOYED_COMMIT = String(process.env.RENDER_GIT_COMMIT || "").trim();
 // האתר רץ על Cloudflare Workers מול D1, ובקשה ראשונה אחרי חוסר פעילות
 // יכולה לקחת יותר משמונה שניות. פסק זמן קצר מדי ניתק את המתקשר מיד.
 const REQUEST_TIMEOUT_MS = Number(process.env.IVR_REQUEST_TIMEOUT_MS) || 15000;
@@ -85,6 +86,21 @@ function itemPrompt(prompts, kind, item, label) {
   return [text(`${label} ${item.title || item.name}`)];
 }
 
+function selectionProgressPrompt(prompts, kind, position, total) {
+  const keys = {
+    album: ["system:album_selection_number", "נא להצביע לאלבום"],
+    song: ["system:song_selection_number", "נא להצביע לשיר"],
+    artist: ["system:artist_selection_number", "נא להצביע לזמר"],
+  };
+  const [key, fallback] = keys[kind] || ["system:selection_number", "נא להצביע לאפשרות"];
+  return [
+    ...prompt(prompts, key, fallback),
+    number(position),
+    ...prompt(prompts, "system:selection_out_of", "מתוך"),
+    number(total),
+  ];
+}
+
 // Individual recordings contain only the item name. The keypad code is added
 // by the IVR so the same recording also works in fixed-width long menus.
 const KINDS_MISSING_DIGIT = new Set(["album", "song", "artist"]);
@@ -128,14 +144,15 @@ async function chooseMany(call, intro, items, minimum, maximum, label, kind, pro
   const selectedIds = new Set();
   let lead = [];
   let showIntro = true;
-  const hasRecordedMenu = Boolean(menuPromptKey && prompts.get(menuPromptKey)?.yemotPath);
   while (selected.length < maxTarget) {
     const canFinish = selected.length >= minTarget;
     const finishCode = "0".repeat(menuCodeWidth(items.length));
     const finishPrompt = canFinish
       ? (finishCode === "0" ? prompt(prompts, "system:finish_selection", "לסיום הבחירה הקישו 0") : keypad("לסיום הבחירה", finishCode))
       : [];
-    const progressPrompt = hasRecordedMenu ? [] : [text(`בחירה ${selected.length + 1} מתוך עד ${maxTarget}`)];
+    // הודעת המיקום חייבת להישמע גם כשקיימת הקלטה רציפה של כל הרשימה.
+    // רכיבי המשפט ניתנים להקלטה, והמספרים נשארים דינמיים לפי מכסת הסקר.
+    const progressPrompt = selectionProgressPrompt(prompts, kind, selected.length + 1, maxTarget);
     const messages = [...lead, ...(showIntro ? intro : []), ...progressPrompt, ...finishPrompt];
     lead = [];
     showIntro = false;
@@ -1075,12 +1092,21 @@ router.get("/", async (call) => {
 
 const app = express();
 app.use(router);
-app.get("/healthz", (_request, response) => response.send("ok"));
+app.get("/healthz", (_request, response) => {
+  response.set("x-rosh-berosh-commit", DEPLOYED_COMMIT || "unknown");
+  response.send("ok");
+});
 
 // "הקו לא עובד" אפשר לאבחן מכאן בלי להתקשר: כאן רואים אם האתר בכלל עונה,
 // אם הסוד המשותף מתקבל, ואם ההצבעה פתוחה.
 app.get("/diag", async (_request, response) => {
-  const diagnosis = { site: SITE_API_BASE_URL, secWait: SEC_WAIT, requestTimeoutMs: REQUEST_TIMEOUT_MS };
+  const diagnosis = {
+    site: SITE_API_BASE_URL,
+    commit: DEPLOYED_COMMIT || null,
+    commitShort: DEPLOYED_COMMIT ? DEPLOYED_COMMIT.slice(0, 7) : null,
+    secWait: SEC_WAIT,
+    requestTimeoutMs: REQUEST_TIMEOUT_MS,
+  };
   try {
     const { response: siteResponse, result } = await api("/api/ivr/catalog");
     diagnosis.status = siteResponse.status;
