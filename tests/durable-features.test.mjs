@@ -14,6 +14,14 @@ test("Google login is exchanged for an opaque 30-day server session", () => {
   assert.doesNotMatch(worker, /sessionCookie\(credential\)/);
 });
 
+test("login offers optional mailing-list consent and subscribes only when checked", () => {
+  const auth = source("app/auth-ui.tsx");
+  assert.match(auth, /מעוניינים להצטרף לרשימת התפוצה של ראש בראש/);
+  assert.match(auth, /type="checkbox"/);
+  assert.match(auth, /if \(joinMailingListRef\.current\)/);
+  assert.match(auth, /fetch\("\/api\/subscribers", \{ method: "POST" \}\)/);
+});
+
 test("site vote checks and progress use the authenticated Google subject", () => {
   const worker = source("worker/index.ts");
   assert.match(worker, /siteVoterKey = user\.sub/);

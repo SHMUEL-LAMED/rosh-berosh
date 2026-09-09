@@ -24,6 +24,8 @@ export function useCurrentUser() {
 
 export function LoginScreen() {
   const button = useRef<HTMLDivElement>(null);
+  const joinMailingListRef = useRef(false);
+  const [joinMailingList, setJoinMailingList] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
@@ -37,6 +39,9 @@ export function LoginScreen() {
             setError("");
             const response = await fetch("/api/auth/google", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ credential }) });
             if (!response.ok) { setError("ההתחברות נכשלה. נסו שוב."); return; }
+            if (joinMailingListRef.current) {
+              await fetch("/api/subscribers", { method: "POST" }).catch(() => null);
+            }
             window.location.reload();
           },
         });
@@ -51,7 +56,7 @@ export function LoginScreen() {
     }).catch(() => setError("ההתחברות עדיין אינה מוגדרת. מנהל המערכת מטפל בכך."));
     return () => { active = false; };
   }, []);
-  return <main className="login-shell" dir="rtl"><section className="login-card"><img className="login-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">ראש בראש</p><h1>מתחברים ומצביעים</h1><p>כדי לשמור על הצבעה הוגנת, הכניסה מתבצעת באמצעות חשבון Google.</p><div ref={button} className="google-button" />{error && <p className="vote-error">{error}</p>}<small>לא נפרסם דבר בחשבון שלכם ולא נקבל את הסיסמה שלכם.</small></section></main>;
+  return <main className="login-shell" dir="rtl"><section className="login-card"><img className="login-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">ראש בראש</p><h1>מתחברים ומצביעים</h1><p>כדי לשמור על הצבעה הוגנת, הכניסה מתבצעת באמצעות חשבון Google.</p><div ref={button} className="google-button" /><label className="login-subscribe"><input type="checkbox" checked={joinMailingList} onChange={(event) => { joinMailingListRef.current = event.target.checked; setJoinMailingList(event.target.checked); }} /><span>מעוניינים להצטרף לרשימת התפוצה של ראש בראש</span></label>{error && <p className="vote-error">{error}</p>}<small>לא נפרסם דבר בחשבון שלכם ולא נקבל את הסיסמה שלכם.</small></section></main>;
 }
 
 export async function logout() {
