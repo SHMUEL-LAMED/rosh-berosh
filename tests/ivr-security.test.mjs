@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { normalizePhone as normalizeWorkerPhone } from "../worker/phone.js";
 import { ballotRateConfig, checkBallotRate } from "../worker/rate-limit.js";
@@ -509,4 +510,16 @@ test("every phone menu waits longer than the seven second default", async () => 
   assert.equal(menuReadOptions([1, 2]).sec_wait, SEC_WAIT);
   assert.equal(continuousMenuInput(12).read.sec_wait, SEC_WAIT);
   assert.equal(adminReadOptions().sec_wait, SEC_WAIT);
+});
+
+test("album, song and artist voting always announce the current choice number", () => {
+  const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
+  const prompts = JSON.parse(readFileSync(new URL("../ivr-service/src/ivr-system-prompts.json", import.meta.url), "utf8"));
+  for (const key of ["system:album_selection_number", "system:song_selection_number", "system:artist_selection_number", "system:selection_out_of"]) {
+    assert.ok(prompts.some((item) => item.key === key), `${key} must be recordable on the site and recording line`);
+    assert.ok(server.includes(key), `${key} must be used by the voting line`);
+  }
+  const chooseMany = server.slice(server.indexOf("async function chooseMany"), server.indexOf("function promptFileName"));
+  assert.match(chooseMany, /selectionProgressPrompt\(prompts, kind, selected\.length \+ 1, maxTarget\)/);
+  assert.doesNotMatch(chooseMany, /hasRecordedMenu \? \[\] :/, "a continuous menu recording must not hide the progress announcement");
 });
