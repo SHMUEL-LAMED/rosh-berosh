@@ -523,3 +523,10 @@ test("album, song and artist voting always announce the current choice number", 
   assert.match(chooseMany, /selectionProgressPrompt\(prompts, kind, selected\.length \+ 1, maxTarget\)/);
   assert.doesNotMatch(chooseMany, /hasRecordedMenu \? \[\] :/, "a continuous menu recording must not hide the progress announcement");
 });
+
+test("Render diagnostics expose the exact deployed commit", () => {
+  const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
+  assert.match(server, /process\.env\.RENDER_GIT_COMMIT/);
+  assert.match(server, /x-rosh-berosh-commit/);
+  assert.match(server, /commitShort: DEPLOYED_COMMIT \? DEPLOYED_COMMIT\.slice\(0, 7\) : null/);
+});

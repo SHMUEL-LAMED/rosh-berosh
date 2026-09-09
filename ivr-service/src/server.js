@@ -14,6 +14,7 @@ const RECORDINGS_YEMOT_API_BASE = String(process.env.RECORDINGS_YEMOT_API_BASE |
 const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().replace(/\/$/, "");
 const PORT = process.env.PORT || 3000;
 const POST_VOTE_TRANSFER = String(process.env.POST_VOTE_TRANSFER || "").replace(/\D/g, "");
+const DEPLOYED_COMMIT = String(process.env.RENDER_GIT_COMMIT || "").trim();
 // האתר רץ על Cloudflare Workers מול D1, ובקשה ראשונה אחרי חוסר פעילות
 // יכולה לקחת יותר משמונה שניות. פסק זמן קצר מדי ניתק את המתקשר מיד.
 const REQUEST_TIMEOUT_MS = Number(process.env.IVR_REQUEST_TIMEOUT_MS) || 15000;
@@ -1090,12 +1091,21 @@ router.get("/", async (call) => {
 
 const app = express();
 app.use(router);
-app.get("/healthz", (_request, response) => response.send("ok"));
+app.get("/healthz", (_request, response) => {
+  response.set("x-rosh-berosh-commit", DEPLOYED_COMMIT || "unknown");
+  response.send("ok");
+});
 
 // "הקו לא עובד" אפשר לאבחן מכאן בלי להתקשר: כאן רואים אם האתר בכלל עונה,
 // אם הסוד המשותף מתקבל, ואם ההצבעה פתוחה.
 app.get("/diag", async (_request, response) => {
-  const diagnosis = { site: SITE_API_BASE_URL, secWait: SEC_WAIT, requestTimeoutMs: REQUEST_TIMEOUT_MS };
+  const diagnosis = {
+    site: SITE_API_BASE_URL,
+    commit: DEPLOYED_COMMIT || null,
+    commitShort: DEPLOYED_COMMIT ? DEPLOYED_COMMIT.slice(0, 7) : null,
+    secWait: SEC_WAIT,
+    requestTimeoutMs: REQUEST_TIMEOUT_MS,
+  };
   try {
     const { response: siteResponse, result } = await api("/api/ivr/catalog");
     diagnosis.status = siteResponse.status;
