@@ -164,7 +164,10 @@ export default function Home() {
     clearNotice();
     const r = catalog.rules;
     if (stage === "albums") {
-      if (albums.length < r.albumsMin || albums.length > r.albumsMax) return fail(`יש לבחור ${rangeText(r.albumsMin, r.albumsMax, "אלבומים")}.`);
+      // Fewer active albums than albumsMin (one deactivated mid-poll) used to
+      // freeze the voter on this step. Ask only for what the list actually has.
+      const albumsRequired = Math.min(r.albumsMin, catalog.albums.length);
+      if (albums.length < albumsRequired || albums.length > r.albumsMax) return fail(`יש לבחור ${rangeText(albumsRequired, Math.min(r.albumsMax, catalog.albums.length), "אלבומים")}.`);
       setSongAlbumIndex(0);
       return goToStage(stageIndex + 1);
     }
@@ -179,7 +182,9 @@ export default function Home() {
       if (songAlbumIndex < selectedAlbums.length - 1) { setSongAlbumIndex(songAlbumIndex + 1); return scrollTop(); }
       return goToStage(stageIndex + 1);
     }
-    if (stage === "artists" && (artists.length < r.artistsMin || artists.length > r.artistsMax)) return fail(`יש לבחור ${rangeText(r.artistsMin, r.artistsMax, "זמרים")}.`);
+    // Same for the singers: a short list must not become a dead end.
+    const artistsRequired = Math.min(r.artistsMin, catalog.artists.length);
+    if (stage === "artists" && (artists.length < artistsRequired || artists.length > r.artistsMax)) return fail(`יש לבחור ${rangeText(artistsRequired, Math.min(r.artistsMax, catalog.artists.length), "זמרים")}.`);
     goToStage(stageIndex + 1);
   };
   const back = () => {
