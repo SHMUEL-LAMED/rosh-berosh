@@ -11,6 +11,7 @@ import { normalizePhone } from "./phone";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 import { readIvrCatalog } from "./ivr-catalog.js";
+import { placeholders } from "./sql.js";
 
 interface Env {
   ASSETS: Fetcher;
@@ -28,7 +29,6 @@ type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; alb
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
-const placeholders = (count: number) => Array(count).fill("?").join(",");
 
 function verifyIvrSecret(request: Request, env: Env): boolean {
   if (!env.IVR_SECRET) return false;
@@ -46,7 +46,6 @@ async function activeSurveyId(env: Env): Promise<string> {
 }
 
 async function readRules(env: Env, surveyId: string): Promise<Rules> {
-  await ensureRuntimeSchema(env);
   const defaults = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
   try {
     return await env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id=?").bind(surveyId).first<Rules>() ?? defaults;
@@ -119,8 +118,23 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   const albumMin = rules.albumsEnabled ? rules.albumsMin : 0, albumMax = rules.albumsEnabled ? rules.albumsMax : 0;
   const songMin = rules.songsEnabled ? rules.songsMin : 0, songMax = rules.songsEnabled ? rules.songsMax : 0;
   const artistMin = rules.artistsEnabled ? rules.artistsMin : 0, artistMax = rules.artistsEnabled ? rules.artistsMax : 0;
-  if (!voterKey || albumIds.length < albumMin || albumIds.length > albumMax || artistIds.length < artistMin || artistIds.length > artistMax || albumIds.some((id) => (songMap[id]?.length ?? 0) > songMax)) {
+  if (!voterKey || albumIds.length > albumMax || artistIds.length > artistMax || albumIds.some((id) => (songMap[id]?.length ?? 0) > songMax)) {
     return json({ error: "הבחירות אינן תואמות להגדרות הסקר." }, 400);
+  }
+
+  // A stage can end up holding fewer active items than its minimum (an album or
+  // an artist deactivated mid-poll), and then nobody could ever finish it: the
+  // phone line and the site both stop at what the list can offer, so the ballot
+  // arrived legitimately short. Require only what the catalogue actually has.
+  if (albumIds.length < albumMin || artistIds.length < artistMin) {
+    const [albumTotal, artistTotal] = await env.DB.batch<{ total: number }>([
+      env.DB.prepare("SELECT COUNT(*) AS total FROM albums WHERE active=1 AND survey_id=?").bind(surveyId),
+      env.DB.prepare("SELECT COUNT(*) AS total FROM artists WHERE active=1 AND survey_id=?").bind(surveyId),
+    ]);
+    const required = (minimum: number, available: unknown) => Math.min(minimum, Number(available || 0));
+    if (albumIds.length < required(albumMin, albumTotal.results[0]?.total) || artistIds.length < required(artistMin, artistTotal.results[0]?.total)) {
+      return json({ error: "הבחירות אינן תואמות להגדרות הסקר." }, 400);
+    }
   }
 
   // An album can end up holding fewer active songs than songsMin (a track
@@ -320,13 +334,18 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     }
     if (request.method === "POST") {
       const body = await request.json<Record<string, unknown>>();
-      await env.MEDIA.put(progressKey, JSON.stringify(body), { httpMetadata: { contentType: "application/json", cacheControl: "no-store" } });
+      const data = JSON.stringify(body);
+      if (data.length > 64_000) return json({ error: "ההתקדמות גדולה מדי." }, 413);
+      await env.MEDIA.put(progressKey, data, { httpMetadata: { contentType: "application/json", cacheControl: "no-store" } });
       return json({ ok: true });
     }
     if (request.method === "DELETE") {
       await env.MEDIA.delete(progressKey);
       return json({ ok: true });
     }
+    // Without this the phone service would get the website's HTML back and
+    // report it as a broken site API.
+    return json({ error: "שיטה לא נתמכת." }, 405);
   }
   if (url.pathname === "/api/subscribers") {
     // הכתובת נלקחת תמיד מהחשבון המחובר ולעולם לא מגוף הבקשה, כדי שאיש
