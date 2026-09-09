@@ -100,6 +100,8 @@ const ADMIN_SECTIONS = [
   },
 ];
 
+const { SEC_WAIT } = require("./menu-input");
+
 const MAIN_MENU_CODE = "00";
 const HANGUP_CODE = "99";
 
@@ -121,7 +123,7 @@ function adminCodes() {
 
 // כל התפריטים בקו הניהול קוראים בדיוק שתי ספרות, כדי שלא תהיה המתנה לטיים אאוט.
 function adminReadOptions() {
-  return { min_digits: 2, max_digits: 2, digits_allowed: adminCodes(), typing_playback_mode: "No" };
+  return { min_digits: 2, max_digits: 2, digits_allowed: adminCodes(), sec_wait: SEC_WAIT, typing_playback_mode: "No" };
 }
 
 // ניתוב הקוד שהוקש: נושא, פעולה, חזרה לתפריט הראשי או סיום שיחה.
