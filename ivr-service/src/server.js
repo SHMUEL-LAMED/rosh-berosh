@@ -85,6 +85,21 @@ function itemPrompt(prompts, kind, item, label) {
   return [text(`${label} ${item.title || item.name}`)];
 }
 
+function selectionProgressPrompt(prompts, kind, position, total) {
+  const keys = {
+    album: ["system:album_selection_number", "נא להצביע לאלבום"],
+    song: ["system:song_selection_number", "נא להצביע לשיר"],
+    artist: ["system:artist_selection_number", "נא להצביע לזמר"],
+  };
+  const [key, fallback] = keys[kind] || ["system:selection_number", "נא להצביע לאפשרות"];
+  return [
+    ...prompt(prompts, key, fallback),
+    number(position),
+    ...prompt(prompts, "system:selection_out_of", "מתוך"),
+    number(total),
+  ];
+}
+
 // Individual recordings contain only the item name. The keypad code is added
 // by the IVR so the same recording also works in fixed-width long menus.
 const KINDS_MISSING_DIGIT = new Set(["album", "song", "artist"]);
@@ -128,14 +143,15 @@ async function chooseMany(call, intro, items, minimum, maximum, label, kind, pro
   const selectedIds = new Set();
   let lead = [];
   let showIntro = true;
-  const hasRecordedMenu = Boolean(menuPromptKey && prompts.get(menuPromptKey)?.yemotPath);
   while (selected.length < maxTarget) {
     const canFinish = selected.length >= minTarget;
     const finishCode = "0".repeat(menuCodeWidth(items.length));
     const finishPrompt = canFinish
       ? (finishCode === "0" ? prompt(prompts, "system:finish_selection", "לסיום הבחירה הקישו 0") : keypad("לסיום הבחירה", finishCode))
       : [];
-    const progressPrompt = hasRecordedMenu ? [] : [text(`בחירה ${selected.length + 1} מתוך עד ${maxTarget}`)];
+    // הודעת המיקום חייבת להישמע גם כשקיימת הקלטה רציפה של כל הרשימה.
+    // רכיבי המשפט ניתנים להקלטה, והמספרים נשארים דינמיים לפי מכסת הסקר.
+    const progressPrompt = selectionProgressPrompt(prompts, kind, selected.length + 1, maxTarget);
     const messages = [...lead, ...(showIntro ? intro : []), ...progressPrompt, ...finishPrompt];
     lead = [];
     showIntro = false;
