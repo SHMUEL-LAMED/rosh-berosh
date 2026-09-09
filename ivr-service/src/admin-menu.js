@@ -111,7 +111,7 @@ const ADMIN_SECTIONS = [
   },
 ];
 
-const { SEC_WAIT } = require("./menu-input");
+const { MENU_SEC_WAIT } = require("./menu-input");
 
 const MAIN_MENU_CODE = "00";
 const HANGUP_CODE = "99";
@@ -132,15 +132,27 @@ function adminCodes() {
   return [MAIN_MENU_CODE, ...ADMIN_SECTIONS.flatMap((section) => [section.code, ...section.items.map((item) => item.code)]), HANGUP_CODE];
 }
 
-// כל התפריטים בקו הניהול קוראים בדיוק שתי ספרות, כדי שלא תהיה המתנה לטיים אאוט.
+// קיצור של ספרה אחת לכל נושא: 1 הוא הנושא 10, 5 הוא הנושא 50. הקוד המלא בן
+// שתי הספרות ממשיך לעבוד מכל מקום, ולכן אחרי ספרה אחת הקו ממתין רגע קצר כדי
+// לראות אם באה ספרה שנייה (הקשה על סולמית מסיימת מיד).
+function sectionShortcut(section) {
+  return section.code[0];
+}
+
+function adminShortcuts() {
+  return ADMIN_SECTIONS.map(sectionShortcut);
+}
+
 function adminReadOptions() {
-  return { min_digits: 2, max_digits: 2, digits_allowed: adminCodes(), sec_wait: SEC_WAIT, typing_playback_mode: "No" };
+  return { min_digits: 1, max_digits: 2, digits_allowed: [...adminShortcuts(), ...adminCodes()], sec_wait: MENU_SEC_WAIT, typing_playback_mode: "No" };
 }
 
 // ניתוב הקוד שהוקש: נושא, פעולה, חזרה לתפריט הראשי או סיום שיחה.
 function resolveAdminCode(code) {
   if (!code || code === HANGUP_CODE) return { type: "hangup" };
   if (code === MAIN_MENU_CODE) return { type: "main" };
+  const shortcut = /^[1-9]$/.test(code) ? findAdminSection(`${code}0`) : null;
+  if (shortcut) return { type: "section", section: shortcut };
   const section = findAdminSection(code);
   if (section) return { type: "section", section };
   const item = findAdminItem(code);
@@ -150,6 +162,8 @@ function resolveAdminCode(code) {
 
 module.exports = {
   ADMIN_SECTIONS,
+  adminShortcuts,
+  sectionShortcut,
   HANGUP_CODE,
   MAIN_MENU_CODE,
   adminCodes,
