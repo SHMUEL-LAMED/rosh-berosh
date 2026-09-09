@@ -78,6 +78,18 @@ test("the upload queue keeps going after the first file, instead of stopping on 
   assert.match(queue, /\}, \[processQueue, pump\]\)/);
 });
 
+test("the public catalog keeps heavy phone and song media out of the first response", () => {
+  const worker = source("worker/index.ts");
+  const catalog = worker.slice(worker.indexOf("async function catalog("), worker.indexOf("async function catalogMedia"));
+  assert.doesNotMatch(catalog, /readIvrPrompts/);
+  assert.doesNotMatch(catalog, /audio_url AS audioUrl/);
+  assert.match(worker, /\/api\/catalog\/media/);
+  const page = source("app/page.tsx");
+  assert.match(page, /loadSongMedia/);
+  assert.match(page, /stage === "songs"/);
+  assert.match(page, /selectedAlbumId/);
+});
+
 test("an album upload also stores the cover that came with the files", () => {
   const page = source("app/admin/page.tsx");
   assert.match(page, /if \(split\.cover\) \{/);

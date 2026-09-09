@@ -58,35 +58,31 @@ async function catalog(env: Env): Promise<Response> {
   try {
     const surveyId = await activeSurveyId(env);
     const rules = await readRules(env, surveyId);
-    const [albums, artists] = await env.DB.batch([
+    const [albums, songs, artists] = await env.DB.batch([
       env.DB.prepare("SELECT id, title, artist_name AS artistName, cover_url AS coverUrl FROM albums WHERE active = 1 AND survey_id = ? ORDER BY position, title").bind(surveyId),
+      env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.active = 1 AND a.survey_id = ? ORDER BY a.position, s.position, s.title").bind(surveyId),
       env.DB.prepare("SELECT id, name, image_url AS imageUrl FROM artists WHERE active = 1 AND survey_id = ? ORDER BY position, name").bind(surveyId),
     ]);
-    let songs;
-    try {
-      songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, s.cover_url AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
-    } catch {
-      songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.title, s.audio_url AS audioUrl, NULL AS coverUrl, 0 AS previewStart, 0 AS previewEnd FROM songs s JOIN albums a ON a.id = s.album_id WHERE s.active = 1 AND a.survey_id = ? ORDER BY s.position, s.title").bind(surveyId).all();
-    }
-    const songsMap = new Map<string, Array<{ coverUrl?: string }>>();
-    (songs.results || []).forEach((song: Record<string, unknown>) => {
-      const covers = songsMap.get(song.albumId as string) || [];
-      if (song.coverUrl) covers.push({ coverUrl: song.coverUrl as string });
-      songsMap.set(song.albumId as string, covers);
-    });
-    const albumsWithCovers = albums.results.map((album: Record<string, unknown>) => {
-      const albumSongs = songsMap.get(album.id as string) || [];
-      if (!album.coverUrl && albumSongs.length > 0) {
-        const uniqueCovers = [...new Set(albumSongs.map((s) => s.coverUrl).filter(Boolean))];
-        if (uniqueCovers.length) album.coverUrl = uniqueCovers[0];
-      }
-      return album;
-    });
-    const ivrPrompts = await readIvrPrompts(env);
-    return json({ surveyId, albums: albumsWithCovers, songs: songs.results, artists: artists.results, rules, ivrPrompts });
+    // המסך הראשון צריך רק שמות ומזהים. כתובות שמע ועטיפות של מאות שירים,
+    // וקריינויות הקו, נטענות בנפרד רק כשפותחים אלבום להאזנה.
+    return json({ surveyId, albums: albums.results, songs: songs.results, artists: artists.results, rules });
   } catch (error) {
     console.error("catalog error", error);
     return json({ error: "לא ניתן לטעון את רשימת המצעד." }, 500);
+  }
+}
+
+async function catalogMedia(request: Request, env: Env): Promise<Response> {
+  const requested = new URL(request.url).searchParams.get("albumIds")?.split(",").map((id) => id.trim()).filter(Boolean) ?? [];
+  const albumIds = unique(requested).slice(0, 50);
+  if (!albumIds.length) return json({ songs: [] });
+  try {
+    const surveyId = await activeSurveyId(env);
+    const songs = await env.DB.prepare(`SELECT s.id, s.audio_url AS audioUrl, s.cover_url AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.active=1 AND a.survey_id=? AND a.id IN (${placeholders(albumIds.length)})`).bind(surveyId, ...albumIds).all();
+    return json({ songs: songs.results });
+  } catch (error) {
+    console.error("catalog media error", error);
+    return json({ error: "לא ניתן לטעון כרגע את קובצי השירים." }, 500);
   }
 }
 
@@ -239,6 +235,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (handled) return handled;
   }
   if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
+  if (url.pathname === "/api/catalog/media" && request.method === "GET") return catalogMedia(request, env);
   if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
   if (url.pathname === "/api/ivr/catalog" && request.method === "GET") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
