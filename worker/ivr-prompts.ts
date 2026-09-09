@@ -1,4 +1,5 @@
 import systemPrompts from "../ivr-service/src/ivr-system-prompts.json";
+import { ensureIvrSchema } from "./schema";
 
 export type IvrPrompt = {
   key: string;
@@ -16,6 +17,22 @@ const PROMPTS_MIGRATED_KEY = "ivr-prompts-migrated";
 const RECORDERS_MIGRATED_KEY = "ivr-recorders-migrated";
 
 export const SYSTEM_PROMPTS = systemPrompts.map(({ key, label }) => [key, label] as const);
+
+// קו הניהול אינו מריץ את בניית הסכמה המלאה לפני כל בקשה, ולכן טבלה חסרה
+// הייתה מפילה את בדיקת ההרשאה ומשביתה את הקו כולו. במקרה כזה בונים את טבלאות
+// הקו בלבד ומנסים שוב פעם אחת.
+function isMissingTable(error: unknown): boolean {
+  return /no such table/i.test(error instanceof Error ? error.message : String(error));
+}
+
+async function withIvrTables<T>(env: Pick<PromptEnv, "DB">, run: () => Promise<T>): Promise<T> {
+  try { return await run(); }
+  catch (error) {
+    if (!isMissingTable(error)) throw error;
+    await ensureIvrSchema(env);
+    return run();
+  }
+}
 
 async function legacyJson(env: Pick<PromptEnv, "MEDIA">, key: string): Promise<unknown> {
   const object = await env.MEDIA.get(key);
@@ -47,19 +64,23 @@ async function migrateLegacyPrompts(env: Pick<PromptEnv, "DB" | "MEDIA">): Promi
 }
 
 export async function readIvrRecorders(env: Pick<PromptEnv, "DB" | "MEDIA">): Promise<string[]> {
-  await migrateLegacyRecorders(env);
-  const rows = await env.DB.prepare("SELECT phone FROM ivr_recorders ORDER BY phone").all<{ phone: string }>();
-  return rows.results.map((row) => row.phone);
+  return withIvrTables(env, async () => {
+    await migrateLegacyRecorders(env);
+    const rows = await env.DB.prepare("SELECT phone FROM ivr_recorders ORDER BY phone").all<{ phone: string }>();
+    return rows.results.map((row) => row.phone);
+  });
 }
 
 export async function addIvrRecorder(env: Pick<PromptEnv, "DB" | "MEDIA">, phone: string): Promise<string[]> {
-  await migrateLegacyRecorders(env);
-  await env.DB.prepare("INSERT OR IGNORE INTO ivr_recorders (phone) VALUES (?)").bind(phone).run();
+  await withIvrTables(env, async () => {
+    await migrateLegacyRecorders(env);
+    await env.DB.prepare("INSERT OR IGNORE INTO ivr_recorders (phone) VALUES (?)").bind(phone).run();
+  });
   return readIvrRecorders(env);
 }
 
 export async function removeIvrRecorder(env: Pick<PromptEnv, "DB" | "MEDIA">, phone: string): Promise<{ removed: boolean; reason?: "missing" | "last"; recorders: string[] }> {
-  await migrateLegacyRecorders(env);
+  await withIvrTables(env, () => migrateLegacyRecorders(env));
   const removed = await env.DB.prepare("DELETE FROM ivr_recorders WHERE phone=? AND (SELECT COUNT(*) FROM ivr_recorders)>1 RETURNING phone").bind(phone).first<{ phone: string }>();
   if (removed) return { removed: true, recorders: await readIvrRecorders(env) };
   const exists = await env.DB.prepare("SELECT phone FROM ivr_recorders WHERE phone=?").bind(phone).first();
@@ -67,19 +88,21 @@ export async function removeIvrRecorder(env: Pick<PromptEnv, "DB" | "MEDIA">, ph
 }
 
 export async function readIvrPrompts(env: Pick<PromptEnv, "DB" | "MEDIA">): Promise<IvrPrompt[]> {
-  await migrateLegacyPrompts(env);
-  const rows = await env.DB.prepare("SELECT key,label,audio_url AS audioUrl,yemot_path AS yemotPath,updated_at AS updatedAt FROM ivr_prompts ORDER BY key").all<IvrPrompt>();
-  return rows.results;
+  return withIvrTables(env, async () => {
+    await migrateLegacyPrompts(env);
+    const rows = await env.DB.prepare("SELECT key,label,audio_url AS audioUrl,yemot_path AS yemotPath,updated_at AS updatedAt FROM ivr_prompts ORDER BY key").all<IvrPrompt>();
+    return rows.results;
+  });
 }
 
 export async function upsertIvrPrompt(env: Pick<PromptEnv, "DB" | "MEDIA">, prompt: IvrPrompt): Promise<void> {
-  await migrateLegacyPrompts(env);
+  await withIvrTables(env, () => migrateLegacyPrompts(env));
   await env.DB.prepare("INSERT INTO ivr_prompts (key,label,audio_url,yemot_path,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET label=excluded.label,audio_url=excluded.audio_url,yemot_path=excluded.yemot_path,updated_at=excluded.updated_at")
     .bind(prompt.key, prompt.label, prompt.audioUrl, prompt.yemotPath, prompt.updatedAt).run();
 }
 
 export async function deleteIvrPrompt(env: Pick<PromptEnv, "DB" | "MEDIA">, key: string): Promise<void> {
-  await migrateLegacyPrompts(env);
+  await withIvrTables(env, () => migrateLegacyPrompts(env));
   await env.DB.prepare("DELETE FROM ivr_prompts WHERE key=?").bind(key).run();
 }
 

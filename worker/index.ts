@@ -230,21 +230,21 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
     return ivrCatalog(env);
   }
+  // קו הניהול הטלפוני, כמו קו ההצבעה, אינו מריץ כאן את בניית הסכמה המלאה: היא
+  // עשרות משפטים ברצף על מסד קר, וימות המשיח מנתקת לפני שהמנהל שומע תפריט.
+  // הקריאות לטבלאות הקו בונות בעצמן טבלה חסרה ומנסות שוב.
   if (url.pathname === "/api/ivr/recorders/check" && request.method === "GET") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-    await ensureRuntimeSchema(env);
     const phone = normalizePhone(url.searchParams.get("phone") || "");
     const recorders = await readIvrRecorders(env);
     return json({ allowed: !!phone && recorders.includes(phone) });
   }
   if (url.pathname.startsWith("/api/ivr/admin/")) {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-    await ensureRuntimeSchema(env);
     return ivrAdminApi(request, env);
   }
   if (url.pathname === "/api/ivr/prompt" && request.method === "POST") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-    await ensureRuntimeSchema(env);
     const form = await request.formData();
     const file = form.get("file"), key = String(form.get("key") || "").trim(), label = String(form.get("label") || "").trim();
     const phone = normalizePhone(form.get("phone"));

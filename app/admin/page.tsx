@@ -74,6 +74,14 @@ export default function AdminPage() {
       if (!title || !artistName || !split.audio.length) throw new Error("יש להזין שם, אמן ולבחור תיקייה או ZIP עם קובצי שמע.");
       if (!data?.activeSurvey?.id) throw new Error("לא נמצא סקר פעיל.");
       const { id } = await api("/api/admin/catalog", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "album", title, artistName }) });
+      // The cover found in the folder or ZIP was parsed and then dropped, so an
+      // album kept its placeholder image until someone uploaded the cover by hand.
+      if (split.cover) {
+        const coverForm = new FormData();
+        coverForm.set("albumId", id); coverForm.set("kind", "cover"); coverForm.set("file", split.cover);
+        try { await api("/api/admin/media", { method: "POST", body: coverForm }); }
+        catch { notify("עטיפת האלבום לא נשמרה, אפשר להעלות אותה שוב מכרטיס האלבום."); }
+      }
       await uploadQueue.enqueue(data.activeSurvey.id, id, split.audio.map((file, position) => ({ file, position })));
       form.reset(); await load();
     } catch (error) {

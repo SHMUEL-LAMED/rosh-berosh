@@ -93,3 +93,34 @@ test("moving an item to an exact place keeps every other item in order", () => {
   assert.equal(reorderIds(ids, "z", 1), null);
   assert.deepEqual(ids, ["a", "b", "c", "d"], "המערך המקורי השתנה");
 });
+
+test("a management call is not dropped when the site does not answer the access check", () => {
+  const server = source("ivr-service/src/server.js");
+  const line = server.slice(server.indexOf('router.get("/recordings"'), server.indexOf('router.get("/"'));
+  assert.match(line, /try \{\s*access = await api\(/, "בדיקת ההרשאה אינה עטופה בטיפול בשגיאה");
+  assert.match(line, /לא ניתן להתחבר כרגע לשרת הניהול/);
+  assert.match(line, /שרת הניהול החזיר שגיאה/);
+});
+
+test("the management line works even when phone recording is not configured", () => {
+  const server = source("ivr-service/src/server.js");
+  const line = server.slice(server.indexOf('router.get("/recordings"'), server.indexOf('router.get("/"'));
+  assert.doesNotMatch(line, /RECORDINGS_YEMOT_TOKEN/, "חוסר הגדרת הקלטה עדיין חוסם את כל קו הניהול");
+  assert.match(server, /function recordingConfigured\(\)/);
+  assert.match(server, /if \(!recordingConfigured\(\)\) throw new Error/);
+});
+
+test("management requests get their own timeouts, because the overview and backups are heavy", () => {
+  const server = source("ivr-service/src/server.js");
+  assert.match(server, /const ADMIN_TIMEOUT_MS = (\d+)/);
+  assert.ok(Number(/const ADMIN_TIMEOUT_MS = (\d+)/.exec(server)[1]) > 8000);
+  assert.ok(Number(/const ADMIN_ACTION_TIMEOUT_MS = (\d+)/.exec(server)[1]) >= 60000);
+  assert.match(server, /overview\?phone=\$\{encodeURIComponent\(callerPhone\)\}`, \{ timeoutMs: ADMIN_TIMEOUT_MS \}/);
+  assert.match(server, /timeoutMs: ADMIN_ACTION_TIMEOUT_MS/);
+});
+
+test("an action always refreshes the state it changed", () => {
+  const server = source("ivr-service/src/server.js");
+  const action = server.slice(server.indexOf("async function phoneAdminAction"), server.indexOf("async function confirmAction"));
+  assert.equal([...action.matchAll(/clearAdminOverview\(callerPhone\)/g)].length, 2, "המצב אינו מתרענן לפני ואחרי הפעולה");
+});

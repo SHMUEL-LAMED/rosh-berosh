@@ -188,6 +188,11 @@ export const RUNTIME_SCHEMA_COLUMNS = COLUMNS;
 export const RUNTIME_SCHEMA_INDEXES = INDEXES;
 export const RUNTIME_SCHEMA_SEEDS = SEEDS;
 
+// הטבלאות שקו הניהול הטלפוני נשען עליהן. בקשה מהקו לעולם אינה מריצה את כל
+// בניית הסכמה — עשרות משפטים ברצף מאחרים את התשובה מעבר לזמן ההמתנה של ימות
+// המשיח — ולכן אלה מורצים לבדם, ורק כשמתברר שטבלה חסרה.
+export const RUNTIME_SCHEMA_IVR_TABLES = TABLES.filter((statement) => /CREATE TABLE IF NOT EXISTS ivr_/.test(statement));
+
 export function columnStatement({ table, column, definition }) {
   return `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`;
 }
@@ -211,5 +216,15 @@ export async function applyRuntimeSchema(db) {
   for (const statement of TABLES) await step(statement, () => db.prepare(statement).run());
   for (const spec of COLUMNS) await step(columnStatement(spec), () => addMissingColumn(db, spec));
   for (const statement of [...DROPPED_INDEXES, ...INDEXES, ...SEEDS]) await step(statement, () => db.prepare(statement).run());
+  return failures;
+}
+
+/** בונה רק את טבלאות הקו הטלפוני, בלי שאר הסכמה. */
+export async function applyIvrRuntimeSchema(db) {
+  const failures = [];
+  for (const statement of RUNTIME_SCHEMA_IVR_TABLES) {
+    try { await db.prepare(statement).run(); }
+    catch (error) { failures.push({ statement, error }); }
+  }
   return failures;
 }
