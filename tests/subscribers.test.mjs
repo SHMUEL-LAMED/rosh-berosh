@@ -88,8 +88,9 @@ test("מי שכבר רשום אינו מתבקש שוב", () => {
   assert.match(source("app/subscribe.tsx"), /subscribed \? "hidden" : "offer"/);
 });
 
-test("מסך ההתחברות אינו מציע הרשמה, כי אין שם חשבון לקחת ממנו כתובת", () => {
+test("מסך ההתחברות אינו מבקש כתובת ידנית לרשימת התפוצה", () => {
   assert.doesNotMatch(source("app/auth-ui.tsx"), /SubscribeCard/);
+  assert.doesNotMatch(source("app/auth-ui.tsx"), /type="email"/);
 });
 
 // הפאנל נועד להצגה ולייצוא בלבד: בלי חיפוש, הוספה ידנית או ייבוא מהממשק.
