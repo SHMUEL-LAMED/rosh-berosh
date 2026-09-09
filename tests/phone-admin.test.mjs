@@ -6,6 +6,7 @@ import { reorderIds, shiftIds } from "../worker/reorder.js";
 
 const require = createRequire(import.meta.url);
 const { ADMIN_SECTIONS, HANGUP_CODE, MAIN_MENU_CODE, adminCodes, adminItems, adminReadOptions, resolveAdminCode } = require("../ivr-service/src/admin-menu.js");
+const adminSpoken = () => [...ADMIN_SECTIONS, ...adminItems()];
 
 const source = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 
@@ -123,4 +124,39 @@ test("an action always refreshes the state it changed", () => {
   const server = source("ivr-service/src/server.js");
   const action = server.slice(server.indexOf("async function phoneAdminAction"), server.indexOf("async function confirmAction"));
   assert.equal([...action.matchAll(/clearAdminOverview\(callerPhone\)/g)].length, 2, "המצב אינו מתרענן לפני ואחרי הפעולה");
+});
+
+test("every topic and action has a spoken form the line can read naturally", () => {
+  for (const entry of adminSpoken()) {
+    assert.ok(entry.spoken, `אין נוסח מוקרא ל${entry.code}`);
+    assert.match(entry.spoken, /^ל/, `${entry.code}: "${entry.spoken}" אינו נפתח ב-ל`);
+    assert.doesNotMatch(entry.spoken, /[.\-"'&|]/, `${entry.code} מכיל תו שימות המשיח מוחקת`);
+    assert.doesNotMatch(entry.spoken, /\d/, `${entry.code}: הקוד נאמר בנפרד כספרות, לא בתוך הטקסט`);
+  }
+});
+
+test("the menu reads the code as digits and never inside the sentence", () => {
+  const server = source("ivr-service/src/server.js");
+  const menu = server.slice(server.indexOf("async function readAdminCode"), server.indexOf('router.get("/recordings"'));
+  assert.match(menu, /keypad\(item\.spoken \|\| item\.label, item\.code\)/);
+  assert.match(menu, /keypad\("לתפריט הראשי", "00"\)/);
+  assert.match(menu, /keypad\("לסיום השיחה", "99"\)/);
+  assert.doesNotMatch(menu, /הקישו 00|הקישו 99/, "קוד הקשה נאמר כמילה במקום כספרות");
+});
+
+test("the topic name is not announced twice when entering it", () => {
+  const server = source("ivr-service/src/server.js");
+  const menu = server.slice(server.indexOf("async function readAdminCode"), server.indexOf('router.get("/recordings"'));
+  assert.match(menu, /if \(String\(lead\)\.trim\(\) !== section\.label\) messages\.push\(text\(section\.label\)\)/);
+});
+
+test("spoken sentences are split into messages, because yemot deletes the periods", () => {
+  const server = source("ivr-service/src/server.js");
+  assert.match(server, /function lines\(\.\.\.parts\)/);
+  const actions = server.slice(server.indexOf("const ADMIN_ACTIONS"), server.indexOf("function stageList"));
+  // נקודה בתוך ${...} היא גישה לשדה בקוד, לא נקודה שנאמרת.
+  const runOn = [...actions.matchAll(/text\(`[^`]*`\)/g)]
+    .map((match) => match[0])
+    .filter((call) => call.replace(/\$\{[^}]*\}/g, "").includes("."));
+  assert.deepEqual(runOn, [], `משפט עם נקודות נשלח כהודעה אחת: ${runOn.join(" | ")}`);
 });

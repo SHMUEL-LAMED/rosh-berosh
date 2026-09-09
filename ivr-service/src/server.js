@@ -58,6 +58,20 @@ async function api(path, options = {}) {
 function text(data) { return { type: "text", data }; }
 function number(data) { return { type: "digits", data: String(data) }; }
 function file(data) { return { type: "file", data }; }
+
+// ימות המשיח מוחקת נקודות מטקסט להקראה, ולכן משפט אחד שנכתב עם נקודות נשמע
+// רצף אחד ארוך בלי הפסקה. כל חלק נשלח כהודעה נפרדת, וביניהן יש הפסקה טבעית.
+function lines(...parts) {
+  return parts
+    .flatMap((part) => (Array.isArray(part) ? part : String(part).split(".")))
+    .flatMap((part) => (part && typeof part === "object" ? [part] : String(part).trim() ? [text(String(part).trim())] : []));
+}
+
+// קודי הקשה נאמרים תמיד ספרה ספרה. קוד שנכתב בתוך הטקסט נקרא כמספר שלם
+// ("תשעים ותשע" במקום "תשע תשע"), והמנהל שומע משהו אחר ממה שהוא צריך להקיש.
+function keypad(label, code) {
+  return [text(label), text("הקישו"), number(code)];
+}
 function finishCall(call) { return POST_VOTE_TRANSFER ? call.routing_yemot(POST_VOTE_TRANSFER) : call.hangup(); }
 
 function promptMap(catalog) { return new Map((catalog.ivrPrompts || []).filter((item) => item?.key).map((item) => [item.key, item])); }
@@ -119,7 +133,7 @@ async function chooseMany(call, intro, items, minimum, maximum, label, kind, pro
     const canFinish = selected.length >= minTarget;
     const finishCode = "0".repeat(menuCodeWidth(items.length));
     const finishPrompt = canFinish
-      ? (finishCode === "0" ? prompt(prompts, "system:finish_selection", "לסיום הבחירה הקישו 0") : [text(`לסיום הבחירה הקישו ${finishCode}`)])
+      ? (finishCode === "0" ? prompt(prompts, "system:finish_selection", "לסיום הבחירה הקישו 0") : keypad("לסיום הבחירה", finishCode))
       : [];
     const progressPrompt = hasRecordedMenu ? [] : [text(`בחירה ${selected.length + 1} מתוך עד ${maxTarget}`)];
     const messages = [...lead, ...(showIntro ? intro : []), ...progressPrompt, ...finishPrompt];
@@ -150,9 +164,9 @@ async function adminChoice(call, intro, items) {
   const back = items.find((item) => item.digit === 0) || null;
   const choices = items.filter((item) => item.digit !== 0);
   if (choices.length <= 9) {
-    const messages = [text(intro)];
-    choices.forEach((item) => messages.push(text(item.label), text("הקישו"), number(item.digit)));
-    if (back) messages.push(text(back.label), text("הקישו 0"));
+    const messages = lines(intro);
+    choices.forEach((item) => messages.push(...keypad(item.label, item.digit)));
+    if (back) messages.push(...keypad(back.label, 0));
     const digits = choices.map((item) => item.digit);
     if (back) digits.push(0);
     const answer = await call.read(messages, "tap", menuReadOptions(digits));
@@ -160,9 +174,9 @@ async function adminChoice(call, intro, items) {
   }
 
   const input = continuousMenuInput(choices.length, Boolean(back));
-  const messages = [text(intro)];
-  choices.forEach((item, index) => messages.push(text(item.label), text("הקישו"), number(menuCode(index, input.width))));
-  if (back) messages.push(text(back.label), text("הקישו"), number(input.finishCode));
+  const messages = lines(intro);
+  choices.forEach((item, index) => messages.push(...keypad(item.label, menuCode(index, input.width))));
+  if (back) messages.push(...keypad(back.label, input.finishCode));
   const answer = await call.read(messages, "tap", input.read);
   if (back && answer === input.finishCode) return back;
   return choices[Number(answer) - 1] || null;
@@ -236,7 +250,7 @@ const router = YemotRouter({
   defaults: { removeInvalidChars: true, read: { removeInvalidChars: true }, id_list_message: { removeInvalidChars: true } },
   uncaughtErrorHandler: async (error, call) => {
     console.error("IVR error", error);
-    try { call.id_list_message([text("אירעה שגיאה במערכת. נא לנסות שוב מאוחר יותר.")]); } catch {}
+    try { call.id_list_message(lines("אירעה שגיאה במערכת", "נא לנסות שוב מאוחר יותר")); } catch {}
   },
 });
 
@@ -292,14 +306,14 @@ async function phoneAdminAction(callerPhone, action) {
 }
 
 async function confirmAction(call, messages) {
-  const content = Array.isArray(messages) ? [...messages] : [text(messages)];
-  content.push(text("לאישור הקישו 1 לביטול הקישו 0"));
+  const content = Array.isArray(messages) ? [...messages] : lines(messages);
+  content.push(...keypad("לאישור", 1), ...keypad("לביטול", 0));
   const answer = await call.read(content, "tap", menuReadOptions([0, 1]));
   return String(answer) === "1";
 }
 
 async function readNumberWithHash(call, message, maxDigits = 2) {
-  const answer = await call.read([text(message), text("לסיום הקישו סולמית לביטול הקישו 0 וסולמית")], "tap", {
+  const answer = await call.read([...lines(message), text("לסיום הקישו סולמית"), text("לביטול הקישו"), number(0), text("וסולמית")], "tap", {
     min_digits: 1,
     max_digits: maxDigits,
     sec_wait: SEC_WAIT,
@@ -314,8 +328,8 @@ async function readNumberWithHash(call, message, maxDigits = 2) {
 // לבצע כמה פעולות באותו נושא בלי לנווט מחדש.
 
 async function speakBack(call, messages) {
-  const content = Array.isArray(messages) ? [...messages] : [text(messages)];
-  content.push(text("לחזרה הקישו 0"));
+  const content = Array.isArray(messages) ? [...messages] : lines(messages);
+  content.push(...keypad("לחזרה", 0));
   await call.read(content, "tap", menuReadOptions([0]));
 }
 
@@ -493,7 +507,7 @@ async function topResults(call, callerPhone, key, label) {
   const rows = (state.results && state.results[key]) || [];
   if (!rows.length) return `אין עדיין תוצאות ל${label}`;
   const messages = [text(`${label} מובילים`)];
-  rows.forEach((item, index) => messages.push(text(`מקום ${index + 1}. ${item.label}. ${Number(item.votes || 0)} הצבעות`)));
+  rows.forEach((item, index) => messages.push(...lines(`מקום ${index + 1}`, item.label, `${Number(item.votes || 0)} הצבעות`)));
   await speakBack(call, messages);
   return "חזרתם לתפריט מצב ותוצאות";
 }
@@ -573,7 +587,12 @@ const ADMIN_ACTIONS = {
   "voting-readiness": async (call, callerPhone) => {
     const state = await phoneAdminOverview(callerPhone);
     const counts = state.readiness.counts;
-    await speakBack(call, [text(`אלבומים פעילים ${counts.albums}. שירים פעילים ${counts.songs}. זמרים פעילים ${counts.artists}. ${state.readiness.ready ? "הסקר מוכן להצבעה" : state.readiness.warnings.join(". ")}`)]);
+    await speakBack(call, lines(
+      `אלבומים פעילים ${counts.albums}`,
+      `שירים פעילים ${counts.songs}`,
+      `זמרים פעילים ${counts.artists}`,
+      ...(state.readiness.ready ? ["הסקר מוכן להצבעה"] : state.readiness.warnings),
+    ));
     return "חזרתם לתפריט ההצבעה";
   },
 
@@ -607,7 +626,7 @@ const ADMIN_ACTIONS = {
   "survey-list": async (call, callerPhone) => {
     const state = await phoneAdminOverview(callerPhone);
     const messages = [text(`יש ${(state.surveys || []).length} סקרים`)];
-    (state.surveys || []).forEach((item) => messages.push(text(`${item.name}. ${item.active ? "פעיל" : "טיוטה"}. ההצבעה ${item.votingOpen ? "פתוחה" : "סגורה"}`)));
+    (state.surveys || []).forEach((item) => messages.push(...lines(item.name, item.active ? "פעיל" : "טיוטה", `ההצבעה ${item.votingOpen ? "פתוחה" : "סגורה"}`)));
     await speakBack(call, messages);
     return "חזרתם לתפריט הסקרים";
   },
@@ -634,7 +653,7 @@ const ADMIN_ACTIONS = {
 
   "stage-list": async (call, callerPhone) => {
     const state = await phoneAdminOverview(callerPhone);
-    await speakBack(call, stageList(state).map((stage) => text(`${stage.label}. ${stage.enabled ? "פעיל" : "כבוי"}. מינימום ${stage.min}. מקסימום ${stage.max}`)));
+    await speakBack(call, stageList(state).flatMap((stage) => lines(stage.label, stage.enabled ? "פעיל" : "כבוי", `מינימום ${stage.min}`, `מקסימום ${stage.max}`)));
     return "חזרתם לתפריט השלבים";
   },
 
@@ -739,7 +758,7 @@ const ADMIN_ACTIONS = {
     const state = await phoneAdminOverview(callerPhone);
     const managers = state.managers || [];
     const messages = [text(`יש ${managers.length} מנהלי אתר`)];
-    managers.forEach((email, index) => messages.push(text(`מנהל מספר ${index + 1}. ${email}`)));
+    managers.forEach((email, index) => messages.push(...lines(`מנהל מספר ${index + 1}`, email)));
     messages.push(text("הוספת מנהל אתר נעשית באתר בלבד"));
     await speakBack(call, messages);
     return "חזרתם לתפריט ההרשאות";
@@ -756,7 +775,17 @@ const ADMIN_ACTIONS = {
   "status-summary": async (call, callerPhone) => {
     const state = await phoneAdminOverview(callerPhone);
     const counts = state.readiness.counts;
-    await speakBack(call, [text(`הסקר הפעיל ${state.activeSurvey.name}. ההצבעה ${state.settings.votingOpen ? "פתוחה" : "סגורה"}. התקבלו ${Number(state.votes.total || 0)} הצבעות, מתוכן ${Number(state.votes.phone || 0)} בטלפון ו ${Number(state.votes.site || 0)} באתר. אלבומים פעילים ${counts.albums}. שירים פעילים ${counts.songs}. זמרים פעילים ${counts.artists}. ${state.readiness.ready ? "הסקר מוכן" : state.readiness.warnings.join(". ")}`)]);
+    await speakBack(call, lines(
+      `הסקר הפעיל ${state.activeSurvey.name}`,
+      `ההצבעה ${state.settings.votingOpen ? "פתוחה" : "סגורה"}`,
+      `התקבלו ${Number(state.votes.total || 0)} הצבעות`,
+      `${Number(state.votes.phone || 0)} בטלפון`,
+      `${Number(state.votes.site || 0)} באתר`,
+      `אלבומים פעילים ${counts.albums}`,
+      `שירים פעילים ${counts.songs}`,
+      `זמרים פעילים ${counts.artists}`,
+      ...(state.readiness.ready ? ["הסקר מוכן"] : state.readiness.warnings),
+    ));
     return "חזרתם לתפריט המצב";
   },
 
@@ -776,18 +805,18 @@ const ADMIN_ACTIONS = {
     const state = await phoneAdminOverview(callerPhone);
     const archives = state.archives || [];
     const messages = [text(`יש ${archives.length} גיבויים בארכיון`)];
-    archives.slice(0, 20).forEach((item, index) => messages.push(text(`גיבוי מספר ${index + 1}. ${item.name}. ${item.votes} הצבעות`)));
+    archives.slice(0, 20).forEach((item, index) => messages.push(...lines(`גיבוי מספר ${index + 1}`, item.name, `${item.votes} הצבעות`)));
     await speakBack(call, messages);
     return "חזרתם לתפריט הגיבויים";
   },
 
   "help-map": async (call) => {
-    const messages = [text("מפת קודי הניהול. אפשר להקיש כל קוד מכל תפריט")];
+    const messages = lines("מפת קודי הניהול", "אפשר להקיש כל קוד מכל תפריט");
     ADMIN_SECTIONS.forEach((section) => {
-      messages.push(text(section.label), text("הקישו"), number(section.code));
-      section.items.forEach((item) => messages.push(text(item.label), text("הקישו"), number(item.code)));
+      messages.push(...keypad(section.spoken || section.label, section.code));
+      section.items.forEach((item) => messages.push(...keypad(item.spoken || item.label, item.code)));
     });
-    messages.push(text("לתפריט הראשי הקישו 00. לסיום הקישו 99"));
+    messages.push(...keypad("לתפריט הראשי", "00"), ...keypad("לסיום השיחה", "99"));
     await speakBack(call, messages);
     return "חזרתם לתפריט הראשי";
   },
@@ -805,22 +834,26 @@ function stageList(state) {
 
 async function pickStage(call, state) {
   return adminChoice(call, "בחרו שלב", [
-    ...stageList(state).map((stage, index) => ({ ...stage, digit: index + 1, label: `${stage.label}, ${stage.enabled ? "פעיל" : "כבוי"}, מינימום ${stage.min}, מקסימום ${stage.max}` })),
+    ...stageList(state).map((stage, index) => ({ ...stage, digit: index + 1, label: `${stage.label} ${stage.enabled ? "פעיל" : "כבוי"} מינימום ${stage.min} מקסימום ${stage.max}` })),
     { digit: 0, key: "", label: "לחזרה" },
   ]);
 }
 
-async function readAdminCode(call, lead, section) {
-  const messages = [text(lead)];
+// ההקראה של התפריט: שם הנושא לא נאמר פעמיים ברצף (הכניסה לנושא כבר אמרה
+// אותו), ההסבר על קוד ישיר נאמר רק בפעם הראשונה בשיחה ולא אחרי כל פעולה,
+// וכל קוד נאמר ספרה ספרה בסוף המשפט שמסביר אותו.
+async function readAdminCode(call, lead, section, { explain = false } = {}) {
+  const messages = lines(lead);
   if (section) {
-    messages.push(text(section.label));
-    section.items.forEach((item) => messages.push(text(item.label), text("הקישו"), number(item.code)));
-    messages.push(text("לתפריט הראשי הקישו 00"));
+    if (String(lead).trim() !== section.label) messages.push(text(section.label));
+    section.items.forEach((item) => messages.push(...keypad(item.spoken || item.label, item.code)));
+    messages.push(...keypad("לתפריט הראשי", "00"));
   } else {
-    messages.push(text("תפריט ניהול ראשי. אפשר להקיש קוד פעולה ישיר מכל מקום"));
-    ADMIN_SECTIONS.forEach((sectionItem) => messages.push(text(sectionItem.label), text("הקישו"), number(sectionItem.code)));
+    messages.push(text("תפריט ניהול ראשי"));
+    if (explain) messages.push(text("אפשר להקיש קוד פעולה ישיר מכל מקום בקו"));
+    ADMIN_SECTIONS.forEach((sectionItem) => messages.push(...keypad(sectionItem.spoken || sectionItem.label, sectionItem.code)));
   }
-  messages.push(text("לסיום השיחה הקישו 99"));
+  messages.push(...keypad("לסיום השיחה", "99"));
   return String(await call.read(messages, "tap", adminReadOptions()) || "");
 }
 
@@ -849,7 +882,7 @@ router.get("/recordings", async (call) => {
     return call.hangup();
   }
   if (!access.result?.allowed) {
-    call.id_list_message([text("מספר הטלפון שלכם אינו מורשה לניהול. יש לאשר את המספר בלשונית ההרשאות באתר או ממספר מורשה אחר בקו")], { prependToNextAction: true });
+    call.id_list_message(lines("מספר הטלפון שלכם אינו מורשה לניהול", "יש לאשר את המספר בלשונית ההרשאות באתר או ממספר מורשה אחר בקו"), { prependToNextAction: true });
     return call.hangup();
   }
   clearAdminOverview(callerPhone);
@@ -858,8 +891,10 @@ router.get("/recordings", async (call) => {
     ? "ברוכים הבאים לקו הניהול והקלטת הקריינויות"
     : "ברוכים הבאים לקו הניהול. הקלטת קריינויות בקו אינה מוגדרת, שאר הפעולות פעילות";
   let section = null;
+  let firstMenu = true;
   while (true) {
-    const chosen = resolveAdminCode(await readAdminCode(call, lead, section));
+    const chosen = resolveAdminCode(await readAdminCode(call, lead, section, { explain: firstMenu }));
+    firstMenu = false;
     if (chosen.type === "hangup") {
       call.id_list_message([text("להתראות")], { prependToNextAction: true });
       return call.hangup();
@@ -1028,7 +1063,7 @@ router.get("/", async (call) => {
   }
   if (submission.response.status === 400) {
     await clearProgress(voterPhone);
-    call.id_list_message([text("רשימת הסקר השתנתה בזמן ההצבעה. הבחירות הישנות נוקו. נא לחייג שוב ולבחור מחדש")], { prependToNextAction: true });
+    call.id_list_message(lines("רשימת הסקר השתנתה בזמן ההצבעה", "הבחירות הישנות נוקו", "נא לחייג שוב ולבחור מחדש"), { prependToNextAction: true });
     return call.hangup();
   }
   if (!submission.response.ok) return call.id_list_message(prompt(prompts, "system:error", "שמירת ההצבעה נכשלה נא לנסות שוב מאוחר יותר"));
