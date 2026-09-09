@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
+  applyIvrRuntimeSchema,
   applyRuntimeSchema,
   columnStatement,
   RUNTIME_SCHEMA_COLUMNS,
   RUNTIME_SCHEMA_INDEXES,
+  RUNTIME_SCHEMA_IVR_TABLES,
   RUNTIME_SCHEMA_SEEDS,
   RUNTIME_SCHEMA_TABLES,
 } from "../worker/schema-statements.js";
@@ -121,4 +123,26 @@ test("the statements run against SQLite from an empty database and stay idempote
   assert.equal(survey[0].id, "main");
   assert.equal(survey[0].active, 1);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM poll_settings").get().total, 1);
+});
+
+test("the phone line builds only its own tables, so a call never waits for the whole schema", async () => {
+  const db = fakeDb();
+  const failures = await applyIvrRuntimeSchema(db);
+  assert.deepEqual(failures, []);
+  assert.deepEqual(created(db.executed), ["ivr_recorders", "ivr_prompts", "ivr_store_meta", "ivr_admin_audit"]);
+  assert.equal(db.executed.length, RUNTIME_SCHEMA_IVR_TABLES.length);
+  assert.ok(db.executed.length < RUNTIME_SCHEMA_TABLES.length);
+});
+
+test("the phone line routes do not run the full schema bootstrap on every request", () => {
+  const worker = readFileSync(new URL("../worker/index.ts", import.meta.url), "utf8");
+  const ivrRoutes = worker.slice(worker.indexOf('/api/ivr/recorders/check'), worker.indexOf('/api/ballots'));
+  assert.doesNotMatch(ivrRoutes, /ensureRuntimeSchema/);
+});
+
+test("a missing phone table is rebuilt and the read is retried, instead of failing the call", () => {
+  const prompts = readFileSync(new URL("../worker/ivr-prompts.ts", import.meta.url), "utf8");
+  assert.match(prompts, /no such table/);
+  assert.match(prompts, /await ensureIvrSchema\(env\);\n\s*return run\(\);/);
+  assert.match(prompts, /export async function readIvrRecorders[\s\S]*?withIvrTables/);
 });

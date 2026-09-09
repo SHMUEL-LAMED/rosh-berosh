@@ -66,3 +66,20 @@ test("admin navigation groups permissions and omits the timeline chart", () => {
   const ivrPanel = page.slice(page.indexOf("function IvrPanel"), page.indexOf("function PromptRow"));
   assert.doesNotMatch(ivrPanel, /<RecorderAccessPanel/);
 });
+
+test("the upload queue keeps going after the first file, instead of stopping on it", () => {
+  const queue = source("app/admin/upload-queue.tsx");
+  const finish = queue.slice(queue.indexOf("const finish = async"), queue.indexOf("xhr.onload"));
+  const releaseAt = finish.indexOf("processing.current = false");
+  const refreshAt = finish.indexOf("await completedRef.current()");
+  assert.ok(releaseAt !== -1 && refreshAt !== -1);
+  assert.ok(releaseAt < refreshAt, "הנעילה משתחררת רק אחרי רענון הקטלוג, וכל שאר השירים נתקעים בתור");
+  assert.match(finish, /setPump\(\(tick\) => tick \+ 1\)/);
+  assert.match(queue, /\}, \[processQueue, pump\]\)/);
+});
+
+test("an album upload also stores the cover that came with the files", () => {
+  const page = source("app/admin/page.tsx");
+  assert.match(page, /if \(split\.cover\) \{/);
+  assert.match(page, /coverForm\.set\("kind", "cover"\)/);
+});

@@ -30,6 +30,10 @@ async function stored(mode: IDBTransactionMode, action: (store: IDBObjectStore) 
 
 export function useUploadQueue({ onCompleted, onMessage }: { onCompleted(): void | Promise<void>; onMessage(message: string): void }) {
   const [items, setItems] = useState<UploadItem[]>([]);
+  // A pump tick, bumped whenever an upload releases the lock. The queue effect
+  // depends on it, so the next file starts even when the item list itself did
+  // not change in the same render (an upload that failed, say).
+  const [pump, setPump] = useState(0);
   const processing = useRef(false);
   const completedRef = useRef(onCompleted);
   const messageRef = useRef(onMessage);
@@ -50,15 +54,19 @@ export function useUploadQueue({ onCompleted, onMessage }: { onCompleted(): void
       if (!event.lengthComputable) return;
       setItems((current) => current.map((item) => item.id === next.id ? { ...item, percent: Math.round(event.loaded / event.total * 100) } : item));
     };
+    // The lock is released before the catalog is refreshed, and the pump is
+    // bumped after it: awaiting the refresh while still holding the lock left
+    // the rest of the album stuck in the queue for good, because the render
+    // that removed the finished file ran the queue effect while it was held.
     const finish = async (status: UploadItem["status"], error?: string) => {
-      if (status === "queued") {
-        await stored("readwrite", (store) => store.delete(next.id));
-        setItems((current) => current.filter((item) => item.id !== next.id));
-        await completedRef.current();
-      } else {
-        setItems((current) => current.map((item) => item.id === next.id ? { ...item, status, error } : item));
-      }
+      const done = status === "queued";
+      if (done) await stored("readwrite", (store) => store.delete(next.id));
       processing.current = false;
+      setItems((current) => done
+        ? current.filter((item) => item.id !== next.id)
+        : current.map((item) => item.id === next.id ? { ...item, status, error } : item));
+      setPump((tick) => tick + 1);
+      if (done) await completedRef.current();
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) void finish("queued");
@@ -76,9 +84,9 @@ export function useUploadQueue({ onCompleted, onMessage }: { onCompleted(): void
   useEffect(() => {
     void stored("readonly", (store) => store.getAll()).then((records) => setItems((records as StoredUpload[]).map((item) => ({ ...item, percent: 0, status: navigator.onLine ? "queued" : "waiting" })))).catch(() => messageRef.current("לא ניתן לשחזר את תור ההעלאות בדפדפן הזה."));
   }, []);
-  useEffect(() => { const timer = window.setTimeout(() => void processQueue(), 0); return () => window.clearTimeout(timer); }, [processQueue]);
+  useEffect(() => { const timer = window.setTimeout(() => void processQueue(), 0); return () => window.clearTimeout(timer); }, [processQueue, pump]);
   useEffect(() => {
-    const online = () => setItems((current) => current.map((item) => item.status === "waiting" ? { ...item, status: "queued", error: undefined } : item));
+    const online = () => { setItems((current) => current.map((item) => item.status === "waiting" ? { ...item, status: "queued", error: undefined } : item)); setPump((tick) => tick + 1); };
     window.addEventListener("online", online);
     return () => window.removeEventListener("online", online);
   }, []);
@@ -90,8 +98,8 @@ export function useUploadQueue({ onCompleted, onMessage }: { onCompleted(): void
     messageRef.current(`${records.length} קבצים נוספו לתור ההעלאות.`);
   }, []);
 
-  const retry = (id: string) => setItems((current) => current.map((item) => item.id === id ? { ...item, status: navigator.onLine ? "queued" : "waiting", error: undefined } : item));
-  const remove = async (id: string) => { await stored("readwrite", (store) => store.delete(id)); setItems((current) => current.filter((item) => item.id !== id)); };
+  const retry = (id: string) => { setItems((current) => current.map((item) => item.id === id ? { ...item, status: navigator.onLine ? "queued" : "waiting", error: undefined } : item)); setPump((tick) => tick + 1); };
+  const remove = async (id: string) => { await stored("readwrite", (store) => store.delete(id)); setItems((current) => current.filter((item) => item.id !== id)); setPump((tick) => tick + 1); };
 
   const panel = items.length ? <section className="upload-queue"><header><h3>תור העלאות</h3><span>{items.length} קבצים</span></header>{items.map((item) => <article key={item.id}><div><b>{item.title}</b><small>{item.status === "uploading" ? `${item.percent}%` : item.status === "waiting" ? "ממתין לחיבור" : item.status === "error" ? item.error : "ממתין בתור"}</small></div><progress max="100" value={item.percent} />{item.status === "error" && <button onClick={() => retry(item.id)}>ניסיון חוזר</button>}<button className="queue-remove" onClick={() => void remove(item.id)}>הסרה</button></article>)}</section> : null;
   return { enqueue, panel, hasPending: items.length > 0 };

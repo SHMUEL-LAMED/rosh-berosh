@@ -15,6 +15,12 @@ const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().rep
 const PORT = process.env.PORT || 3000;
 const POST_VOTE_TRANSFER = String(process.env.POST_VOTE_TRANSFER || "").replace(/\D/g, "");
 const REQUEST_TIMEOUT_MS = 8000;
+// קו הניהול נושא בקשות כבדות בהרבה מקו ההצבעה: מסך המצב טוען את כל הקטלוג,
+// ופעולות כמו גיבוי, שחזור, חילוץ עטיפות וקריינות אוטומטית לוקחות עשרות שניות.
+// עם זמן ההמתנה הרגיל כל אלה נכשלו, והמנהל שמע "אירעה שגיאה" בכל פעולה.
+const ADMIN_TIMEOUT_MS = 20000;
+const ADMIN_ACTION_TIMEOUT_MS = 90000;
+const ADMIN_OVERVIEW_TTL_MS = 15000;
 if (!SITE_API_BASE_URL) { console.error("חסר SITE_API_BASE_URL"); process.exit(1); }
 if (!IVR_SECRET) { console.error("חסר IVR_SECRET"); process.exit(1); }
 
@@ -184,7 +190,12 @@ async function downloadRecordedAudio(fileName) {
   }
 }
 
+function recordingConfigured() {
+  return Boolean(RECORDINGS_YEMOT_TOKEN) && /^\/(?:\d+\/)*\d+$/.test(RECORDINGS_FOLDER);
+}
+
 async function recordPromptByPhone(call, callerPhone, key, label) {
+  if (!recordingConfigured()) throw new Error("הקלטת קריינויות בקו עדיין אינה מוגדרת, אפשר להקליט מהאתר");
   const fileName = promptFileName(key);
   await call.read(
     [text(`הקליטו כעת ${label} לסיום הקישו סולמית ולאחר מכן אשרו את ההקלטה`)],
@@ -242,18 +253,32 @@ async function clearProgress(voterPhone) {
   } catch {}
 }
 
+// כל פעולה בקו טוענת מחדש את מצב הניהול המלא. שמירה קצרה בזיכרון חוסכת טעינה
+// כבדה בכל הקשה, והיא נמחקת מיד אחרי כל פעולה שמשנה נתונים.
+const adminOverviewCache = new Map();
+
+function clearAdminOverview(callerPhone) {
+  adminOverviewCache.delete(callerPhone);
+}
+
 async function phoneAdminOverview(callerPhone) {
-  const { response, result } = await api(`/api/ivr/admin/overview?phone=${encodeURIComponent(callerPhone)}`);
+  const cached = adminOverviewCache.get(callerPhone);
+  if (cached && Date.now() - cached.at < ADMIN_OVERVIEW_TTL_MS) return cached.state;
+  const { response, result } = await api(`/api/ivr/admin/overview?phone=${encodeURIComponent(callerPhone)}`, { timeoutMs: ADMIN_TIMEOUT_MS });
   if (!response.ok) throw new Error(result?.error || "לא ניתן לטעון את נתוני הניהול");
+  adminOverviewCache.set(callerPhone, { at: Date.now(), state: result });
   return result;
 }
 
 async function phoneAdminAction(callerPhone, action) {
+  clearAdminOverview(callerPhone);
   const { response, result } = await api("/api/ivr/admin/action", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ phone: callerPhone, ...action }),
+    timeoutMs: ADMIN_ACTION_TIMEOUT_MS,
   });
+  clearAdminOverview(callerPhone);
   if (!response.ok) throw new Error(result?.error || "פעולת הניהול נכשלה");
   return result;
 }
@@ -791,18 +816,38 @@ async function readAdminCode(call, lead, section) {
 }
 
 router.get("/recordings", async (call) => {
-  if (!RECORDINGS_YEMOT_TOKEN || !/^\/(?:\d+\/)*\d+$/.test(RECORDINGS_FOLDER)) {
-    return call.id_list_message([text("קו הניהול וההקלטות עדיין אינו מוגדר")]);
-  }
-
+  // חוסר הגדרה של תיקיית ההקלטות חסם קודם את קו הניהול כולו, אף שרוב הפעולות
+  // — פתיחת הצבעה, קטלוג, תוצאות וגיבויים — אינן נוגעות להקלטה בכלל. עכשיו רק
+  // פעולות ההקלטה עצמן מודיעות שהן אינן מוגדרות.
   const callerPhone = phone(call);
-  const access = await api(`/api/ivr/recorders/check?phone=${encodeURIComponent(callerPhone)}`);
-  if (!access.response.ok || !access.result?.allowed) {
-    call.id_list_message([text("מספר הטלפון שלכם אינו מורשה לניהול ולהקלטת קריינויות")], { prependToNextAction: true });
+  if (!callerPhone) {
+    call.id_list_message([text("לא ניתן לנהל ממספר חסוי נא להתקשר ממספר מזוהה")], { prependToNextAction: true });
     return call.hangup();
   }
+  // תקלת רשת בבדיקת ההרשאה הפילה קודם את השיחה כולה דרך מטפל השגיאות הכללי,
+  // ולכן הקו נשמע "לא עובד". מבדילים בין מספר שאינו מורשה לבין שרת שלא ענה.
+  let access;
+  try {
+    access = await api(`/api/ivr/recorders/check?phone=${encodeURIComponent(callerPhone)}`, { timeoutMs: ADMIN_TIMEOUT_MS });
+  } catch (error) {
+    console.error("phone admin access check failed", error);
+    call.id_list_message([text("לא ניתן להתחבר כרגע לשרת הניהול נא לנסות שוב בעוד רגע")], { prependToNextAction: true });
+    return call.hangup();
+  }
+  if (!access.response.ok) {
+    console.error("phone admin access check returned", access.response.status, access.result);
+    call.id_list_message([text("שרת הניהול החזיר שגיאה נא לנסות שוב בעוד רגע")], { prependToNextAction: true });
+    return call.hangup();
+  }
+  if (!access.result?.allowed) {
+    call.id_list_message([text("מספר הטלפון שלכם אינו מורשה לניהול. יש לאשר את המספר בלשונית ההרשאות באתר או ממספר מורשה אחר בקו")], { prependToNextAction: true });
+    return call.hangup();
+  }
+  clearAdminOverview(callerPhone);
 
-  let lead = "ברוכים הבאים לקו הניהול והקלטת הקריינויות";
+  let lead = recordingConfigured()
+    ? "ברוכים הבאים לקו הניהול והקלטת הקריינויות"
+    : "ברוכים הבאים לקו הניהול. הקלטת קריינויות בקו אינה מוגדרת, שאר הפעולות פעילות";
   let section = null;
   while (true) {
     const chosen = resolveAdminCode(await readAdminCode(call, lead, section));
