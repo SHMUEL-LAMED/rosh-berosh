@@ -103,15 +103,18 @@ test("the protected IVR catalog keeps voting names but excludes website media", 
     if (sql.includes("FROM songs")) return [{ id: "song-1", albumId: "album-1", title: "שם השיר" }];
     if (sql.includes("FROM artists")) return [{ id: "artist-1", name: "שם הזמר" }];
     if (sql.includes("FROM ivr_prompts")) return [{ key: "song:song-1", yemotPath: "ivr2:/rb123.wav" }];
+    // הסקר הפעיל נבחר בתוך אותה קבוצת שאילתות ולא בפנייה נפרדת שקודמת לה.
+    if (sql.includes("FROM surveys")) return [{ id: "survey-1" }];
     return [];
   };
+  const standalone = [];
   const db = {
     prepare(sql) {
       return {
         sql,
         bind() { return this; },
-        async first() { queries.push(sql); return sql.includes("FROM surveys") ? { id: "survey-1" } : null; },
-        async all() { return { results: rowsFor(sql) }; },
+        async first() { standalone.push(sql); queries.push(sql); return null; },
+        async all() { standalone.push(sql); return { results: rowsFor(sql) }; },
       };
     },
     async batch(statements) { return statements.map(({ sql }) => ({ results: rowsFor(sql) })); },
@@ -125,6 +128,10 @@ test("the protected IVR catalog keeps voting names but excludes website media", 
     ivrPrompts: [{ key: "song:song-1", yemotPath: "ivr2:/rb123.wav" }],
   });
   assert.doesNotMatch(queries.join("\n"), /cover_url|image_url|audio_url|preview_start|preview_end/i);
+  // מחוץ לקבוצה רצה רק שאילתת הקריינויות, ובמקביל לה. כל שאילתה נוספת כאן
+  // היא הליכה נוספת אל D1 שכל שיחה נכנסת משלמת עליה לפני שנשמע תפריט.
+  assert.equal(standalone.length, 1, standalone.join("\n"));
+  assert.match(standalone[0], /FROM ivr_prompts/);
 });
 
 test("all long IVR menus use fixed-width codes without pages", () => {
