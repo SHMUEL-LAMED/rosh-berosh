@@ -107,6 +107,37 @@ test("the public catalog is cached and successful admin changes invalidate it", 
   assert.match(worker, /invalidateCatalogCache\(request, ctx\)/);
 });
 
+test("the phone catalog is cached too, and never leaks past the secret check", () => {
+  const worker = source("worker/index.ts");
+  // הקו הוא הצרכן הכבד: כל שיחה נכנסת מושכת את הקטלוג, ולכן הוא חייב מטמון
+  // בדיוק כמו האתר - אבל בלי להיות ניתן לבקשה מבחוץ ובלי להישמר אצל מתווך.
+  assert.match(worker, /const IVR_CATALOG_CACHE_KEY = "\/__cache\/ivr-catalog"/);
+  assert.match(worker, /cachedIvrCatalog\(request, env, ctx\)/);
+  assert.match(worker, /cachedJson\(request, ctx, IVR_CATALOG_CACHE_KEY, \(\) => ivrCatalog\(env\), true\)/);
+  assert.match(worker, /headers\.set\("cache-control", "no-store"\)/);
+  const route = worker.slice(worker.indexOf('/api/ivr/catalog'), worker.indexOf('/api/ivr/recorders/check'));
+  assert.ok(route.indexOf("verifyIvrSecret") < route.indexOf("cachedIvrCatalog"), "הסוד חייב להיבדק לפני שנוגעים במטמון");
+});
+
+test("every change that touches the phone payload clears both catalog copies", () => {
+  const worker = source("worker/index.ts");
+  assert.match(worker, /CATALOG_CACHE_KEYS = \[SITE_CATALOG_CACHE_KEY, IVR_CATALOG_CACHE_KEY\]/);
+  assert.match(worker, /for \(const pathname of CATALOG_CACHE_KEYS\)/);
+  const promptUpload = worker.slice(worker.indexOf('/api/ivr/prompt'), worker.indexOf('/api/ballots/check'));
+  assert.match(promptUpload, /invalidateCatalogCache\(request, ctx\)/, "העלאת קריינות משנה את קטלוג הקו וחייבת למחוק אותו");
+});
+
+test("the phone catalog reads the active survey inside its batch, not before it", () => {
+  const catalogModule = source("worker/ivr-catalog.js");
+  // הפנייה הראשונה ל-surveys רצה לבדה, ורק כשחזרה נשלחה שאר הקבוצה: שתי
+  // הליכות אל D1 בכל שיחה נכנסת במקום אחת.
+  assert.doesNotMatch(catalogModule, /await db\.prepare\("SELECT id FROM surveys/);
+  assert.match(catalogModule, /const ACTIVE_SURVEY_SQL = "COALESCE\(\(SELECT id FROM surveys/);
+  assert.match(catalogModule, /SELECT \$\{ACTIVE_SURVEY_SQL\} AS id/);
+  const [, batch] = catalogModule.split("db.batch([");
+  assert.doesNotMatch(batch.slice(0, batch.indexOf("]),")), /\.bind\(surveyId\)/, "אין עוד מזהה סקר שנקרא מראש להזרקה");
+});
+
 test("an album upload also stores the cover that came with the files", () => {
   const page = source("app/admin/page.tsx");
   assert.match(page, /if \(split\.cover\) \{/);
