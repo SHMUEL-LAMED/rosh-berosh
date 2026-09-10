@@ -98,6 +98,15 @@ test("the public catalog keeps heavy phone and song media out of the first respo
   assert.match(page, /selectedAlbumId/);
 });
 
+test("the public catalog is cached and successful admin changes invalidate it", () => {
+  const worker = source("worker/index.ts");
+  assert.match(worker, /CATALOG_CACHE_SECONDS = 60/);
+  assert.match(worker, /cache\.match\(key\)/);
+  assert.match(worker, /cache\.put\(key, cacheable\.clone\(\)\)/);
+  assert.match(worker, /request\.method !== "GET" && response\.ok/);
+  assert.match(worker, /invalidateCatalogCache\(request, ctx\)/);
+});
+
 test("an album upload also stores the cover that came with the files", () => {
   const page = source("app/admin/page.tsx");
   assert.match(page, /if \(split\.cover\) \{/);

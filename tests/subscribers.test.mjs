@@ -59,7 +59,7 @@ test("רשימה בלי אף כתובת תקינה חוזרת ריקה", () => {
 test("ניתוב /api/admin/subscribers קודם לנתב הניהול הכללי", () => {
   const worker = readFileSync(new URL("../worker/index.ts", import.meta.url), "utf8");
   const subscribers = worker.indexOf('startsWith("/api/admin/subscribers")');
-  const catchAll = worker.indexOf('startsWith("/api/admin/")) return adminApi');
+  const catchAll = worker.indexOf('startsWith("/api/admin/")) {');
   assert.ok(subscribers !== -1, "חסר ניתוב ל-/api/admin/subscribers");
   assert.ok(catchAll !== -1, "חסר הנתב הכללי של הניהול");
   assert.ok(subscribers < catchAll, "מודול רשימת התפוצה חייב להיבדק לפני הנתב הכללי");

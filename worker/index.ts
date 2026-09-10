@@ -24,6 +24,7 @@ interface Env {
   IMAGES: { input(stream: ReadableStream): { transform(options: Record<string, unknown>): { output(options: { format: string; quality: number }): Promise<{ response(): Response }> } } };
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
+type EdgeCacheStorage = CacheStorage & { default?: Cache };
 type Submission = { voterKey?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string };
 type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; albumsMax: number; songsEnabled: number; songsMin: number; songsMax: number; artistsEnabled: number; artistsMin: number; artistsMax: number };
 const DEFAULT_RULES: Rules = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
@@ -31,6 +32,20 @@ const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORD
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
+const CATALOG_CACHE_SECONDS = 60;
+
+function catalogCache(request: Request): { cache?: Cache; key: Request } {
+  const url = new URL(request.url);
+  url.pathname = "/api/catalog";
+  url.search = "";
+  return { cache: (globalThis.caches as EdgeCacheStorage | undefined)?.default, key: new Request(url.toString(), { method: "GET" }) };
+}
+
+function withCacheStatus(response: Response, status: "HIT" | "MISS"): Response {
+  const headers = new Headers(response.headers);
+  headers.set("x-rosh-berosh-cache", status);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
 
 function verifyIvrSecret(request: Request, env: Env): boolean {
   if (!env.IVR_SECRET) return false;
@@ -73,6 +88,26 @@ async function catalog(env: Env): Promise<Response> {
     console.error("catalog error", error);
     return json({ error: "לא ניתן לטעון את רשימת המצעד." }, 500);
   }
+}
+
+async function cachedCatalog(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const { cache, key } = catalogCache(request);
+  if (cache) {
+    const hit = await cache.match(key);
+    if (hit) return withCacheStatus(hit, "HIT");
+  }
+  const response = await catalog(env);
+  if (!cache || !response.ok) return response;
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", `public, max-age=${CATALOG_CACHE_SECONDS}`);
+  const cacheable = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  ctx.waitUntil(cache.put(key, cacheable.clone()));
+  return withCacheStatus(cacheable, "MISS");
+}
+
+function invalidateCatalogCache(request: Request, ctx: ExecutionContext): void {
+  const { cache, key } = catalogCache(request);
+  if (cache) ctx.waitUntil(cache.delete(key));
 }
 
 async function catalogMedia(request: Request, env: Env): Promise<Response> {
@@ -236,9 +271,13 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const handled = await subscribersAdminApi(request, env);
     if (handled) return handled;
   }
-  if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env);
+  if (url.pathname.startsWith("/api/admin/")) {
+    const response = await adminApi(request, env);
+    if (request.method !== "GET" && response.ok) invalidateCatalogCache(request, ctx);
+    return response;
+  }
   if (url.pathname === "/api/catalog/media" && request.method === "GET") return catalogMedia(request, env);
-  if (url.pathname === "/api/catalog" && request.method === "GET") return catalog(env);
+  if (url.pathname === "/api/catalog" && request.method === "GET") return cachedCatalog(request, env, ctx);
   if (url.pathname === "/api/ivr/catalog" && request.method === "GET") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
     return ivrCatalog(env);
@@ -254,7 +293,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
   if (url.pathname.startsWith("/api/ivr/admin/")) {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-    return ivrAdminApi(request, env);
+    const response = await ivrAdminApi(request, env);
+    if (request.method !== "GET" && response.ok) invalidateCatalogCache(request, ctx);
+    return response;
   }
   if (url.pathname === "/api/ivr/prompt" && request.method === "POST") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);

@@ -533,6 +533,17 @@ test("album, song and artist voting always announce the current choice number", 
   assert.doesNotMatch(chooseMany, /hasRecordedMenu \? \[\] :/, "a continuous menu recording must not hide the progress announcement");
 });
 
+test("phone voting saves every choice and resumes a partially completed section", () => {
+  const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
+  const chooseMany = server.slice(server.indexOf("async function chooseMany"), server.indexOf("function promptFileName"));
+  assert.match(chooseMany, /initialSelected = \[\]/);
+  assert.match(chooseMany, /for \(const item of initialSelected\)/);
+  assert.match(chooseMany, /await onSelection\(\[\.\.\.selected\]\)/);
+  assert.match(server, /albumMenuKey, selectedAlbums, async \(next\)/);
+  assert.match(server, /artistMenuKey, selectedArtists, async \(next\)/);
+  assert.match(server, /initialSongs, async \(next\)/);
+});
+
 test("Render diagnostics expose the exact deployed commit", () => {
   const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
   assert.match(server, /process\.env\.RENDER_GIT_COMMIT/);
