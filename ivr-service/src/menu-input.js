@@ -64,4 +64,16 @@ function continuousMenuInput(itemCount, allowFinish = false) {
   };
 }
 
-module.exports = { MENU_SEC_WAIT, SEC_WAIT, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput };
+// ימות המשיח מקצה את הסולמית למקש "סיום הקשה", ולכן אי אפשר לקלוט אותה
+// כספרה: הקשה עליה לבדה מגיעה לקו כהקשה ריקה. תפריט שמבקש הקשה ריקה מפורשת
+// עם ערך מזוהה יכול לזהות אותה, והקו מעביר את המתקשר ליעד. אין דרך להבחין
+// בין סולמית לבין מי שלא הקיש כלום עד תום ההמתנה: שניהם מגיעים כאותו ערך.
+const TRANSFER_KEY = "hashkey";
+
+// בלי יעד העברה אין לאן להעביר, ולכן התפריט נשאר בהתנהגות המקורית: הקשה
+// ריקה מבקשת בחירה מחדש במקום להוציא את המתקשר מההצבעה.
+function transferOnEmptyEntry(options, transferTarget) {
+  return transferTarget ? { ...options, allow_empty: true, empty_val: TRANSFER_KEY } : options;
+}
+
+module.exports = { MENU_SEC_WAIT, SEC_WAIT, TRANSFER_KEY, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput, transferOnEmptyEntry };

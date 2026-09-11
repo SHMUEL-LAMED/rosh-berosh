@@ -17,5 +17,6 @@
   { "key": "system:voting_closed", "label": "ההצבעה עדיין אינה פתוחה" },
   { "key": "system:not_ready", "label": "רשימות המצעד עדיין אינן מוכנות" },
   { "key": "system:error", "label": "אירעה שגיאה" },
-  { "key": "system:success", "label": "ההצבעה נקלטה בהצלחה" }
+  { "key": "system:success", "label": "ההצבעה נקלטה בהצלחה" },
+  { "key": "system:transferring", "label": "מעבירים אתכם לקו הראשי" }
 ]

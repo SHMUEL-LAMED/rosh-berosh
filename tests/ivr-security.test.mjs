@@ -10,7 +10,7 @@ import { hasStageChoices } from "../app/voting-stage.js";
 
 const require = createRequire(import.meta.url);
 const { DEFAULT_POST_VOTE_TRANSFER, normalizePhone: normalizeIvrPhone, phone, resolvePostVoteTransfer } = require("../ivr-service/src/phone.js");
-const { continuousMenuInput, menuCode, menuReadOptions } = require("../ivr-service/src/menu-input.js");
+const { TRANSFER_KEY, continuousMenuInput, menuCode, menuReadOptions, transferOnEmptyEntry } = require("../ivr-service/src/menu-input.js");
 const { sanitizeProgress, progressChanged } = require("../ivr-service/src/progress.js");
 
 function ivrRecorderEnv(initial = []) {
@@ -565,4 +565,34 @@ test("the voting line transfers the caller back to the main line when the call i
   const alreadyVoted = [...server.matchAll(/system:already_voted[\s\S]{0,220}?(finishCall\(call\)|call\.hangup\(\))/g)];
   assert.equal(alreadyVoted.length, 2, "שני המסלולים של הצבעה כפולה חייבים להיבדק");
   for (const match of alreadyVoted) assert.equal(match[1], "finishCall(call)");
+});
+
+test("pressing hash anywhere in the voting line transfers the caller to the main line", () => {
+  // ימות המשיח מסיימת הקשה בסולמית ואינה מעבירה אותה כספרה, ולכן הקו מזהה
+  // אותה כהקשה ריקה עם ערך מוסכם. בלי יעד העברה ההתנהגות נשארת כשהייתה.
+  assert.deepEqual(transferOnEmptyEntry({ min_digits: 2, max_digits: 2 }, "0796077075"), {
+    min_digits: 2,
+    max_digits: 2,
+    allow_empty: true,
+    empty_val: TRANSFER_KEY,
+  });
+  assert.deepEqual(transferOnEmptyEntry({ min_digits: 2 }, ""), { min_digits: 2 });
+  assert.doesNotMatch(TRANSFER_KEY, /[\d,]/, "ערך ההקשה הריקה לא יכול להיראות כמו קוד הקשה או לשבור את שורת הפרמטרים");
+
+  const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
+  assert.match(server, /function transferOnHash\(options\) \{\n  return transferOnEmptyEntry\(options, POST_VOTE_TRANSFER\);/);
+  assert.match(server, /call\.routing_yemot\(POST_VOTE_TRANSFER\);\n\}/, "ההעברה עצמה יוצאת מהשיחה דרך routing_yemot");
+
+  // שני התפריטים של קו ההצבעה: רשימת הבחירה ותפריט השלבים הראשי.
+  const votingReads = [...server.matchAll(/await call\.read\([^;]*?"tap",\s*transferOnHash\(/g)];
+  assert.equal(votingReads.length, 2, "כל תפריט בקו ההצבעה חייב לזהות סולמית");
+  assert.equal([...server.matchAll(/answer === TRANSFER_KEY\) (return )?transferToLine\(call, prompts\)/g)].length, 2);
+
+  // בקו הניהול הסולמית מסיימת הקשת מספר, ולכן אסור שהיא תעביר משם.
+  const adminLine = server.slice(server.indexOf("async function adminChoice"), server.indexOf('router.get("/", async (call)'));
+  assert.doesNotMatch(adminLine, /transferOnHash/, "קו הניהול חייב להישאר בלי ההעברה בסולמית");
+
+  const prompts = JSON.parse(readFileSync(new URL("../ivr-service/src/ivr-system-prompts.json", import.meta.url), "utf8"));
+  assert.ok(prompts.some((item) => item.key === "system:transferring"), "הודעת ההעברה חייבת להיות ניתנת להקלטה");
+  assert.ok(server.includes("system:transferring"));
 });
