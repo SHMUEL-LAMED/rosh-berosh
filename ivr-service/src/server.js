@@ -2,7 +2,7 @@ const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { normalizePhone, phone, resolvePostVoteTransfer } = require("./phone");
-const { SEC_WAIT, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput } = require("./menu-input");
+const { SEC_WAIT, TRANSFER_KEY, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput, transferOnEmptyEntry } = require("./menu-input");
 const { sanitizeProgress, progressChanged } = require("./progress");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 const { ADMIN_SECTIONS, adminReadOptions, resolveAdminCode, sectionShortcut } = require("./admin-menu");
@@ -77,6 +77,19 @@ function keypad(label, code) {
 }
 function finishCall(call) { return POST_VOTE_TRANSFER ? call.routing_yemot(POST_VOTE_TRANSFER) : call.hangup(); }
 
+// הקשה על סולמית בכל תפריט בקו ההצבעה מעבירה לקו הראשי. תפריטי הניהול
+// בשלוחת ההקלטות אינם עוברים כאן בכוונה: שם הסולמית מסיימת הקשת מספר.
+function transferOnHash(options) {
+  return transferOnEmptyEntry(options, POST_VOTE_TRANSFER);
+}
+
+// routing_yemot זורק ExitError ומסיים את השיחה, ולכן אפשר לקרוא לזה גם
+// מעומק תפריט הבחירה בלי להחזיר ערך מיוחד דרך כל שרשרת הקריאות.
+function transferToLine(call, prompts) {
+  call.id_list_message(prompt(prompts, "system:transferring", "מעבירים אתכם לקו הראשי"), { prependToNextAction: true });
+  return call.routing_yemot(POST_VOTE_TRANSFER);
+}
+
 function promptMap(catalog) { return new Map((catalog.ivrPrompts || []).filter((item) => item?.key).map((item) => [item.key, item])); }
 function prompt(prompts, key, fallback) {
   const item = prompts.get(key);
@@ -126,7 +139,8 @@ async function chooseOne(call, messages, items, label, kind, prompts, menuPrompt
       }
     });
   }
-  const answer = await call.read(full, "tap", input.read);
+  const answer = await call.read(full, "tap", transferOnHash(input.read));
+  if (answer === TRANSFER_KEY) return transferToLine(call, prompts);
   if (allowFinish && answer === input.finishCode) return null;
   // null הוא "סיימתי"; הקשה שלא מתאימה לשום פריט חוזרת כ-undefined, כדי
   // שהיא לא תיראה כמו סיום ותקצר את מספר הבחירות בלי שהמתקשר ביקש.
@@ -1074,7 +1088,8 @@ router.get("/", async (call) => {
       continue;
     }
     const fallback = "לבחירת אלבומים הקישו 1 לבחירת שירים מתוך האלבומים שבחרתם הקישו 2 לבחירת זמרים הקישו 3";
-    const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", { min_digits: 1, max_digits: 1, digits_allowed: allowed, sec_wait: SEC_WAIT, typing_playback_mode: "No" });
+    const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", transferOnHash({ min_digits: 1, max_digits: 1, digits_allowed: allowed, sec_wait: SEC_WAIT, typing_playback_mode: "No" }));
+    if (answer === TRANSFER_KEY) return transferToLine(call, prompts);
     menuLead = [];
     if (answer === "1" && allowed.includes(1)) {
       selectedAlbums = await chooseMany(call, prompt(prompts, "system:albums_intro", `בחרו בין ${albumMinQuota} ל ${albumMaxQuota} אלבומים`), catalog.albums || [], albumMinimum, albumMaximum, "לאלבום", "album", prompts, albumMenuKey, selectedAlbums, async (next) => {
