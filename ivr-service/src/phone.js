@@ -10,4 +10,16 @@ function phone(call) {
   return normalizePhone(call?.phone || call?.ApiPhone || call?.values?.ApiPhone || call?.values?.Phone);
 }
 
-module.exports = { normalizePhone, phone };
+// ברירת המחדל של היעד בסיום השיחה בקו ההצבעה: המתקשר מועבר חזרה לקו הראשי,
+// גם אחרי הצבעה שנקלטה עכשיו וגם אחרי הודעת "כבר הצבעתם" למי שהצביע כבר.
+const DEFAULT_POST_VOTE_TRANSFER = "0796077075";
+
+// POST_VOTE_TRANSFER דורס את המספר, והערך "off" מבטל את ההעברה לגמרי ומחזיר
+// את הקו לסיום שיחה רגיל. "0" נחשב ביטול ולא יעד, כי אין שלוחה כזאת.
+function resolvePostVoteTransfer(value) {
+  const setting = String(value ?? "").trim();
+  if (/^(0|off|none|no)$/i.test(setting)) return "";
+  return (setting || DEFAULT_POST_VOTE_TRANSFER).replace(/\D/g, "");
+}
+
+module.exports = { DEFAULT_POST_VOTE_TRANSFER, normalizePhone, phone, resolvePostVoteTransfer };

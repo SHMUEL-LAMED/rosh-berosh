@@ -1,7 +1,7 @@
 const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
-const { normalizePhone, phone } = require("./phone");
+const { normalizePhone, phone, resolvePostVoteTransfer } = require("./phone");
 const { SEC_WAIT, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput } = require("./menu-input");
 const { sanitizeProgress, progressChanged } = require("./progress");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
@@ -13,7 +13,9 @@ const RECORDINGS_YEMOT_TOKEN = String(process.env.RECORDINGS_YEMOT_TOKEN || "").
 const RECORDINGS_YEMOT_API_BASE = String(process.env.RECORDINGS_YEMOT_API_BASE || "https://www.call2all.co.il/ym/api").replace(/\/$/, "");
 const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().replace(/\/$/, "");
 const PORT = process.env.PORT || 3000;
-const POST_VOTE_TRANSFER = String(process.env.POST_VOTE_TRANSFER || "").replace(/\D/g, "");
+// כל מי שמסיים בקו ההצבעה מועבר חזרה לקו הראשי: גם מי שהצביע עכשיו וגם מי
+// שכבר הצביע בעבר ושומע שוב את הודעת "כבר הצבעתם".
+const POST_VOTE_TRANSFER = resolvePostVoteTransfer(process.env.POST_VOTE_TRANSFER);
 const DEPLOYED_COMMIT = String(process.env.RENDER_GIT_COMMIT || "").trim();
 // האתר רץ על Cloudflare Workers מול D1, ובקשה ראשונה אחרי חוסר פעילות
 // יכולה לקחת יותר משמונה שניות. פסק זמן קצר מדי ניתק את המתקשר מיד.
@@ -1145,6 +1147,7 @@ app.get("/diag", async (_request, response) => {
     commitShort: DEPLOYED_COMMIT ? DEPLOYED_COMMIT.slice(0, 7) : null,
     secWait: SEC_WAIT,
     requestTimeoutMs: REQUEST_TIMEOUT_MS,
+    postVoteTransfer: POST_VOTE_TRANSFER || null,
   };
   try {
     const { response: siteResponse, result } = await api("/api/ivr/catalog");

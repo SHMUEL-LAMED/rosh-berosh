@@ -9,7 +9,7 @@ import { readIvrCatalog } from "../worker/ivr-catalog.js";
 import { hasStageChoices } from "../app/voting-stage.js";
 
 const require = createRequire(import.meta.url);
-const { normalizePhone: normalizeIvrPhone, phone } = require("../ivr-service/src/phone.js");
+const { DEFAULT_POST_VOTE_TRANSFER, normalizePhone: normalizeIvrPhone, phone, resolvePostVoteTransfer } = require("../ivr-service/src/phone.js");
 const { continuousMenuInput, menuCode, menuReadOptions } = require("../ivr-service/src/menu-input.js");
 const { sanitizeProgress, progressChanged } = require("../ivr-service/src/progress.js");
 
@@ -549,4 +549,20 @@ test("Render diagnostics expose the exact deployed commit", () => {
   assert.match(server, /process\.env\.RENDER_GIT_COMMIT/);
   assert.match(server, /x-rosh-berosh-commit/);
   assert.match(server, /commitShort: DEPLOYED_COMMIT \? DEPLOYED_COMMIT\.slice\(0, 7\) : null/);
+});
+
+test("the voting line transfers the caller back to the main line when the call is done", () => {
+  assert.equal(DEFAULT_POST_VOTE_TRANSFER, "0796077075");
+  assert.equal(resolvePostVoteTransfer(undefined), "0796077075", "בלי הגדרה מועברים לקו הראשי");
+  assert.equal(resolvePostVoteTransfer(""), "0796077075");
+  assert.equal(resolvePostVoteTransfer(" 077-1234567 "), "0771234567", "הגדרה ידנית דורסת את ברירת המחדל");
+  for (const off of ["0", "off", "OFF", "none", "no"]) assert.equal(resolvePostVoteTransfer(off), "", `${off} מבטל את ההעברה`);
+
+  const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
+  assert.match(server, /const POST_VOTE_TRANSFER = resolvePostVoteTransfer\(process\.env\.POST_VOTE_TRANSFER\)/);
+  assert.match(server, /function finishCall\(call\) \{ return POST_VOTE_TRANSFER \? call\.routing_yemot\(POST_VOTE_TRANSFER\) : call\.hangup\(\); \}/);
+  // מי שכבר הצביע שומע את ההודעה ומועבר חזרה לקו, ולא מנותק באמצע.
+  const alreadyVoted = [...server.matchAll(/system:already_voted[\s\S]{0,220}?(finishCall\(call\)|call\.hangup\(\))/g)];
+  assert.equal(alreadyVoted.length, 2, "שני המסלולים של הצבעה כפולה חייבים להיבדק");
+  for (const match of alreadyVoted) assert.equal(match[1], "finishCall(call)");
 });
