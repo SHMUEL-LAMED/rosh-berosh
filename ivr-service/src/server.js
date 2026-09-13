@@ -90,6 +90,20 @@ function transferToLine(call, prompts) {
   return call.routing_yemot(POST_VOTE_TRANSFER);
 }
 
+// ימות המשיח מחזירה אותו ערך גם עבור סולמית וגם כאשר נגמר זמן ההמתנה בלי
+// הקשה. לכן לעולם לא מעבירים על הערך הריק לבדו: מבקשים אישור מפורש נוסף.
+// כך חוסר תגובה או קוד חלקי אינם מוציאים מצביע באמצע התהליך.
+async function confirmTransfer(call, prompts) {
+  const answer = await call.read(
+    prompt(prompts, "system:confirm_transfer", "להעברה לקו הראשי הקישו 1 לחזרה להצבעה הקישו 2"),
+    "tap",
+    { min_digits: 1, max_digits: 1, digits_allowed: ["1", "2"], sec_wait: SEC_WAIT, typing_playback_mode: "No" },
+  );
+  if (answer !== "1") return false;
+  transferToLine(call, prompts);
+  return true;
+}
+
 function promptMap(catalog) { return new Map((catalog.ivrPrompts || []).filter((item) => item?.key).map((item) => [item.key, item])); }
 function prompt(prompts, key, fallback) {
   const item = prompts.get(key);
@@ -140,7 +154,10 @@ async function chooseOne(call, messages, items, label, kind, prompts, menuPrompt
     });
   }
   const answer = await call.read(full, "tap", transferOnHash(input.read));
-  if (answer === TRANSFER_KEY) return transferToLine(call, prompts);
+  if (answer === TRANSFER_KEY) {
+    await confirmTransfer(call, prompts);
+    return undefined;
+  }
   if (allowFinish && answer === input.finishCode) return null;
   // null הוא "סיימתי"; הקשה שלא מתאימה לשום פריט חוזרת כ-undefined, כדי
   // שהיא לא תיראה כמו סיום ותקצר את מספר הבחירות בלי שהמתקשר ביקש.
@@ -1089,7 +1106,10 @@ router.get("/", async (call) => {
     }
     const fallback = "לבחירת אלבומים הקישו 1 לבחירת שירים מתוך האלבומים שבחרתם הקישו 2 לבחירת זמרים הקישו 3";
     const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", transferOnHash({ min_digits: 1, max_digits: 1, digits_allowed: allowed, sec_wait: SEC_WAIT, typing_playback_mode: "No" }));
-    if (answer === TRANSFER_KEY) return transferToLine(call, prompts);
+    if (answer === TRANSFER_KEY) {
+      await confirmTransfer(call, prompts);
+      continue;
+    }
     menuLead = [];
     if (answer === "1" && allowed.includes(1)) {
       selectedAlbums = await chooseMany(call, prompt(prompts, "system:albums_intro", `בחרו בין ${albumMinQuota} ל ${albumMaxQuota} אלבומים`), catalog.albums || [], albumMinimum, albumMaximum, "לאלבום", "album", prompts, albumMenuKey, selectedAlbums, async (next) => {

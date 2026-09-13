@@ -33,17 +33,27 @@ const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORD
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
 const CATALOG_CACHE_SECONDS = 60;
+// מפתחות המטמון אינם נתיבים אמיתיים של האתר. קטלוג הקו מוגש רק אחרי בדיקת
+// הסוד, ולכן העותק השמור יושב תחת כתובת שאי אפשר לבקש מבחוץ: גם אם מישהו
+// ינחש אותה, אין ראוטר שמגיש אותה, והמטמון נקרא רק מהקוד שכבר אימת את הסוד.
+const SITE_CATALOG_CACHE_KEY = "/__cache/catalog";
+const IVR_CATALOG_CACHE_KEY = "/__cache/ivr-catalog";
+const CATALOG_CACHE_KEYS = [SITE_CATALOG_CACHE_KEY, IVR_CATALOG_CACHE_KEY];
 
-function catalogCache(request: Request): { cache?: Cache; key: Request } {
+function catalogCache(request: Request, pathname: string = SITE_CATALOG_CACHE_KEY): { cache?: Cache; key: Request } {
   const url = new URL(request.url);
-  url.pathname = "/api/catalog";
+  url.pathname = pathname;
   url.search = "";
   return { cache: (globalThis.caches as EdgeCacheStorage | undefined)?.default, key: new Request(url.toString(), { method: "GET" }) };
 }
 
-function withCacheStatus(response: Response, status: "HIT" | "MISS"): Response {
+// המטמון של Cloudflare שומר רק תשובה שמסומנת public, אבל את קטלוג הקו אסור
+// שיישמר אצל מתווך כלשהו בדרך. לכן העותק שנשמר אצלנו מסומן public והעותק
+// שנשלח לקו מסומן no-store. הגוף נעטף פעם אחת בלבד, כדי שלא יוזרם פעמיים.
+function withCacheStatus(response: Response, status: "HIT" | "MISS", keepPrivate = false): Response {
   const headers = new Headers(response.headers);
   headers.set("x-rosh-berosh-cache", status);
+  if (keepPrivate) headers.set("cache-control", "no-store");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -90,24 +100,37 @@ async function catalog(env: Env): Promise<Response> {
   }
 }
 
-async function cachedCatalog(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  const { cache, key } = catalogCache(request);
+async function cachedJson(request: Request, ctx: ExecutionContext, pathname: string, produce: () => Promise<Response>, keepPrivate = false): Promise<Response> {
+  const { cache, key } = catalogCache(request, pathname);
   if (cache) {
     const hit = await cache.match(key);
-    if (hit) return withCacheStatus(hit, "HIT");
+    if (hit) return withCacheStatus(hit, "HIT", keepPrivate);
   }
-  const response = await catalog(env);
-  if (!cache || !response.ok) return response;
+  const response = await produce();
+  // תשובת שגיאה לעולם אינה נשמרת: אחרת תקלה רגעית במסד הייתה נתקעת במטמון
+  // ומשתיקה את הקו לדקה שלמה אחרי שהמסד כבר חזר.
+  if (!cache || !response.ok) return keepPrivate ? withCacheStatus(response, "MISS", true) : response;
   const headers = new Headers(response.headers);
   headers.set("cache-control", `public, max-age=${CATALOG_CACHE_SECONDS}`);
   const cacheable = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   ctx.waitUntil(cache.put(key, cacheable.clone()));
-  return withCacheStatus(cacheable, "MISS");
+  return withCacheStatus(cacheable, "MISS", keepPrivate);
 }
 
+const cachedCatalog = (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>
+  cachedJson(request, ctx, SITE_CATALOG_CACHE_KEY, () => catalog(env));
+
+// כל שיחה נכנסת לקו מושכת את הקטלוג מחדש, וזו הפנייה שקובעת אם המתקשר שומע
+// תפריט או ניתוק. שישים שניות של מטמון הופכות את רוב השיחות לתשובה בלי D1
+// בכלל, וכל שינוי ניהול - מהאתר או מקו הניהול - מוחק אותו מיד.
+const cachedIvrCatalog = (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>
+  cachedJson(request, ctx, IVR_CATALOG_CACHE_KEY, () => ivrCatalog(env), true);
+
 function invalidateCatalogCache(request: Request, ctx: ExecutionContext): void {
-  const { cache, key } = catalogCache(request);
-  if (cache) ctx.waitUntil(cache.delete(key));
+  for (const pathname of CATALOG_CACHE_KEYS) {
+    const { cache, key } = catalogCache(request, pathname);
+    if (cache) ctx.waitUntil(cache.delete(key));
+  }
 }
 
 async function catalogMedia(request: Request, env: Env): Promise<Response> {
@@ -280,7 +303,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (url.pathname === "/api/catalog" && request.method === "GET") return cachedCatalog(request, env, ctx);
   if (url.pathname === "/api/ivr/catalog" && request.method === "GET") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
-    return ivrCatalog(env);
+    return cachedIvrCatalog(request, env, ctx);
   }
   // קו הניהול הטלפוני, כמו קו ההצבעה, אינו מריץ כאן את בניית הסכמה המלאה: היא
   // עשרות משפטים ברצף על מסד קר, וימות המשיח מנתקת לפני שהמנהל שומע תפריט.
@@ -321,6 +344,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const audioUrl = `/media/${mediaKey.split("/").map(encodeURIComponent).join("/")}`;
     await upsertIvrPrompt(env, { key, label, audioUrl, yemotPath: sync.path, updatedAt: Date.now() });
     if (previous?.audioUrl !== audioUrl) await deleteIvrAudioIfUnreferenced(env, previous?.audioUrl);
+    // הקריינות שנשמרה זה עתה יושבת בתוך תשובת הקטלוג של הקו, ולכן העותק
+    // השמור חייב להימחק כאן בדיוק כמו אחרי כל שינוי ניהול אחר.
+    invalidateCatalogCache(request, ctx);
     return json({ ok: true, prompt: { key, label, audioUrl, yemotPath: sync.path } });
   }
   if (url.pathname === "/api/ballots/check" && request.method === "GET") {
