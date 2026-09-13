@@ -103,15 +103,18 @@ test("the protected IVR catalog keeps voting names but excludes website media", 
     if (sql.includes("FROM songs")) return [{ id: "song-1", albumId: "album-1", title: "שם השיר" }];
     if (sql.includes("FROM artists")) return [{ id: "artist-1", name: "שם הזמר" }];
     if (sql.includes("FROM ivr_prompts")) return [{ key: "song:song-1", yemotPath: "ivr2:/rb123.wav" }];
+    // הסקר הפעיל נבחר בתוך אותה קבוצת שאילתות ולא בפנייה נפרדת שקודמת לה.
+    if (sql.includes("FROM surveys")) return [{ id: "survey-1" }];
     return [];
   };
+  const standalone = [];
   const db = {
     prepare(sql) {
       return {
         sql,
         bind() { return this; },
-        async first() { queries.push(sql); return sql.includes("FROM surveys") ? { id: "survey-1" } : null; },
-        async all() { return { results: rowsFor(sql) }; },
+        async first() { standalone.push(sql); queries.push(sql); return null; },
+        async all() { standalone.push(sql); return { results: rowsFor(sql) }; },
       };
     },
     async batch(statements) { return statements.map(({ sql }) => ({ results: rowsFor(sql) })); },
@@ -125,6 +128,10 @@ test("the protected IVR catalog keeps voting names but excludes website media", 
     ivrPrompts: [{ key: "song:song-1", yemotPath: "ivr2:/rb123.wav" }],
   });
   assert.doesNotMatch(queries.join("\n"), /cover_url|image_url|audio_url|preview_start|preview_end/i);
+  // מחוץ לקבוצה רצה רק שאילתת הקריינויות, ובמקביל לה. כל שאילתה נוספת כאן
+  // היא הליכה נוספת אל D1 שכל שיחה נכנסת משלמת עליה לפני שנשמע תפריט.
+  assert.equal(standalone.length, 1, standalone.join("\n"));
+  assert.match(standalone[0], /FROM ivr_prompts/);
 });
 
 test("all long IVR menus use fixed-width codes without pages", () => {
@@ -567,7 +574,7 @@ test("the voting line transfers the caller back to the main line when the call i
   for (const match of alreadyVoted) assert.equal(match[1], "finishCall(call)");
 });
 
-test("pressing hash anywhere in the voting line transfers the caller to the main line", () => {
+test("an empty entry requires explicit confirmation before transfer", () => {
   // ימות המשיח מסיימת הקשה בסולמית ואינה מעבירה אותה כספרה, ולכן הקו מזהה
   // אותה כהקשה ריקה עם ערך מוסכם. בלי יעד העברה ההתנהגות נשארת כשהייתה.
   assert.deepEqual(transferOnEmptyEntry({ min_digits: 2, max_digits: 2 }, "0796077075"), {
@@ -581,18 +588,22 @@ test("pressing hash anywhere in the voting line transfers the caller to the main
 
   const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
   assert.match(server, /function transferOnHash\(options\) \{\n  return transferOnEmptyEntry\(options, POST_VOTE_TRANSFER\);/);
+  assert.match(server, /async function confirmTransfer\(call, prompts\)/);
+  assert.match(server, /answer !== "1"\) return false/, "רק הקשת 1 מאשרת העברה");
   assert.match(server, /call\.routing_yemot\(POST_VOTE_TRANSFER\);\n\}/, "ההעברה עצמה יוצאת מהשיחה דרך routing_yemot");
 
   // שני התפריטים של קו ההצבעה: רשימת הבחירה ותפריט השלבים הראשי.
   const votingReads = [...server.matchAll(/await call\.read\([^;]*?"tap",\s*transferOnHash\(/g)];
   assert.equal(votingReads.length, 2, "כל תפריט בקו ההצבעה חייב לזהות סולמית");
-  assert.equal([...server.matchAll(/answer === TRANSFER_KEY\) (return )?transferToLine\(call, prompts\)/g)].length, 2);
+  assert.equal([...server.matchAll(/answer === TRANSFER_KEY\)/g)].length, 2);
+  assert.equal([...server.matchAll(/await confirmTransfer\(call, prompts\)/g)].length, 2);
 
   // בקו הניהול הסולמית מסיימת הקשת מספר, ולכן אסור שהיא תעביר משם.
   const adminLine = server.slice(server.indexOf("async function adminChoice"), server.indexOf('router.get("/", async (call)'));
   assert.doesNotMatch(adminLine, /transferOnHash/, "קו הניהול חייב להישאר בלי ההעברה בסולמית");
 
   const prompts = JSON.parse(readFileSync(new URL("../ivr-service/src/ivr-system-prompts.json", import.meta.url), "utf8"));
+  assert.ok(prompts.some((item) => item.key === "system:confirm_transfer"), "הודעת האישור חייבת להיות ניתנת להקלטה");
   assert.ok(prompts.some((item) => item.key === "system:transferring"), "הודעת ההעברה חייבת להיות ניתנת להקלטה");
   assert.ok(server.includes("system:transferring"));
 });
