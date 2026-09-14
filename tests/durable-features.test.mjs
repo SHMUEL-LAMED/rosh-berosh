@@ -56,7 +56,11 @@ test("admin preview reaches the final screen without writing a ballot or progres
   assert.match(page, /preview \|\| !catalog \|\| voted !== false/);
   assert.match(page, /שום הצבעה או התקדמות לא נשמרו/);
   assert.match(admin, /\?preview=site/);
-  assert.match(admin, /\?preview=ivr/);
+  assert.match(admin, /<PhonePreview/);
+  const phone = source("app/admin/phone-preview.tsx");
+  assert.match(phone, /speechSynthesis\.speak/);
+  assert.match(phone, /className="phone-keypad"/);
+  assert.match(phone, /התחלת שיחת בדיקה/);
   assert.match(admin, /הקישו <b>75<\/b>/);
 });
 

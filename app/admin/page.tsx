@@ -10,6 +10,7 @@ import { useUploadQueue } from "./upload-queue";
 import { SubscribersPanel } from "./subscribers-panel";
 import { downloadResultsXlsx, downloadAllResultsXlsx } from "./xlsx-export";
 import systemPrompts from "../../ivr-service/src/ivr-system-prompts.json";
+import { PhonePreview } from "./phone-preview";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string; position: number; active: number };
 type Song = { id: string; albumId: string; title: string; audioUrl?: string; coverUrl?: string; previewStart: number; previewEnd: number; position: number; active: number };
@@ -147,7 +148,7 @@ export default function AdminPage() {
     <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ preview: "תצוגה מקדימה", surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", access: "הרשאות", results: "תוצאות", voters: "מצביעים", subscribers: "רשימת תפוצה" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
       <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>
       {tab === "dashboard" && <Dashboard data={data} onNavigate={setTab} onChanged={load} onMessage={notify} />}
-      {tab === "preview" && <PreviewPanel />}
+      {tab === "preview" && data && <PreviewPanel data={data} />}
       {tab === "surveys" && data && <SurveysPanel data={data} onChanged={load} onMessage={notify} />}
       {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={notify} />}
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
@@ -162,12 +163,12 @@ export default function AdminPage() {
   </main>;
 }
 
-function PreviewPanel() {
+function PreviewPanel({ data }: { data: Overview }) {
   return <AdminSection title="בדיקת הסקר בלי לשמור הצבעה">
     <p className="panel-help">שתי התצוגות משתמשות בסקר הפעיל, ברשימות ובמגבלות האמיתיות. אפשר לבדוק גם כשההצבעה סגורה, ומצב תצוגה מקדימה לעולם אינו שולח הצבעה או שומר התקדמות.</p>
     <div className="preview-options">
       <article><span>🖥</span><div><h3>תצוגת האתר</h3><p>עברו בדיוק במסכים שהמצביע רואה — מבחירת האלבומים ועד כרטיס הסיום.</p><a className="continue" href="/?preview=site" target="_blank" rel="noreferrer">פתיחת תצוגת האתר</a></div></article>
-      <article><span>☎</span><div><h3>תצוגת הקו דרך האתר</h3><p>בדקו את סדר שלבי הקו והכמויות בדפדפן. הבחירות נעשות בלחיצה במקום בהקשה.</p><a className="continue" href="/?preview=ivr" target="_blank" rel="noreferrer">פתיחת הדמיית הקו</a></div></article>
+      <article className="phone-preview-card"><span>☎</span><div><h3>שיחת טלפון בתוך האתר</h3><p>לחצו על התחלת שיחה, הקשיבו לקריינות והקישו על המקשים בדיוק כמו בטלפון.</p><PhonePreview surveyId={data.activeSurvey?.id} albums={data.albums} songs={data.songs} artists={data.artists} settings={data.settings} prompts={data.ivrPrompts} /></div></article>
       <article><span>🎧</span><div><h3>תצוגת הקו בטלפון</h3><p>חייגו לקו הניהול והקישו <b>75</b>. הקו יריץ את מסלול ההצבעה והקריינויות בפועל, ובסוף יחזור לניהול בלי לשמור דבר.</p></div></article>
     </div>
   </AdminSection>;
