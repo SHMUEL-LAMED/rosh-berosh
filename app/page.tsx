@@ -64,6 +64,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [voted, setVoted] = useState<boolean | null>(null);
+  const [blocked, setBlocked] = useState(false);
   const [voteCheckFailed, setVoteCheckFailed] = useState(false);
   const progressReady = useRef(false);
   const loadedMediaAlbums = useRef(new Set<string>());
@@ -102,9 +103,11 @@ export default function Home() {
   const checkVote = useCallback(async () => {
     setVoted(null); setVoteCheckFailed(false);
     try {
-      const response = await fetch("/api/ballots/check", { cache: "no-store" });
+      const fp = await browserFingerprint().catch(() => "");
+      const response = await fetch(`/api/ballots/check${fp ? `?fingerprint=${encodeURIComponent(fp)}` : ""}`, { cache: "no-store" });
       if (!response.ok) throw new Error();
       const body = await response.json();
+      setBlocked(!!body.blocked);
       setVoted(!!body.voted);
     } catch {
       setVoteCheckFailed(true);
@@ -238,7 +241,8 @@ export default function Home() {
   if (!user) return <LoginScreen />;
   if (voteCheckFailed) return <main className="login-shell"><section className="success-card"><h1>לא הצלחנו לבדוק את ההצבעה</h1><p>לא נציג את טופס ההצבעה לפני שנדע אם כבר הצבעתם.</p><button className="continue" onClick={checkVote}>ניסיון חוזר</button></section></main>;
   if (voted === null) return <main className="login-shell"><div className="loading">בודקים אם כבר הצבעתם…</div></main>;
-  if (done) return <main className="voting-shell"><section className="success-card"><span>✓</span><p className="kicker">ההצבעה נקלטה</p><h1>תודה שהשתתפתם!</h1><p>הבחירות שלכם נשמרו בהצלחה.</p><SubscribeCard /></section></main>;
+  if (blocked) return <main className="login-shell"><section className="success-card"><h1>המחשב נחסם מהצבעה</h1><p>אי אפשר לשלוח הצבעה נוספת מהמחשב הזה בסקר הנוכחי.</p></section></main>;
+  if (done && catalog) return <main className="voting-shell"><section className="success-card receipt-success"><span>✓</span><p className="kicker">ההצבעה נקלטה</p><h1>תודה שהשתתפתם!</h1><p>הבחירות שלכם נשמרו בהצלחה.</p><VoteReceipt albums={selectedAlbums.map((album) => ({ title: album.title, artistName: album.artistName, songs: selectedSongNames(album.id) }))} artists={selectedArtists.map((artist) => artist.name)} /><SubscribeCard /></section></main>;
 
   return <main className={`voting-shell ${player ? "with-player" : ""}`} dir="rtl">
     <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>החלפת חשבון</button></nav></header>
@@ -266,6 +270,42 @@ export default function Home() {
     </>}
     {catalog && catalog.songs.length > 0 && <BrowsePanel catalog={catalog} loadSongMedia={loadSongMedia} />}
   </main>;
+}
+
+function VoteReceipt({ albums, artists }: { albums: { title: string; artistName: string; songs: string }[]; artists: string[] }) {
+  const makeFile = async () => {
+    const width = 1080, rowHeight = 76;
+    const height = Math.max(1350, 650 + albums.length * rowHeight + Math.ceil(artists.length / 2) * 60);
+    const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext("2d"); if (!ctx) throw new Error("לא ניתן ליצור את הכרטיס.");
+    const gradient = ctx.createLinearGradient(0, 0, width, height); gradient.addColorStop(0, "#17112b"); gradient.addColorStop(.55, "#2b2350"); gradient.addColorStop(1, "#8b6f18");
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.beginPath(); ctx.arc(140, 160, 250, 0, Math.PI * 2); ctx.fill();
+    ctx.direction = "rtl"; ctx.textAlign = "center"; ctx.fillStyle = "#ead47a"; ctx.font = "700 34px Arial"; ctx.fillText("הקול שלי במצעד", width / 2, 120);
+    ctx.fillStyle = "#ffffff"; ctx.font = "900 76px Arial"; ctx.fillText("ראש בראש", width / 2, 220);
+    ctx.font = "700 31px Arial"; ctx.fillStyle = "#f2e8bd"; ctx.fillText("25 שנות מוזיקה יהודית", width / 2, 272);
+    ctx.fillStyle = "rgba(255,255,255,.94)"; ctx.roundRect(65, 335, width - 130, height - 430, 34); ctx.fill();
+    let y = 410; ctx.textAlign = "right"; ctx.fillStyle = "#8b6f18"; ctx.font = "800 34px Arial";
+    if (albums.length) { ctx.fillText("האלבומים והשירים שבחרתי", width - 115, y); y += 58; }
+    for (const [index, album] of albums.entries()) {
+      ctx.fillStyle = "#29213f"; ctx.font = "800 28px Arial"; ctx.fillText(`${index + 1}. ${album.title}`, width - 120, y);
+      ctx.fillStyle = "#70677e"; ctx.font = "23px Arial"; ctx.fillText(`${album.artistName}  ·  ${album.songs}`, width - 150, y + 34); y += rowHeight;
+    }
+    if (artists.length) {
+      y += 24; ctx.fillStyle = "#8b6f18"; ctx.font = "800 34px Arial"; ctx.fillText("הזמרים שבחרתי", width - 115, y); y += 55;
+      ctx.fillStyle = "#29213f"; ctx.font = "700 27px Arial"; ctx.fillText(artists.join("  •  "), width - 120, y);
+    }
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffffff"; ctx.font = "700 25px Arial"; ctx.fillText("גם אני השתתפתי במצעד הגדול של ראש בראש", width / 2, height - 54);
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("יצירת הקובץ נכשלה.")), "image/png"));
+    return new File([blob], "ההצבעה-שלי-ראש-בראש.png", { type: "image/png" });
+  };
+  const download = async () => { const file = await makeFile(); const url = URL.createObjectURL(file); const link = document.createElement("a"); link.href = url; link.download = file.name; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); };
+  const share = async () => {
+    const file = await makeFile();
+    if (navigator.share && navigator.canShare?.({ files: [file] })) return navigator.share({ title: "ההצבעה שלי בראש בראש", text: "אלה הבחירות שלי במצעד ראש בראש", files: [file] });
+    await download();
+  };
+  return <section className="vote-receipt" aria-label="סיכום ההצבעה לשיתוף"><div className="receipt-heading"><small>הקול שלי במצעד</small><b>ראש בראש</b><span>25 שנות מוזיקה יהודית</span></div>{albums.length > 0 && <div><h2>האלבומים והשירים שבחרתי</h2>{albums.map((album, index) => <article key={`${album.title}-${index}`}><b>{index + 1}. {album.title}</b><small>{album.artistName} · {album.songs}</small></article>)}</div>}{artists.length > 0 && <div><h2>הזמרים שבחרתי</h2><p>{artists.join(" • ")}</p></div>}<footer><button type="button" onClick={() => void download()}>הורדת הכרטיס</button><button type="button" className="share-receipt" onClick={() => void share()}>שיתוף הכרטיס</button></footer></section>;
 }
 
 function Title({ kicker, title, count }: { kicker: string; title: string; count?: string }) { return <div className="section-title"><div><p className="kicker">{kicker}</p><h2>{title}</h2></div>{count && <strong>{count}</strong>}</div>; }

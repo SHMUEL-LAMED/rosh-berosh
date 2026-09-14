@@ -20,11 +20,11 @@ type IvrPrompt = { key: string; label: string; audioUrl: string; yemotPath: stri
 type Readiness = { ready: boolean; warnings: string[]; counts: { albums: number; songs: number; artists: number; missingCovers: number; missingSongs: number } };
 type PollArchive = { key: string; name: string; createdAt: number; votes: number; albums: number; songs: number; artists: number };
 type Survey = { id: string; name: string; active: number; createdAt: number; votingOpen: number; albums: number; songs: number; artists: number; votes: number };
-type SuspiciousVote = { fingerprint: string; count: number; voters: string[] };
+type SuspiciousVote = { fingerprint: string; count: number; voters: string[]; blocked: boolean };
 type TimelinePoint = { bucket: number; channel: "site" | "phone"; votes: number };
 type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; voteTimeline: { hourly: TimelinePoint[]; daily: TimelinePoint[] }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
 type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "access" | "results" | "archives" | "voters" | "subscribers";
-type Voter = { id: string; voterKey: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
+type Voter = { id: string; voterKey: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
 const SYSTEM_PROMPTS = systemPrompts;
 
@@ -146,7 +146,7 @@ export default function AdminPage() {
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
     <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", access: "הרשאות", results: "תוצאות", voters: "מצביעים", subscribers: "רשימת תפוצה" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
       <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>
-      {tab === "dashboard" && <Dashboard data={data} onNavigate={setTab} />}
+      {tab === "dashboard" && <Dashboard data={data} onNavigate={setTab} onChanged={load} onMessage={notify} />}
       {tab === "surveys" && data && <SurveysPanel data={data} onChanged={load} onMessage={notify} />}
       {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={notify} />}
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
@@ -161,7 +161,15 @@ export default function AdminPage() {
   </main>;
 }
 
-function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab: Tab): void }) { return <><div className="dashboard-grid"><button onClick={() => onNavigate("surveys")}><b>{data?.surveys.length ?? 0}</b><span>סקרים</span><small>{data?.activeSurvey ? `פעיל: ${data.activeSurvey.name}` : "בחירה והפעלה"}</small></button><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>{data?.suspicious && data.suspicious.length > 0 && <AdminSection title="הצבעות חשודות"><p className="panel-help">הצבעות שבוצעו מאותו דפדפן/מחשב עם חשבונות שונים. זה לא בהכרח הונאה — יכול להיות מחשב משותף.</p><div className="suspicious-list">{data.suspicious.map((item) => <div key={item.fingerprint} className="suspicious-row"><span className="suspicious-count">{item.count} הצבעות</span><span className="suspicious-fp">{item.fingerprint.slice(0, 12)}…</span><div className="suspicious-voters">{item.voters.map((v) => <small key={v}>{v}</small>)}</div></div>)}</div></AdminSection>}</>; }
+function Dashboard({ data, onNavigate, onChanged, onMessage }: { data: Overview | null; onNavigate(tab: Tab): void; onChanged(): Promise<void> | void; onMessage(message: string): void }) {
+  const toggleBlock = async (item: SuspiciousVote) => {
+    if (!item.blocked && !confirm("לחסום את המחשב הזה מכל הצבעה נוספת בסקר הנוכחי? ייתכן שזה מחשב משותף.")) return;
+    const response = await fetch("/api/admin/blocked-fingerprints", { method: item.blocked ? "DELETE" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fingerprint: item.fingerprint }) });
+    const result = await response.json(); if (!response.ok) return onMessage(result.error || "עדכון החסימה נכשל.");
+    onMessage(item.blocked ? "החסימה הוסרה." : "המחשב נחסם מהצבעות נוספות בסקר הזה."); await onChanged();
+  };
+  return <><div className="dashboard-grid"><button onClick={() => onNavigate("surveys")}><b>{data?.surveys.length ?? 0}</b><span>סקרים</span><small>{data?.activeSurvey ? `פעיל: ${data.activeSurvey.name}` : "בחירה והפעלה"}</small></button><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>{data?.suspicious && data.suspicious.length > 0 && <AdminSection title="הצבעות חשודות"><p className="panel-help">הצבעות שבוצעו מאותו דפדפן/מחשב עם חשבונות שונים. זה לא בהכרח הונאה — יכול להיות מחשב משותף.</p><div className="suspicious-list">{data.suspicious.map((item) => <div key={item.fingerprint} className={`suspicious-row${item.blocked ? " blocked" : ""}`}><span className="suspicious-count">{item.count} הצבעות</span><span className="suspicious-fp">{item.fingerprint.slice(0, 12)}…</span><div className="suspicious-voters">{item.voters.map((v) => <small key={v}>{v}</small>)}</div><button type="button" className={item.blocked ? "" : "danger"} onClick={() => void toggleBlock(item)}>{item.blocked ? "הסרת חסימה" : "חסימת המחשב"}</button></div>)}</div></AdminSection>}</>;
+}
 
 function RecorderAccessPanel({ recorders, onSaved, onMessage }: { recorders: string[]; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
   const add = async (event: FormEvent<HTMLFormElement>) => {
@@ -543,7 +551,7 @@ function VotersPanel() {
     {loading ? <p className="loading">טוען…</p> : !voters.length ? <p className="panel-help">אין הצבעות עדיין.</p> : <>
       <div className="voters-list">{voters.map((v) => <article key={v.id} className="voter-card">
         <div className="voter-header">
-          <span className="voter-key">{v.voterKey}</span>
+          <span className="voter-key">{v.channel === "site" ? (v.voterEmail || "כתובת המייל לא נשמרה בהצבעה ישנה") : v.voterKey}</span>
           <span className={`voter-channel ${v.channel}`}>{channelLabel(v.channel)}</span>
           <time>{new Date(v.createdAt < 1_000_000_000_000 ? v.createdAt * 1000 : v.createdAt).toLocaleString("he-IL")}</time>
         </div>
