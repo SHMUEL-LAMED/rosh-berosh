@@ -52,6 +52,10 @@ test("successful voters receive a downloadable and shareable branded receipt", (
   assert.match(page, /artist\.imageUrl/);
   assert.match(page, /loadReceiptImage/);
   assert.match(page, /drawReceiptImage/);
+  assert.match(page, /preparedFile/);
+  assert.match(page, /document\.body\.appendChild\(link\)/);
+  assert.match(page, /כרטיס ההצבעה הורד בהצלחה/);
+  assert.match(page, /הדפדפן לא תומך בשיתוף קובץ ישיר/);
   assert.match(worker, /receipt: \{/);
   assert.match(worker, /a\.cover_url AS coverUrl/);
   assert.match(worker, /a\.image_url AS imageUrl/);

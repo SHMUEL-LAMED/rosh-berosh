@@ -295,8 +295,10 @@ type LoadedReceiptImage = { image: CanvasImageSource; width: number; height: num
 
 async function loadReceiptImage(src?: string | null): Promise<LoadedReceiptImage | null> {
   if (!src) return null;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 6000);
   try {
-    const response = await fetch(src);
+    const response = await fetch(src, { signal: controller.signal });
     if (!response.ok) return null;
     const blob = await response.blob();
     if (typeof createImageBitmap === "function") {
@@ -309,6 +311,7 @@ async function loadReceiptImage(src?: string | null): Promise<LoadedReceiptImage
     await image.decode();
     return { image, width: image.naturalWidth, height: image.naturalHeight, cleanup: () => URL.revokeObjectURL(url) };
   } catch { return null; }
+  finally { window.clearTimeout(timeout); }
 }
 
 function drawReceiptImage(ctx: CanvasRenderingContext2D, loaded: LoadedReceiptImage | null, x: number, y: number, width: number, height: number, radius: number, fallback: string, circle = false) {
@@ -339,8 +342,7 @@ function receiptText(ctx: CanvasRenderingContext2D, value: string, maxWidth: num
   return `${text}…`;
 }
 
-function VoteReceipt({ albums, artists }: Receipt) {
-  const makeFile = async () => {
+async function buildReceiptFile(albums: ReceiptAlbum[], artists: ReceiptArtist[]) {
     const width = 1080, albumRows = Math.ceil(albums.length / 2), artistRows = Math.ceil(artists.length / 4);
     const albumSection = albums.length ? 80 + albumRows * 205 : 0;
     const artistSection = artists.length ? 90 + artistRows * 205 : 0;
@@ -396,14 +398,60 @@ function VoteReceipt({ albums, artists }: Receipt) {
       const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("יצירת הקובץ נכשלה.")), "image/png"));
       return new File([blob], "ההצבעה-שלי-ראש-בראש.png", { type: "image/png" });
     } finally { loaded.forEach((item) => item.cleanup()); }
+}
+
+function VoteReceipt({ albums, artists }: Receipt) {
+  const { notify } = useNotice();
+  const preparedFile = useRef<File | null>(null);
+  const [preparing, setPreparing] = useState(true);
+  const [working, setWorking] = useState<"download" | "share" | null>(null);
+  const receiptKey = JSON.stringify({ albums: albums.map((item) => [item.id, item.coverUrl, item.songs]), artists: artists.map((item) => [item.id, item.imageUrl]) });
+
+  useEffect(() => {
+    let active = true;
+    preparedFile.current = null;
+    queueMicrotask(() => { if (active) setPreparing(true); });
+    void buildReceiptFile(albums, artists).then((file) => {
+      if (active) preparedFile.current = file;
+    }).catch((error) => {
+      if (active) notify(error instanceof Error ? error.message : "יצירת כרטיס השיתוף נכשלה.", "error");
+    }).finally(() => { if (active) setPreparing(false); });
+    return () => { active = false; };
+    // receiptKey changes only when the content or one of its images changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiptKey, notify]);
+
+  const getFile = async () => preparedFile.current || await buildReceiptFile(albums, artists);
+  const saveFile = (file: File) => {
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url; link.download = file.name; link.style.display = "none";
+    document.body.appendChild(link); link.click(); link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
-  const download = async () => { const file = await makeFile(); const url = URL.createObjectURL(file); const link = document.createElement("a"); link.href = url; link.download = file.name; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); };
+  const download = async () => {
+    setWorking("download");
+    try { saveFile(await getFile()); notify("כרטיס ההצבעה הורד בהצלחה.", "success"); }
+    catch (error) { notify(error instanceof Error ? error.message : "הורדת הכרטיס נכשלה.", "error"); }
+    finally { setWorking(null); }
+  };
   const share = async () => {
-    const file = await makeFile();
-    if (navigator.share && navigator.canShare?.({ files: [file] })) return navigator.share({ title: "ההצבעה שלי בראש בראש", text: "אלה הבחירות שלי במצעד ראש בראש", files: [file] });
-    await download();
+    setWorking("share");
+    try {
+      const file = await getFile();
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ title: "ההצבעה שלי בראש בראש", text: "אלה הבחירות שלי במצעד ראש בראש", files: [file] });
+      } else {
+        saveFile(file);
+        notify("הדפדפן לא תומך בשיתוף קובץ ישיר, לכן כרטיס ההצבעה הורד ואפשר לצרף אותו להודעה.", "info");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      notify(error instanceof Error ? error.message : "שיתוף ההצבעה נכשל.", "error");
+    } finally { setWorking(null); }
   };
-  return <section className="vote-receipt" aria-label="סיכום ההצבעה לשיתוף"><div className="receipt-heading"><small>הקול שלי במצעד</small><b>ראש בראש</b><span>25 שנות מוזיקה יהודית</span></div>{albums.length > 0 && <div className="receipt-section"><h2>האלבומים והשירים שבחרתי</h2><div className="receipt-album-grid">{albums.map((album, index) => <article key={album.id}><div className="receipt-cover">{album.coverUrl ? <img src={album.coverUrl} alt={`עטיפת ${album.title}`} loading="lazy" /> : <span>♫</span>}</div><div><small>בחירה {index + 1}</small><b>{album.title}</b><span>{album.artistName}</span><em>{album.songs.length ? album.songs.join(" · ") : "ללא בחירת שיר"}</em></div></article>)}</div></div>}{artists.length > 0 && <div className="receipt-section"><h2>הזמרים שבחרתי</h2><div className="receipt-artist-grid">{artists.map((artist) => <article key={artist.id}>{artist.imageUrl ? <img src={artist.imageUrl} alt={`תמונת ${artist.name}`} loading="lazy" /> : <span>{artist.name.slice(0, 1)}</span>}<b>{artist.name}</b></article>)}</div></div>}<footer><button type="button" onClick={() => void download()}>הורדת הכרטיס</button><button type="button" className="share-receipt" onClick={() => void share()}>שיתוף ההצבעה שלי</button></footer></section>;
+  const disabled = preparing || working !== null;
+  return <section className="vote-receipt" aria-label="סיכום ההצבעה לשיתוף"><div className="receipt-heading"><small>הקול שלי במצעד</small><b>ראש בראש</b><span>25 שנות מוזיקה יהודית</span></div>{albums.length > 0 && <div className="receipt-section"><h2>האלבומים והשירים שבחרתי</h2><div className="receipt-album-grid">{albums.map((album, index) => <article key={album.id}><div className="receipt-cover">{album.coverUrl ? <img src={album.coverUrl} alt={`עטיפת ${album.title}`} loading="lazy" /> : <span>♫</span>}</div><div><small>בחירה {index + 1}</small><b>{album.title}</b><span>{album.artistName}</span><em>{album.songs.length ? album.songs.join(" · ") : "ללא בחירת שיר"}</em></div></article>)}</div></div>}{artists.length > 0 && <div className="receipt-section"><h2>הזמרים שבחרתי</h2><div className="receipt-artist-grid">{artists.map((artist) => <article key={artist.id}>{artist.imageUrl ? <img src={artist.imageUrl} alt={`תמונת ${artist.name}`} loading="lazy" /> : <span>{artist.name.slice(0, 1)}</span>}<b>{artist.name}</b></article>)}</div></div>}<footer><button type="button" disabled={disabled} onClick={() => void download()}>{preparing ? "מכין את הכרטיס…" : working === "download" ? "מוריד…" : "הורדת הכרטיס"}</button><button type="button" disabled={disabled} className="share-receipt" onClick={() => void share()}>{preparing ? "מכין את הכרטיס…" : working === "share" ? "פותח שיתוף…" : "שיתוף ההצבעה שלי"}</button></footer></section>;
 }
 
 function Title({ kicker, title, count }: { kicker: string; title: string; count?: string }) { return <div className="section-title"><div><p className="kicker">{kicker}</p><h2>{title}</h2></div>{count && <strong>{count}</strong>}</div>; }
