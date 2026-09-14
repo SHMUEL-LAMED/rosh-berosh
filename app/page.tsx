@@ -58,6 +58,9 @@ export default function Home() {
   const [artists, setArtists] = useState<string[]>([]);
   const { song: player, play, stop, setSiblings } = usePlayer();
   const [user] = useCurrentUser();
+  const requestedPreview = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("preview") : null;
+  const preview = !!user?.isAdmin && (requestedPreview === "site" || requestedPreview === "ivr");
+  const ivrPreview = preview && requestedPreview === "ivr";
   const { notify, clear: clearNotice } = useNotice();
   const fail = (text: string) => notify(text, "error");
   const [loadFailed, setLoadFailed] = useState(false);
@@ -114,10 +117,19 @@ export default function Home() {
     }
   }, []);
   useEffect(() => { const timer = window.setTimeout(() => void loadCatalog(), 0); return () => window.clearTimeout(timer); }, [loadCatalog]);
-  useEffect(() => { if (!user) return; const timer = window.setTimeout(() => void checkVote(), 0); return () => window.clearTimeout(timer); }, [user, checkVote]);
+  useEffect(() => {
+    if (!user) return;
+    if (preview) {
+      progressReady.current = true;
+      const timer = window.setTimeout(() => { setBlocked(false); setVoted(false); }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    const timer = window.setTimeout(() => void checkVote(), 0);
+    return () => window.clearTimeout(timer);
+  }, [user, preview, checkVote]);
 
   useEffect(() => {
-    if (!catalog || voted !== false || progressReady.current) return;
+    if (preview || !catalog || voted !== false || progressReady.current) return;
     progressReady.current = true;
     fetch("/api/ballots/progress", { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error();
@@ -137,15 +149,15 @@ export default function Home() {
       setStageIndex(Math.max(0, Math.min(stageCount - 1, Number(progress.stageIndex) || 0)));
       setSongAlbumIndex(Math.max(0, Math.min(restoredAlbums.length - 1, Number(progress.songAlbumIndex) || 0)));
     }).catch(() => notify("לא הצלחנו לשחזר את ההתקדמות השמורה.", "error"));
-  }, [catalog, voted, notify]);
+  }, [catalog, voted, preview, notify]);
 
   useEffect(() => {
-    if (!catalog || voted !== false || !progressReady.current || done) return;
+    if (preview || !catalog || voted !== false || !progressReady.current || done) return;
     const timer = window.setTimeout(() => {
       void fetch("/api/ballots/progress", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, stageIndex, songAlbumIndex }) });
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [catalog, voted, done, albums, songs, artists, stageIndex, songAlbumIndex]);
+  }, [catalog, voted, preview, done, albums, songs, artists, stageIndex, songAlbumIndex]);
   const stages = useMemo(() => {
     if (!catalog) return [] as { key: Stage; label: string }[];
     return [
@@ -226,6 +238,7 @@ export default function Home() {
   const submit = async () => {
     setBusy(true); clearNotice();
     try {
+      if (preview) { setDone(true); stop(); return; }
       const fp = await browserFingerprint().catch(() => "");
       const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site", fingerprint: fp }) });
       const result = await response.json();
@@ -239,15 +252,16 @@ export default function Home() {
 
   if (user === undefined) return <main className="login-shell"><div className="loading">בודקים התחברות…</div></main>;
   if (!user) return <LoginScreen />;
-  if (voteCheckFailed) return <main className="login-shell"><section className="success-card"><h1>לא הצלחנו לבדוק את ההצבעה</h1><p>לא נציג את טופס ההצבעה לפני שנדע אם כבר הצבעתם.</p><button className="continue" onClick={checkVote}>ניסיון חוזר</button></section></main>;
+  if (!preview && voteCheckFailed) return <main className="login-shell"><section className="success-card"><h1>לא הצלחנו לבדוק את ההצבעה</h1><p>לא נציג את טופס ההצבעה לפני שנדע אם כבר הצבעתם.</p><button className="continue" onClick={checkVote}>ניסיון חוזר</button></section></main>;
   if (voted === null) return <main className="login-shell"><div className="loading">בודקים אם כבר הצבעתם…</div></main>;
-  if (blocked) return <main className="login-shell"><section className="success-card"><h1>המחשב נחסם מהצבעה</h1><p>אי אפשר לשלוח הצבעה נוספת מהמחשב הזה בסקר הנוכחי.</p></section></main>;
-  if (done && catalog) return <main className="voting-shell"><section className="success-card receipt-success"><span>✓</span><p className="kicker">ההצבעה נקלטה</p><h1>תודה שהשתתפתם!</h1><p>הבחירות שלכם נשמרו בהצלחה.</p><VoteReceipt albums={selectedAlbums.map((album) => ({ title: album.title, artistName: album.artistName, songs: selectedSongNames(album.id) }))} artists={selectedArtists.map((artist) => artist.name)} /><SubscribeCard /></section></main>;
+  if (!preview && blocked) return <main className="login-shell"><section className="success-card"><h1>המחשב נחסם מהצבעה</h1><p>אי אפשר לשלוח הצבעה נוספת מהמחשב הזה בסקר הנוכחי.</p></section></main>;
+  if (done && catalog) return <main className="voting-shell"><section className="success-card receipt-success"><span>✓</span><p className="kicker">{preview ? "התצוגה המקדימה הסתיימה" : "ההצבעה נקלטה"}</p><h1>{preview ? "הגעתם עד השלב האחרון" : "תודה שהשתתפתם!"}</h1><p>{preview ? "זו הייתה הדגמה בלבד. שום הצבעה או התקדמות לא נשמרו." : "הבחירות שלכם נשמרו בהצלחה."}</p><VoteReceipt albums={selectedAlbums.map((album) => ({ title: album.title, artistName: album.artistName, songs: selectedSongNames(album.id) }))} artists={selectedArtists.map((artist) => artist.name)} />{preview ? <div className="preview-finish-actions"><button className="continue" onClick={() => { setDone(false); setStageIndex(0); setSongAlbumIndex(0); setAlbums([]); setSongs({}); setArtists([]); }}>התחלת תצוגה מחדש</button><a className="back" href="/admin">חזרה לניהול</a></div> : <SubscribeCard />}</section></main>;
 
   return <main className={`voting-shell ${player ? "with-player" : ""}`} dir="rtl">
+    {preview && <div className={`preview-banner${ivrPreview ? " ivr" : ""}`}><b>{ivrPreview ? "תצוגה מקדימה של קו ההצבעה" : "תצוגה מקדימה של האתר"}</b><span>{ivrPreview ? "השלבים והכמויות זהים לקו; במקום מקשי הטלפון בוחרים כאן בלחיצה." : "אפשר לעבור עד הסוף. שום בחירה לא תישמר כהצבעה."}</span><a href="/admin">יציאה לניהול</a></div>}
     <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>החלפת חשבון</button></nav></header>
     <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1 className="parade-title"><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider" aria-hidden="true"></span><span className="hero-line2"><b>25</b><small>שנות מוזיקה</small></span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
-    {voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><SubscribeCard /></div></section> : catalog && !catalog.rules.votingOpen ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
+    {!preview && voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><SubscribeCard /></div></section> : catalog && !catalog.rules.votingOpen && !preview ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
         {!catalog && !loadFailed && <div className="loading">טוענים את רשימת המצעד…</div>}

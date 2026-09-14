@@ -71,6 +71,18 @@ test("every code in the map is wired to a handler in the IVR", () => {
   }
 });
 
+test("management code 75 previews the real voting flow without saving", () => {
+  const server = source("ivr-service/src/server.js");
+  const preview = adminItems().find((item) => item.code === "75");
+  assert.equal(preview?.action, "preview-voting");
+  assert.match(server, /runVotingFlow\(call, \{ preview: true, voterPhone: callerPhone \}\)/);
+  assert.match(server, /const saved = preview \? null : await loadProgress/);
+  assert.match(server, /const persistProgress = \(\) => preview \? Promise\.resolve\(\)/);
+  const votingFlow = server.slice(server.indexOf("async function runVotingFlow"));
+  const finish = votingFlow.slice(votingFlow.indexOf("if (preview) {"), votingFlow.indexOf('const submission = await api("/api/ballots"'));
+  assert.match(finish, /שום הצבעה או התקדמות לא נשמרו/);
+});
+
 test("every action the phone sends is handled by the worker", () => {
   const server = source("ivr-service/src/server.js");
   const worker = source("worker/ivr-admin.ts");

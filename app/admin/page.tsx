@@ -23,7 +23,7 @@ type Survey = { id: string; name: string; active: number; createdAt: number; vot
 type SuspiciousVote = { fingerprint: string; count: number; voters: string[]; blocked: boolean };
 type TimelinePoint = { bucket: number; channel: "site" | "phone"; votes: number };
 type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; voteTimeline: { hourly: TimelinePoint[]; daily: TimelinePoint[] }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
-type Tab = "dashboard" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "access" | "results" | "archives" | "voters" | "subscribers";
+type Tab = "dashboard" | "preview" | "surveys" | "albums" | "artists" | "ivr" | "settings" | "access" | "results" | "archives" | "voters" | "subscribers";
 type Voter = { id: string; voterKey: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
 const SYSTEM_PROMPTS = systemPrompts;
@@ -142,11 +142,12 @@ export default function AdminPage() {
 
   return <main className="admin-shell" dir="rtl">
     <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
-      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Nav active={tab === "voters"} onClick={() => setTab("voters")}>מצביעים</Nav><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
+      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "preview"} onClick={() => setTab("preview")}>תצוגה מקדימה</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Nav active={tab === "voters"} onClick={() => setTab("voters")}>מצביעים</Nav><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
-    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", access: "הרשאות", results: "תוצאות", voters: "מצביעים", subscribers: "רשימת תפוצה" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
+    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ preview: "תצוגה מקדימה", surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", access: "הרשאות", results: "תוצאות", voters: "מצביעים", subscribers: "רשימת תפוצה" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
       <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>
       {tab === "dashboard" && <Dashboard data={data} onNavigate={setTab} onChanged={load} onMessage={notify} />}
+      {tab === "preview" && <PreviewPanel />}
       {tab === "surveys" && data && <SurveysPanel data={data} onChanged={load} onMessage={notify} />}
       {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={notify} />}
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
@@ -159,6 +160,17 @@ export default function AdminPage() {
       {tab === "subscribers" && <SubscribersPanel onMessage={notify} />}
     </section>
   </main>;
+}
+
+function PreviewPanel() {
+  return <AdminSection title="בדיקת הסקר בלי לשמור הצבעה">
+    <p className="panel-help">שתי התצוגות משתמשות בסקר הפעיל, ברשימות ובמגבלות האמיתיות. אפשר לבדוק גם כשההצבעה סגורה, ומצב תצוגה מקדימה לעולם אינו שולח הצבעה או שומר התקדמות.</p>
+    <div className="preview-options">
+      <article><span>🖥</span><div><h3>תצוגת האתר</h3><p>עברו בדיוק במסכים שהמצביע רואה — מבחירת האלבומים ועד כרטיס הסיום.</p><a className="continue" href="/?preview=site" target="_blank" rel="noreferrer">פתיחת תצוגת האתר</a></div></article>
+      <article><span>☎</span><div><h3>תצוגת הקו דרך האתר</h3><p>בדקו את סדר שלבי הקו והכמויות בדפדפן. הבחירות נעשות בלחיצה במקום בהקשה.</p><a className="continue" href="/?preview=ivr" target="_blank" rel="noreferrer">פתיחת הדמיית הקו</a></div></article>
+      <article><span>🎧</span><div><h3>תצוגת הקו בטלפון</h3><p>חייגו לקו הניהול והקישו <b>75</b>. הקו יריץ את מסלול ההצבעה והקריינויות בפועל, ובסוף יחזור לניהול בלי לשמור דבר.</p></div></article>
+    </div>
+  </AdminSection>;
 }
 
 function Dashboard({ data, onNavigate, onChanged, onMessage }: { data: Overview | null; onNavigate(tab: Tab): void; onChanged(): Promise<void> | void; onMessage(message: string): void }) {
