@@ -14,6 +14,9 @@ type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; alb
 type Catalog = { surveyId: string; albums: Album[]; songs: Song[]; artists: Artist[]; rules: Rules };
 type Stage = "albums" | "songs" | "artists" | "summary";
 type SavedProgress = { albumIds?: string[]; songIdsByAlbum?: Record<string, string[]>; artistIds?: string[]; stageIndex?: number; songAlbumIndex?: number };
+type ReceiptAlbum = { id: string; title: string; artistName: string; coverUrl?: string | null; songs: string[] };
+type ReceiptArtist = { id: string; name: string; imageUrl?: string | null };
+type Receipt = { albums: ReceiptAlbum[]; artists: ReceiptArtist[] };
 
 const rangeText = (min: number, max: number, noun: string) => min === max ? `${min} ${noun}` : min === 0 ? `עד ${max} ${noun}` : `בין ${min} ל־${max} ${noun}`;
 
@@ -67,6 +70,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [voted, setVoted] = useState<boolean | null>(null);
+  const [savedReceipt, setSavedReceipt] = useState<Receipt | null>(null);
   const [blocked, setBlocked] = useState(false);
   const [voteCheckFailed, setVoteCheckFailed] = useState(false);
   const progressReady = useRef(false);
@@ -112,6 +116,7 @@ export default function Home() {
       const body = await response.json();
       setBlocked(!!body.blocked);
       setVoted(!!body.voted);
+      setSavedReceipt(body.receipt || null);
     } catch {
       setVoteCheckFailed(true);
     }
@@ -255,13 +260,13 @@ export default function Home() {
   if (!preview && voteCheckFailed) return <main className="login-shell"><section className="success-card"><h1>לא הצלחנו לבדוק את ההצבעה</h1><p>לא נציג את טופס ההצבעה לפני שנדע אם כבר הצבעתם.</p><button className="continue" onClick={checkVote}>ניסיון חוזר</button></section></main>;
   if (voted === null) return <main className="login-shell"><div className="loading">בודקים אם כבר הצבעתם…</div></main>;
   if (!preview && blocked) return <main className="login-shell"><section className="success-card"><h1>המחשב נחסם מהצבעה</h1><p>אי אפשר לשלוח הצבעה נוספת מהמחשב הזה בסקר הנוכחי.</p></section></main>;
-  if (done && catalog) return <main className="voting-shell"><section className="success-card receipt-success"><span>✓</span><p className="kicker">{preview ? "התצוגה המקדימה הסתיימה" : "ההצבעה נקלטה"}</p><h1>{preview ? "הגעתם עד השלב האחרון" : "תודה שהשתתפתם!"}</h1><p>{preview ? "זו הייתה הדגמה בלבד. שום הצבעה או התקדמות לא נשמרו." : "הבחירות שלכם נשמרו בהצלחה."}</p><VoteReceipt albums={selectedAlbums.map((album) => ({ title: album.title, artistName: album.artistName, songs: selectedSongNames(album.id) }))} artists={selectedArtists.map((artist) => artist.name)} />{preview ? <div className="preview-finish-actions"><button className="continue" onClick={() => { setDone(false); setStageIndex(0); setSongAlbumIndex(0); setAlbums([]); setSongs({}); setArtists([]); }}>התחלת תצוגה מחדש</button><a className="back" href="/admin">חזרה לניהול</a></div> : <SubscribeCard />}</section></main>;
+  if (done && catalog) return <main className="voting-shell"><section className="success-card receipt-success"><span>✓</span><p className="kicker">{preview ? "התצוגה המקדימה הסתיימה" : "ההצבעה נקלטה"}</p><h1>{preview ? "הגעתם עד השלב האחרון" : "תודה שהשתתפתם!"}</h1><p>{preview ? "זו הייתה הדגמה בלבד. שום הצבעה או התקדמות לא נשמרו." : "הבחירות שלכם נשמרו בהצלחה."}</p><VoteReceipt albums={selectedAlbums.map((album) => ({ id: album.id, title: album.title, artistName: album.artistName, coverUrl: album.coverUrl, songs: selectedSongNames(album.id) === "לא נבחר" ? [] : selectedSongNames(album.id).split(" · ") }))} artists={selectedArtists.map((artist) => ({ id: artist.id, name: artist.name, imageUrl: artist.imageUrl }))} />{preview ? <div className="preview-finish-actions"><button className="continue" onClick={() => { setDone(false); setStageIndex(0); setSongAlbumIndex(0); setAlbums([]); setSongs({}); setArtists([]); }}>התחלת תצוגה מחדש</button><a className="back" href="/admin">חזרה לניהול</a></div> : <SubscribeCard />}</section></main>;
 
   return <main className={`voting-shell ${player ? "with-player" : ""} ${preview ? `preview-mode preview-${stage}` : ""}`} dir="rtl">
     {preview && <div className={`preview-banner${ivrPreview ? " ivr" : ""}`}><b>{ivrPreview ? "תצוגה מקדימה של קו ההצבעה" : "תצוגה מקדימה של האתר"}</b><span>{ivrPreview ? "השלבים והכמויות זהים לקו; במקום מקשי הטלפון בוחרים כאן בלחיצה." : "אפשר לעבור עד הסוף. שום בחירה לא תישמר כהצבעה."}</span><a href="/admin">יציאה לניהול</a></div>}
     <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>החלפת חשבון</button></nav></header>
     <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1 className="parade-title"><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider" aria-hidden="true"></span><span className="hero-line2"><b>25</b><small>שנות מוזיקה</small></span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
-    {!preview && voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><SubscribeCard /></div></section> : catalog && !catalog.rules.votingOpen && !preview ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
+    {!preview && voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><p>הבחירה שלכם שמורה כאן ואפשר לשתף אותה בכל זמן.</p>{savedReceipt && <VoteReceipt albums={savedReceipt.albums} artists={savedReceipt.artists} />}<SubscribeCard /></div></section> : catalog && !catalog.rules.votingOpen && !preview ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
         {!catalog && !loadFailed && <div className="loading">טוענים את רשימת המצעד…</div>}
@@ -286,32 +291,111 @@ export default function Home() {
   </main>;
 }
 
-function VoteReceipt({ albums, artists }: { albums: { title: string; artistName: string; songs: string }[]; artists: string[] }) {
+type LoadedReceiptImage = { image: CanvasImageSource; width: number; height: number; cleanup(): void };
+
+async function loadReceiptImage(src?: string | null): Promise<LoadedReceiptImage | null> {
+  if (!src) return null;
+  try {
+    const response = await fetch(src);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (typeof createImageBitmap === "function") {
+      const bitmap = await createImageBitmap(blob);
+      return { image: bitmap, width: bitmap.width, height: bitmap.height, cleanup: () => bitmap.close() };
+    }
+    const url = URL.createObjectURL(blob);
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    return { image, width: image.naturalWidth, height: image.naturalHeight, cleanup: () => URL.revokeObjectURL(url) };
+  } catch { return null; }
+}
+
+function drawReceiptImage(ctx: CanvasRenderingContext2D, loaded: LoadedReceiptImage | null, x: number, y: number, width: number, height: number, radius: number, fallback: string, circle = false) {
+  ctx.save();
+  ctx.beginPath();
+  if (circle) ctx.arc(x + width / 2, y + height / 2, Math.min(width, height) / 2, 0, Math.PI * 2);
+  else ctx.roundRect(x, y, width, height, radius);
+  ctx.clip();
+  if (loaded) {
+    const scale = Math.max(width / loaded.width, height / loaded.height);
+    const drawnWidth = loaded.width * scale, drawnHeight = loaded.height * scale;
+    ctx.drawImage(loaded.image, x + (width - drawnWidth) / 2, y + (height - drawnHeight) / 2, drawnWidth, drawnHeight);
+  } else {
+    const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+    gradient.addColorStop(0, "#302750"); gradient.addColorStop(1, "#a5862d");
+    ctx.fillStyle = gradient; ctx.fillRect(x, y, width, height);
+    ctx.direction = "rtl"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fff"; ctx.font = `900 ${Math.round(Math.min(width, height) * .42)}px Arial`;
+    ctx.fillText(fallback, x + width / 2, y + height / 2);
+  }
+  ctx.restore();
+}
+
+function receiptText(ctx: CanvasRenderingContext2D, value: string, maxWidth: number) {
+  if (ctx.measureText(value).width <= maxWidth) return value;
+  let text = value;
+  while (text.length > 1 && ctx.measureText(`${text}…`).width > maxWidth) text = text.slice(0, -1);
+  return `${text}…`;
+}
+
+function VoteReceipt({ albums, artists }: Receipt) {
   const makeFile = async () => {
-    const width = 1080, rowHeight = 76;
-    const height = Math.max(1350, 650 + albums.length * rowHeight + Math.ceil(artists.length / 2) * 60);
+    const width = 1080, albumRows = Math.ceil(albums.length / 2), artistRows = Math.ceil(artists.length / 4);
+    const albumSection = albums.length ? 80 + albumRows * 205 : 0;
+    const artistSection = artists.length ? 90 + artistRows * 205 : 0;
+    const height = Math.max(1350, 485 + albumSection + artistSection);
     const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
     const ctx = canvas.getContext("2d"); if (!ctx) throw new Error("לא ניתן ליצור את הכרטיס.");
-    const gradient = ctx.createLinearGradient(0, 0, width, height); gradient.addColorStop(0, "#17112b"); gradient.addColorStop(.55, "#2b2350"); gradient.addColorStop(1, "#8b6f18");
-    ctx.fillStyle = gradient; ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.beginPath(); ctx.arc(140, 160, 250, 0, Math.PI * 2); ctx.fill();
-    ctx.direction = "rtl"; ctx.textAlign = "center"; ctx.fillStyle = "#ead47a"; ctx.font = "700 34px Arial"; ctx.fillText("הקול שלי במצעד", width / 2, 120);
-    ctx.fillStyle = "#ffffff"; ctx.font = "900 76px Arial"; ctx.fillText("ראש בראש", width / 2, 220);
-    ctx.font = "700 31px Arial"; ctx.fillStyle = "#f2e8bd"; ctx.fillText("25 שנות מוזיקה יהודית", width / 2, 272);
-    ctx.fillStyle = "rgba(255,255,255,.94)"; ctx.roundRect(65, 335, width - 130, height - 430, 34); ctx.fill();
-    let y = 410; ctx.textAlign = "right"; ctx.fillStyle = "#8b6f18"; ctx.font = "800 34px Arial";
-    if (albums.length) { ctx.fillText("האלבומים והשירים שבחרתי", width - 115, y); y += 58; }
-    for (const [index, album] of albums.entries()) {
-      ctx.fillStyle = "#29213f"; ctx.font = "800 28px Arial"; ctx.fillText(`${index + 1}. ${album.title}`, width - 120, y);
-      ctx.fillStyle = "#70677e"; ctx.font = "23px Arial"; ctx.fillText(`${album.artistName}  ·  ${album.songs}`, width - 150, y + 34); y += rowHeight;
-    }
-    if (artists.length) {
-      y += 24; ctx.fillStyle = "#8b6f18"; ctx.font = "800 34px Arial"; ctx.fillText("הזמרים שבחרתי", width - 115, y); y += 55;
-      ctx.fillStyle = "#29213f"; ctx.font = "700 27px Arial"; ctx.fillText(artists.join("  •  "), width - 120, y);
-    }
-    ctx.textAlign = "center"; ctx.fillStyle = "#ffffff"; ctx.font = "700 25px Arial"; ctx.fillText("גם אני השתתפתי במצעד הגדול של ראש בראש", width / 2, height - 54);
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("יצירת הקובץ נכשלה.")), "image/png"));
-    return new File([blob], "ההצבעה-שלי-ראש-בראש.png", { type: "image/png" });
+    const loadedAlbums = await Promise.all(albums.map((album) => loadReceiptImage(album.coverUrl)));
+    const loadedArtists = await Promise.all(artists.map((artist) => loadReceiptImage(artist.imageUrl)));
+    const loaded = [...loadedAlbums, ...loadedArtists].filter(Boolean) as LoadedReceiptImage[];
+    try {
+      const gradient = ctx.createLinearGradient(0, 0, width, height); gradient.addColorStop(0, "#151027"); gradient.addColorStop(.58, "#312653"); gradient.addColorStop(1, "#9d7b1e");
+      ctx.fillStyle = gradient; ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = "rgba(255,255,255,.07)"; ctx.beginPath(); ctx.arc(95, 155, 270, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(1015, 55, 190, 0, Math.PI * 2); ctx.fill();
+      ctx.direction = "rtl"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = "#ead47a"; ctx.font = "800 32px Arial"; ctx.fillText("הקול שלי במצעד", width / 2, 86);
+      ctx.fillStyle = "#fff"; ctx.font = "900 78px Arial"; ctx.fillText("ראש בראש", width / 2, 178);
+      ctx.fillStyle = "#f2e8bd"; ctx.font = "700 30px Arial"; ctx.fillText("25 שנות מוזיקה יהודית", width / 2, 228);
+      ctx.fillStyle = "rgba(255,255,255,.97)"; ctx.beginPath(); ctx.roundRect(48, 280, width - 96, height - 390, 38); ctx.fill();
+      let y = 345;
+      if (albums.length) {
+        ctx.textAlign = "right"; ctx.fillStyle = "#8b6f18"; ctx.font = "900 34px Arial"; ctx.fillText("האלבומים והשירים שבחרתי", width - 88, y); y += 50;
+        const gap = 18, cardWidth = (width - 176 - gap) / 2, cardHeight = 185;
+        for (const [index, album] of albums.entries()) {
+          const column = index % 2, row = Math.floor(index / 2);
+          const x = 79 + column * (cardWidth + gap), cardY = y + row * 205;
+          ctx.fillStyle = "#f7f2e2"; ctx.beginPath(); ctx.roundRect(x, cardY, cardWidth, cardHeight, 22); ctx.fill();
+          const imageX = x + cardWidth - 163;
+          drawReceiptImage(ctx, loadedAlbums[index], imageX, cardY + 14, 142, 157, 17, "♫");
+          const textRight = imageX - 18, textWidth = cardWidth - 195;
+          ctx.textAlign = "right"; ctx.fillStyle = "#2b2340"; ctx.font = "900 25px Arial";
+          ctx.fillText(receiptText(ctx, album.title, textWidth), textRight, cardY + 52);
+          ctx.fillStyle = "#746a7d"; ctx.font = "700 19px Arial";
+          ctx.fillText(receiptText(ctx, album.artistName, textWidth), textRight, cardY + 83);
+          ctx.fillStyle = "#9a771b"; ctx.font = "700 18px Arial";
+          const songText = album.songs.length ? album.songs.join(" · ") : "ללא בחירת שיר";
+          ctx.fillText(receiptText(ctx, songText, textWidth), textRight, cardY + 126);
+        }
+        y += albumRows * 205 + 20;
+      }
+      if (artists.length) {
+        ctx.textAlign = "right"; ctx.fillStyle = "#8b6f18"; ctx.font = "900 34px Arial"; ctx.fillText("הזמרים שבחרתי", width - 88, y); y += 40;
+        const cellWidth = (width - 150) / 4;
+        for (const [index, artist] of artists.entries()) {
+          const column = index % 4, row = Math.floor(index / 4);
+          const centerX = 75 + column * cellWidth + cellWidth / 2, imageY = y + row * 205;
+          drawReceiptImage(ctx, loadedArtists[index], centerX - 68, imageY, 136, 136, 68, artist.name.slice(0, 1), true);
+          ctx.textAlign = "center"; ctx.fillStyle = "#2b2340"; ctx.font = "800 21px Arial";
+          ctx.fillText(receiptText(ctx, artist.name, cellWidth - 12), centerX, imageY + 170);
+        }
+      }
+      ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "800 25px Arial"; ctx.fillText("גם אני השתתפתי במצעד הגדול של ראש בראש", width / 2, height - 52);
+      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("יצירת הקובץ נכשלה.")), "image/png"));
+      return new File([blob], "ההצבעה-שלי-ראש-בראש.png", { type: "image/png" });
+    } finally { loaded.forEach((item) => item.cleanup()); }
   };
   const download = async () => { const file = await makeFile(); const url = URL.createObjectURL(file); const link = document.createElement("a"); link.href = url; link.download = file.name; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); };
   const share = async () => {
@@ -319,7 +403,7 @@ function VoteReceipt({ albums, artists }: { albums: { title: string; artistName:
     if (navigator.share && navigator.canShare?.({ files: [file] })) return navigator.share({ title: "ההצבעה שלי בראש בראש", text: "אלה הבחירות שלי במצעד ראש בראש", files: [file] });
     await download();
   };
-  return <section className="vote-receipt" aria-label="סיכום ההצבעה לשיתוף"><div className="receipt-heading"><small>הקול שלי במצעד</small><b>ראש בראש</b><span>25 שנות מוזיקה יהודית</span></div>{albums.length > 0 && <div><h2>האלבומים והשירים שבחרתי</h2>{albums.map((album, index) => <article key={`${album.title}-${index}`}><b>{index + 1}. {album.title}</b><small>{album.artistName} · {album.songs}</small></article>)}</div>}{artists.length > 0 && <div><h2>הזמרים שבחרתי</h2><p>{artists.join(" • ")}</p></div>}<footer><button type="button" onClick={() => void download()}>הורדת הכרטיס</button><button type="button" className="share-receipt" onClick={() => void share()}>שיתוף הכרטיס</button></footer></section>;
+  return <section className="vote-receipt" aria-label="סיכום ההצבעה לשיתוף"><div className="receipt-heading"><small>הקול שלי במצעד</small><b>ראש בראש</b><span>25 שנות מוזיקה יהודית</span></div>{albums.length > 0 && <div className="receipt-section"><h2>האלבומים והשירים שבחרתי</h2><div className="receipt-album-grid">{albums.map((album, index) => <article key={album.id}><div className="receipt-cover">{album.coverUrl ? <img src={album.coverUrl} alt={`עטיפת ${album.title}`} loading="lazy" /> : <span>♫</span>}</div><div><small>בחירה {index + 1}</small><b>{album.title}</b><span>{album.artistName}</span><em>{album.songs.length ? album.songs.join(" · ") : "ללא בחירת שיר"}</em></div></article>)}</div></div>}{artists.length > 0 && <div className="receipt-section"><h2>הזמרים שבחרתי</h2><div className="receipt-artist-grid">{artists.map((artist) => <article key={artist.id}>{artist.imageUrl ? <img src={artist.imageUrl} alt={`תמונת ${artist.name}`} loading="lazy" /> : <span>{artist.name.slice(0, 1)}</span>}<b>{artist.name}</b></article>)}</div></div>}<footer><button type="button" onClick={() => void download()}>הורדת הכרטיס</button><button type="button" className="share-receipt" onClick={() => void share()}>שיתוף ההצבעה שלי</button></footer></section>;
 }
 
 function Title({ kicker, title, count }: { kicker: string; title: string; count?: string }) { return <div className="section-title"><div><p className="kicker">{kicker}</p><h2>{title}</h2></div>{count && <strong>{count}</strong>}</div>; }
