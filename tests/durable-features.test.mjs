@@ -29,6 +29,25 @@ test("site vote checks and progress use the authenticated Google subject", () =>
   assert.match(worker, /DELETE FROM site_ballot_progress WHERE survey_id=\? AND user_sub=\?/);
 });
 
+test("site ballots keep the Google email and blocked computers are rejected server-side", () => {
+  const worker = source("worker/index.ts");
+  const admin = source("worker/admin.ts");
+  assert.match(worker, /voterEmail: user\.email/);
+  assert.match(worker, /INSERT INTO ballots \(id,survey_id,voter_key,voter_email,channel,fingerprint\)/);
+  assert.match(worker, /SELECT 1 AS blocked FROM blocked_fingerprints/);
+  assert.match(admin, /\/api\/admin\/blocked-fingerprints/);
+  assert.match(admin, /COALESCE\(b\.voter_email,\(SELECT s\.email FROM auth_sessions/);
+});
+
+test("successful voters receive a downloadable and shareable branded receipt", () => {
+  const page = source("app/page.tsx");
+  assert.match(page, /function VoteReceipt/);
+  assert.match(page, /הורדת הכרטיס/);
+  assert.match(page, /שיתוף הכרטיס/);
+  assert.match(page, /new File\(\[blob\], "ההצבעה-שלי-ראש-בראש\.png"/);
+  assert.match(page, /navigator\.share/);
+});
+
 test("a returning voter keeps the site header, account controls and song browser", () => {
   const page = source("app/page.tsx");
   assert.doesNotMatch(page, /if \(voted\) return/);

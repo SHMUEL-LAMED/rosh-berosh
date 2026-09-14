@@ -209,7 +209,7 @@ async function insertPollSnapshot(env: AdminEnv, snapshot: PollSnapshot, surveyI
     ...snapshot.albums.map((row) => env.DB.prepare("INSERT INTO albums (id,survey_id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,?,?)").bind(row.id, surveyId, row.title, row.artist_name, restoredUrl(row.cover_url, urls), row.position, row.active)),
     ...snapshot.songs.map((row) => env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,cover_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,?,?,?,?)").bind(row.id, row.album_id, row.title, restoredUrl(row.audio_url, urls), restoredUrl(row.cover_url, urls) || null, row.preview_start || 0, row.preview_end || 0, row.position, row.active)),
     ...snapshot.artists.map((row) => env.DB.prepare("INSERT INTO artists (id,survey_id,name,image_url,position,active) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.name, restoredUrl(row.image_url, urls), row.position, row.active)),
-    ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,fingerprint,created_at) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.channel, row.fingerprint || null, row.created_at)),
+    ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,created_at) VALUES (?,?,?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.voter_email || null, row.channel, row.fingerprint || null, row.created_at)),
     ...snapshot.albumVotes.map((row) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(row.ballot_id, row.album_id)),
     ...snapshot.songVotes.map((row) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(row.ballot_id, row.album_id, row.song_id)),
     ...snapshot.artistVotes.map((row) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(row.ballot_id, row.artist_id)),
@@ -286,6 +286,7 @@ async function clearCurrentPoll(env: AdminEnv, surveyId?: string) {
     env.DB.prepare("DELETE FROM album_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(survey),
     env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(survey),
     env.DB.prepare("DELETE FROM ballots WHERE survey_id=?").bind(survey),
+    env.DB.prepare("DELETE FROM blocked_fingerprints WHERE survey_id=?").bind(survey),
     env.DB.prepare("DELETE FROM songs WHERE album_id IN (SELECT id FROM albums WHERE survey_id=?)").bind(survey),
     env.DB.prepare("DELETE FROM albums WHERE survey_id=?").bind(survey),
     env.DB.prepare("DELETE FROM artists WHERE survey_id=?").bind(survey),
@@ -302,6 +303,7 @@ export async function resetPollVotes(env: AdminEnv, surveyId: string): Promise<n
       env.DB.prepare("DELETE FROM album_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
       env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
       env.DB.prepare("DELETE FROM ballots WHERE survey_id=?").bind(surveyId),
+      env.DB.prepare("DELETE FROM blocked_fingerprints WHERE survey_id=?").bind(surveyId),
     ]);
   }
   await clearIvrProgress(env, surveyId);
@@ -619,16 +621,29 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       ]);
       const [ivrPrompts, ivrRecorders, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readIvrRecorders(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
       const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
-      let suspicious: { fingerprint: string; count: number; voters: string[] }[] = [];
+      let suspicious: { fingerprint: string; count: number; voters: string[]; blocked: boolean }[] = [];
       try {
-        const dupFp = await env.DB.prepare("SELECT fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(voter_key, ', ') AS voters FROM ballots WHERE survey_id=? AND fingerprint IS NOT NULL AND fingerprint != '' GROUP BY fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string }>();
-        suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", ") }));
+        const dupFp = await env.DB.prepare("SELECT b.fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(COALESCE(b.voter_email,b.voter_key), ', ') AS voters, CASE WHEN bf.fingerprint IS NULL THEN 0 ELSE 1 END AS blocked FROM ballots b LEFT JOIN blocked_fingerprints bf ON bf.survey_id=b.survey_id AND bf.fingerprint=b.fingerprint WHERE b.survey_id=? AND b.fingerprint IS NOT NULL AND b.fingerprint != '' GROUP BY b.fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string; blocked: number }>();
+        suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", "), blocked: Boolean(r.blocked) }));
       } catch { /* fingerprint column may not exist yet */ }
       return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, voteTimeline: { hourly: hourlyVotes.results, daily: dailyVotes.results }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, ivrRecorders, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
     } catch (error) {
       console.error("overview error", error);
       return json({ error: `שגיאה בטעינת הנתונים: ${error instanceof Error ? error.message : String(error)}` }, 500);
     }
+  }
+
+  if (url.pathname === "/api/admin/blocked-fingerprints" && ["POST", "DELETE"].includes(request.method)) {
+    const body = await request.json<{ fingerprint?: string }>();
+    const fingerprint = text(body.fingerprint);
+    if (!/^[a-f0-9]{64}$/i.test(fingerprint)) return json({ error: "טביעת המחשב אינה תקינה." }, 400);
+    if (request.method === "POST") {
+      await env.DB.prepare("INSERT INTO blocked_fingerprints (survey_id,fingerprint,blocked_by) VALUES (?,?,?) ON CONFLICT(survey_id,fingerprint) DO UPDATE SET blocked_by=excluded.blocked_by,created_at=unixepoch()")
+        .bind(surveyId, fingerprint, currentAdmin.email).run();
+      return json({ ok: true, blocked: true });
+    }
+    await env.DB.prepare("DELETE FROM blocked_fingerprints WHERE survey_id=? AND fingerprint=?").bind(surveyId, fingerprint).run();
+    return json({ ok: true, blocked: false });
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/archives") {
@@ -1014,7 +1029,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
     const pageSize = 50;
     const offset = (page - 1) * pageSize;
-    const ballots = await env.DB.prepare(`SELECT id, voter_key AS voterKey, channel, fingerprint, created_at AS createdAt FROM ballots WHERE survey_id=? ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}`).bind(surveyId).all<{ id: string; voterKey: string; channel: string; fingerprint?: string; createdAt: number }>();
+    const ballots = await env.DB.prepare(`SELECT b.id, b.voter_key AS voterKey, COALESCE(b.voter_email,(SELECT s.email FROM auth_sessions s WHERE s.user_sub=b.voter_key ORDER BY s.created_at DESC LIMIT 1)) AS voterEmail, b.channel, b.fingerprint, b.created_at AS createdAt FROM ballots b WHERE b.survey_id=? ORDER BY b.created_at DESC LIMIT ${pageSize} OFFSET ${offset}`).bind(surveyId).all<{ id: string; voterKey: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number }>();
     const ballotIds = ballots.results.map((b) => b.id);
     if (!ballotIds.length) return json({ voters: [], page, hasMore: false });
     const [albumVotes, songVotes, artistVotes] = await env.DB.batch([

@@ -44,8 +44,15 @@ const TABLES = [
     id TEXT PRIMARY KEY NOT NULL,
     survey_id TEXT NOT NULL DEFAULT 'main' REFERENCES surveys(id),
     voter_key TEXT NOT NULL,
+    voter_email TEXT,
     channel TEXT NOT NULL DEFAULT 'site',
     fingerprint TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  `CREATE TABLE IF NOT EXISTS blocked_fingerprints (
+    survey_id TEXT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    blocked_by TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
   `CREATE TABLE IF NOT EXISTS album_votes (
@@ -148,6 +155,7 @@ const COLUMNS = [
   { table: "songs", column: "preview_start", definition: "INTEGER NOT NULL DEFAULT 0" },
   { table: "songs", column: "preview_end", definition: "INTEGER NOT NULL DEFAULT 0" },
   { table: "ballots", column: "fingerprint", definition: "TEXT" },
+  { table: "ballots", column: "voter_email", definition: "TEXT" },
 ];
 
 // אינדקסים ייחודיים שהוחלפו ב-`drizzle/0001` ו-`drizzle/0002`.
@@ -166,6 +174,7 @@ const INDEXES = [
   "CREATE UNIQUE INDEX IF NOT EXISTS artist_votes_unique ON artist_votes(ballot_id, artist_id)",
   "CREATE INDEX IF NOT EXISTS ballots_survey_created_idx ON ballots(survey_id, created_at)",
   "CREATE INDEX IF NOT EXISTS ballots_fingerprint_idx ON ballots(fingerprint) WHERE fingerprint IS NOT NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS blocked_fingerprints_unique ON blocked_fingerprints(survey_id,fingerprint)",
   "CREATE INDEX IF NOT EXISTS album_votes_album_idx ON album_votes(album_id)",
   "CREATE INDEX IF NOT EXISTS song_votes_song_idx ON song_votes(song_id)",
   "CREATE INDEX IF NOT EXISTS artist_votes_artist_idx ON artist_votes(artist_id)",

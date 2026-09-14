@@ -43,6 +43,7 @@ export const ballots = sqliteTable("ballots", {
   id: text("id").primaryKey(),
   surveyId: text("survey_id").notNull().default("main").references(() => surveys.id),
   voterKey: text("voter_key").notNull(),
+  voterEmail: text("voter_email"),
   channel: text("channel").notNull().default("site"),
   fingerprint: text("fingerprint"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
@@ -90,6 +91,15 @@ export const pollSettings = sqliteTable("poll_settings", {
   artistsMin: integer("artists_min").notNull().default(1),
   artistsMax: integer("artists_max").notNull().default(3),
 });
+
+export const blockedFingerprints = sqliteTable("blocked_fingerprints", {
+  surveyId: text("survey_id").notNull().references(() => surveys.id, { onDelete: "cascade" }),
+  fingerprint: text("fingerprint").notNull(),
+  blockedBy: text("blocked_by").notNull(),
+  createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  uniqueIndex("blocked_fingerprints_unique").on(table.surveyId, table.fingerprint),
+]);
 
 export const ballotRateLimits = sqliteTable("ballot_rate_limits", {
   bucket: text("bucket").primaryKey(),

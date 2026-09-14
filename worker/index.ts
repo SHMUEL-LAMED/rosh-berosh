@@ -25,7 +25,7 @@ interface Env {
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
 type EdgeCacheStorage = CacheStorage & { default?: Cache };
-type Submission = { voterKey?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string };
+type Submission = { voterKey?: string; voterEmail?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string };
 type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; albumsMax: number; songsEnabled: number; songsMin: number; songsMax: number; artistsEnabled: number; artistsMin: number; artistsMax: number };
 const DEFAULT_RULES: Rules = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
 const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1), 'main')";
@@ -168,6 +168,7 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   const channel = body.channel === "phone" ? "phone" : "site";
   const rawVoterKey = body.voterKey?.trim().toLowerCase() || "";
   const voterKey = channel === "phone" ? normalizePhone(rawVoterKey) : rawVoterKey;
+  const fingerprint = body.fingerprint?.trim() || "";
   const albumIds = unique(body.albumIds ?? []);
   const artistIds = unique(body.artistIds ?? []);
   const songMap = Object.fromEntries(Object.entries(body.songIdsByAlbum ?? {}).map(([albumId, value]) => [albumId, unique(Array.isArray(value) ? value : value ? [value] : [])]));
@@ -176,6 +177,11 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   const artistMin = rules.artistsEnabled ? rules.artistsMin : 0, artistMax = rules.artistsEnabled ? rules.artistsMax : 0;
   if (!voterKey || albumIds.length > albumMax || artistIds.length > artistMax || albumIds.some((id) => (songMap[id]?.length ?? 0) > songMax)) {
     return json({ error: "הבחירות אינן תואמות להגדרות הסקר." }, 400);
+  }
+
+  if (channel === "site" && fingerprint) {
+    const blocked = await env.DB.prepare("SELECT 1 AS blocked FROM blocked_fingerprints WHERE survey_id=? AND fingerprint=?").bind(surveyId, fingerprint).first();
+    if (blocked) return json({ error: "המחשב הזה נחסם מהצבעה בסקר." }, 403);
   }
 
   // A stage can end up holding fewer active items than its minimum (an album or
@@ -214,7 +220,7 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
 
   const ballotId = crypto.randomUUID();
   const statements = [
-    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,fingerprint) VALUES (?,?,?,?,?)").bind(ballotId, surveyId, voterKey, channel, body.fingerprint || null),
+    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint) VALUES (?,?,?,?,?,?)").bind(ballotId, surveyId, voterKey, channel === "site" ? normalizeEmail(body.voterEmail) || null : null, channel, fingerprint || null),
     ...albumIds.map((id) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(ballotId, id)),
     ...albumIds.flatMap((id) => (songMap[id] ?? []).map((songId) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(ballotId, id, songId))),
     ...artistIds.map((id) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(ballotId, id)),
@@ -361,6 +367,11 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const voterKey = isIvr ? normalizePhone(rawVoterKey) : siteVoterKey;
     if (!voterKey) return json({ voted: false });
     const surveyId = await activeSurveyId(env);
+    const fingerprint = url.searchParams.get("fingerprint")?.trim() || "";
+    if (!isIvr && fingerprint) {
+      const blocked = await env.DB.prepare("SELECT 1 AS blocked FROM blocked_fingerprints WHERE survey_id=? AND fingerprint=?").bind(surveyId, fingerprint).first();
+      if (blocked) return json({ voted: false, blocked: true });
+    }
     const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first();
     return json({ voted: !!existing });
   }
@@ -469,7 +480,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     }
     const user = await readSession(request, env);
     if (!user) return json({ error: "יש להתחבר באמצעות Google." }, 401);
-    return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub }) }), env);
+    return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub, voterEmail: user.email }) }), env);
   }
   if (url.pathname === "/_vinext/image") {
     return handleImageOptimization(request, {

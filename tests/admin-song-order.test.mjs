@@ -139,3 +139,24 @@ test("the voters panel lists ballots instead of failing", async () => {
   assert.deepEqual(body.voters[0].albums, ["אלבום"]);
   assert.deepEqual(body.voters[0].songs, [{ title: "song-b", albumTitle: "אלבום" }]);
 });
+
+test("the voters panel returns an email instead of the opaque Google subject", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAlbum(db);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,created_at) VALUES ('ballot-email','main','google-sub-123','voter@example.com','site',1)").run();
+  const response = await worker.fetch(new Request("http://localhost/api/admin/voters", { headers: { cookie } }), env, ctx);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.voters[0].voterEmail, "voter@example.com");
+});
+
+test("an administrator can block and unblock a suspicious computer", async () => {
+  const { worker, db, env, cookie } = await setup();
+  const fingerprint = "a".repeat(64);
+  const block = await worker.fetch(new Request("http://localhost/api/admin/blocked-fingerprints", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ fingerprint }) }), env, ctx);
+  assert.equal(block.status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM blocked_fingerprints WHERE fingerprint=?").get(fingerprint).total, 1);
+  const unblock = await worker.fetch(new Request("http://localhost/api/admin/blocked-fingerprints", { method: "DELETE", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ fingerprint }) }), env, ctx);
+  assert.equal(unblock.status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM blocked_fingerprints WHERE fingerprint=?").get(fingerprint).total, 0);
+});
