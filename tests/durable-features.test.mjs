@@ -48,6 +48,18 @@ test("successful voters receive a downloadable and shareable branded receipt", (
   assert.match(page, /navigator\.share/);
 });
 
+test("admin preview reaches the final screen without writing a ballot or progress", () => {
+  const page = source("app/page.tsx");
+  const admin = source("app/admin/page.tsx");
+  assert.match(page, /requestedPreview === "site" \|\| requestedPreview === "ivr"/);
+  assert.match(page, /if \(preview\) \{ setDone\(true\); stop\(\); return; \}/);
+  assert.match(page, /preview \|\| !catalog \|\| voted !== false/);
+  assert.match(page, /שום הצבעה או התקדמות לא נשמרו/);
+  assert.match(admin, /\?preview=site/);
+  assert.match(admin, /\?preview=ivr/);
+  assert.match(admin, /הקישו <b>75<\/b>/);
+});
+
 test("a returning voter keeps the site header, account controls and song browser", () => {
   const page = source("app/page.tsx");
   assert.doesNotMatch(page, /if \(voted\) return/);

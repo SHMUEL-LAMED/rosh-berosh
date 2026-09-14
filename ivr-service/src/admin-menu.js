@@ -87,6 +87,7 @@ const ADMIN_SECTIONS = [
       { code: "72", label: "האלבומים המובילים", action: "status-albums" , spoken: "לשמיעת האלבומים המובילים" },
       { code: "73", label: "השירים המובילים", action: "status-songs" , spoken: "לשמיעת השירים המובילים" },
       { code: "74", label: "הזמרים המובילים", action: "status-artists" , spoken: "לשמיעת הזמרים המובילים" },
+      { code: "75", label: "תצוגה מקדימה של קו ההצבעה", action: "preview-voting" , spoken: "לתצוגה מקדימה של קו ההצבעה" },
     ],
   },
   {

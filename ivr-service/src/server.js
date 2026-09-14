@@ -852,6 +852,10 @@ const ADMIN_ACTIONS = {
   "status-albums": (call, callerPhone) => topResults(call, callerPhone, "albums", "אלבומים"),
   "status-songs": (call, callerPhone) => topResults(call, callerPhone, "songs", "שירים"),
   "status-artists": (call, callerPhone) => topResults(call, callerPhone, "artists", "זמרים"),
+  "preview-voting": async (call, callerPhone) => {
+    call.id_list_message(lines("מתחילים תצוגה מקדימה של קו ההצבעה", "הבחירות לא יישמרו ולא ייספרו בתוצאות"), { prependToNextAction: true });
+    return runVotingFlow(call, { preview: true, voterPhone: callerPhone });
+  },
 
   "archive-create": async (call, callerPhone) => {
     if (!(await confirmAction(call, "האם ליצור עכשיו גיבוי מלא כולל קובצי המדיה"))) return "יצירת הגיבוי בוטלה";
@@ -983,7 +987,7 @@ router.get("/recordings", async (call) => {
   }
 });
 
-router.get("/", async (call) => {
+async function runVotingFlow(call, { preview = false, voterPhone = phone(call) } = {}) {
   // עד כאן כל תקלה - סוד לא תואם, שגיאת שרת או אתר שלא עונה - נשמעה למתקשר
   // בדיוק כמו "ההצבעה אינה פתוחה", והשיחה נותקה מיד בלי שום דרך לדעת מה קרה.
   let response, catalog;
@@ -998,14 +1002,13 @@ router.get("/", async (call) => {
     return call.id_list_message([text("יש תקלה זמנית בחיבור למערכת ההצבעה נא לנסות שוב בעוד כמה דקות")]);
   }
   const prompts = promptMap(catalog);
-  if (!catalog.rules?.votingOpen) return call.id_list_message(prompt(prompts, "system:voting_closed", "ההצבעה עדיין אינה פתוחה"));
+  if (!preview && !catalog.rules?.votingOpen) return call.id_list_message(prompt(prompts, "system:voting_closed", "ההצבעה עדיין אינה פתוחה"));
 
-  const voterPhone = phone(call);
   if (!voterPhone) {
     call.id_list_message([text("לא ניתן להצביע ממספר חסוי נא להתקשר ממספר מזוהה ולנסות שוב")], { prependToNextAction: true });
     return call.hangup();
   }
-  try {
+  if (!preview) try {
     const { result: check } = await api(`/api/ballots/check?voterKey=${encodeURIComponent(voterPhone)}`);
     if (check.voted) {
       call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"), { prependToNextAction: true });
@@ -1026,7 +1029,7 @@ router.get("/", async (call) => {
   // handled by the quotas below, and the site accepts the shorter ballot too.
   if (rules.albumsEnabled && !catalog.albums?.length) return call.id_list_message(prompt(prompts, "system:not_ready", "רשימת האלבומים עדיין אינה מוכנה"));
 
-  const saved = await loadProgress(voterPhone);
+  const saved = preview ? null : await loadProgress(voterPhone);
   let selectedAlbums = [], selectedArtists = [], songIdsByAlbum = {}, menuLead = [];
 
   if (saved) {
@@ -1052,7 +1055,7 @@ router.get("/", async (call) => {
   const songsDone = () => !rules.songsEnabled || selectedAlbums.every((album) => (songIdsByAlbum[album.id] || []).length >= songMinQuotaOf(album));
   const artistsDone = () => !rules.artistsEnabled || selectedArtists.length >= artistMinQuota;
   const complete = () => albumsDone() && songsDone() && artistsDone();
-  const persistProgress = () => saveProgress(voterPhone, {
+  const persistProgress = () => preview ? Promise.resolve() : saveProgress(voterPhone, {
     albumIds: selectedAlbums.map((album) => album.id),
     songIdsByAlbum,
     artistIds: selectedArtists.map((artist) => artist.id),
@@ -1145,6 +1148,11 @@ router.get("/", async (call) => {
     }
   }
 
+  if (preview) {
+    call.id_list_message(lines("התצוגה המקדימה הסתיימה", "שום הצבעה או התקדמות לא נשמרו", "חוזרים לתפריט הניהול"), { prependToNextAction: true });
+    return "תפריט מצב ותוצאות";
+  }
+
   const submission = await api("/api/ballots", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -1164,7 +1172,9 @@ router.get("/", async (call) => {
   await clearProgress(voterPhone);
   call.id_list_message(prompt(prompts, "system:success", "תודה הצבעתכם נקלטה בהצלחה"), { prependToNextAction: true });
   return finishCall(call);
-});
+}
+
+router.get("/", async (call) => runVotingFlow(call));
 
 const app = express();
 app.use(router);

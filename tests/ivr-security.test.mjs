@@ -599,7 +599,7 @@ test("an empty entry requires explicit confirmation before transfer", () => {
   assert.equal([...server.matchAll(/await confirmTransfer\(call, prompts\)/g)].length, 2);
 
   // בקו הניהול הסולמית מסיימת הקשת מספר, ולכן אסור שהיא תעביר משם.
-  const adminLine = server.slice(server.indexOf("async function adminChoice"), server.indexOf('router.get("/", async (call)'));
+  const adminLine = server.slice(server.indexOf("async function adminChoice"), server.indexOf("async function runVotingFlow"));
   assert.doesNotMatch(adminLine, /transferOnHash/, "קו הניהול חייב להישאר בלי ההעברה בסולמית");
 
   const prompts = JSON.parse(readFileSync(new URL("../ivr-service/src/ivr-system-prompts.json", import.meta.url), "utf8"));
