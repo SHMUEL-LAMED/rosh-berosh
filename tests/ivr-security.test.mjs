@@ -551,6 +551,18 @@ test("phone voting saves every choice and resumes a partially completed section"
   assert.match(server, /initialSongs, async \(next\)/);
 });
 
+test("each voting stage introduction is played only once", () => {
+  const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
+  const votingFlow = server.slice(server.indexOf("async function runVotingFlow"), server.indexOf("app.get(\"/healthz\""));
+  assert.match(votingFlow, /const introducedStages = new Set\(\)/);
+  assert.match(votingFlow, /if \(selectedAlbums\.length\) introducedStages\.add\("albums"\)/);
+  assert.match(votingFlow, /Object\.values\(songIdsByAlbum\).*introducedStages\.add\("songs"\)/);
+  assert.match(votingFlow, /if \(selectedArtists\.length\) introducedStages\.add\("artists"\)/);
+  assert.equal((votingFlow.match(/stageIntro\("albums"/g) || []).length, 2);
+  assert.equal((votingFlow.match(/stageIntro\("songs"/g) || []).length, 2);
+  assert.equal((votingFlow.match(/stageIntro\("artists"/g) || []).length, 2);
+});
+
 test("Render diagnostics expose the exact deployed commit", () => {
   const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
   assert.match(server, /process\.env\.RENDER_GIT_COMMIT/);
