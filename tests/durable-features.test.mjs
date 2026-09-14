@@ -41,11 +41,21 @@ test("site ballots keep the Google email and blocked computers are rejected serv
 
 test("successful voters receive a downloadable and shareable branded receipt", () => {
   const page = source("app/page.tsx");
+  const worker = source("worker/index.ts");
   assert.match(page, /function VoteReceipt/);
   assert.match(page, /הורדת הכרטיס/);
-  assert.match(page, /שיתוף הכרטיס/);
+  assert.match(page, /שיתוף ההצבעה שלי/);
   assert.match(page, /new File\(\[blob\], "ההצבעה-שלי-ראש-בראש\.png"/);
   assert.match(page, /navigator\.share/);
+  assert.match(page, /savedReceipt && <VoteReceipt/);
+  assert.match(page, /album\.coverUrl/);
+  assert.match(page, /artist\.imageUrl/);
+  assert.match(page, /loadReceiptImage/);
+  assert.match(page, /drawReceiptImage/);
+  assert.match(worker, /receipt: \{/);
+  assert.match(worker, /a\.cover_url AS coverUrl/);
+  assert.match(worker, /a\.image_url AS imageUrl/);
+  assert.match(worker, /if \(!existing && blocked\)/, "a blocked computer must still be able to share an existing authenticated ballot");
 });
 
 test("admin preview reaches the final screen without writing a ballot or progress", () => {

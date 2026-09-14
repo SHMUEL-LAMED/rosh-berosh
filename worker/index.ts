@@ -368,12 +368,37 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (!voterKey) return json({ voted: false });
     const surveyId = await activeSurveyId(env);
     const fingerprint = url.searchParams.get("fingerprint")?.trim() || "";
+    let blocked = false;
     if (!isIvr && fingerprint) {
-      const blocked = await env.DB.prepare("SELECT 1 AS blocked FROM blocked_fingerprints WHERE survey_id=? AND fingerprint=?").bind(surveyId, fingerprint).first();
-      if (blocked) return json({ voted: false, blocked: true });
+      blocked = !!(await env.DB.prepare("SELECT 1 AS blocked FROM blocked_fingerprints WHERE survey_id=? AND fingerprint=?").bind(surveyId, fingerprint).first());
     }
-    const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first();
-    return json({ voted: !!existing });
+    const existing = await env.DB.prepare("SELECT id FROM ballots WHERE survey_id=? AND voter_key=?").bind(surveyId, voterKey).first<{ id: string }>();
+    // Blocking prevents a new ballot; it must not hide an authenticated user's
+    // existing ballot or take away the ability to share it.
+    if (!existing && blocked) return json({ voted: false, blocked: true });
+    if (!existing || isIvr) return json({ voted: !!existing });
+
+    // A returning website voter may share only their own authenticated ballot.
+    // Read the labels and images from the database rather than trusting ids sent
+    // by the browser, and keep the IVR response intentionally small.
+    const [albums, songs, artists] = await env.DB.batch([
+      env.DB.prepare("SELECT a.id,a.title,a.artist_name AS artistName,a.cover_url AS coverUrl FROM album_votes v JOIN albums a ON a.id=v.album_id WHERE v.ballot_id=? ORDER BY a.position,a.title").bind(existing.id),
+      env.DB.prepare("SELECT s.album_id AS albumId,s.title FROM song_votes v JOIN songs s ON s.id=v.song_id WHERE v.ballot_id=? ORDER BY s.album_id,s.position,s.title").bind(existing.id),
+      env.DB.prepare("SELECT a.id,a.name,a.image_url AS imageUrl FROM artist_votes v JOIN artists a ON a.id=v.artist_id WHERE v.ballot_id=? ORDER BY a.position,a.name").bind(existing.id),
+    ]);
+    const songsByAlbum = new Map<string, string[]>();
+    for (const row of songs.results as Array<{ albumId: string; title: string }>) {
+      const list = songsByAlbum.get(row.albumId) || [];
+      list.push(row.title);
+      songsByAlbum.set(row.albumId, list);
+    }
+    return json({
+      voted: true,
+      receipt: {
+        albums: (albums.results as Array<{ id: string; title: string; artistName: string; coverUrl?: string | null }>).map((album) => ({ ...album, songs: songsByAlbum.get(album.id) || [] })),
+        artists: artists.results,
+      },
+    });
   }
   if (url.pathname === "/api/ballots/progress") {
     const surveyId = await activeSurveyId(env);
