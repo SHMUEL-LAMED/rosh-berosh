@@ -52,3 +52,31 @@ export function SubscribeCard({ heading = "רוצים לשמוע מאיתנו?",
     <p className="subscribe-note">נשתמש בכתובת החשבון שאיתו התחברתם. אפשר להסיר אותה מהרשימה בכל עת.</p>
   </section>;
 }
+
+/** מוצג פעם אחת מיד לאחר התחברות חדשה, ורק למי שאינו כבר ברשימה. */
+export function SubscribeAfterLogin() {
+  const [state, setState] = useState<"checking" | "offer" | "hidden">("checking");
+
+  useEffect(() => {
+    if (sessionStorage.getItem("rosh-berosh-show-subscribe") !== "1") return;
+    sessionStorage.removeItem("rosh-berosh-show-subscribe");
+    let active = true;
+    fetch("/api/subscribers", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
+      .then((data) => { if (active) setState(data?.subscribed ? "hidden" : "offer"); })
+      .catch(() => { if (active) setState("hidden"); });
+    return () => { active = false; };
+  }, []);
+
+  if (state !== "offer") return null;
+  return <div className="subscribe-overlay" role="dialog" aria-modal="true" aria-labelledby="subscribe-after-login-title">
+    <section className="subscribe-dialog">
+      <button className="subscribe-close" type="button" aria-label="לא עכשיו" onClick={() => setState("hidden")}>×</button>
+      <p className="kicker">ברוכים הבאים לראש בראש</p>
+      <h2 id="subscribe-after-login-title">רוצים לקבל עדכונים?</h2>
+      <p>הצטרפו לרשימת התפוצה וקבלו עדכונים על המצעד, התוצאות וההצבעות הבאות.</p>
+      <SubscribeCard heading="ההרשמה לוקחת רגע" blurb="נשתמש בכתובת ה־Google שאיתה התחברתם — בלי למלא טופס." />
+      <button className="subscribe-later" type="button" onClick={() => setState("hidden")}>לא עכשיו</button>
+    </section>
+  </div>;
+}
