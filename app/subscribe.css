@@ -11,3 +11,8 @@
 .subscribe-mark{width:42px;height:42px;display:grid;flex:none;place-items:center;border-radius:50%;color:#137863;background:#def4ed;font-size:20px}
 .subscribe-card.done b{display:block}
 .subscribe-card.done small{display:block;margin-top:4px;color:var(--muted);font-size:12px}
+.subscribe-overlay{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:20px;background:rgba(10,16,31,.58);backdrop-filter:blur(5px)}
+.subscribe-dialog{position:relative;width:min(510px,100%);padding:34px 28px 24px;border:1px solid rgba(184,149,48,.42);border-radius:23px;color:var(--text);background:var(--panel);box-shadow:0 24px 75px rgba(0,0,0,.34);text-align:right}
+.subscribe-dialog h2{margin:5px 0 8px;font-size:28px}.subscribe-dialog>p:not(.kicker){margin:0;color:var(--muted);line-height:1.65}.subscribe-dialog .subscribe-card{margin-top:18px;padding:0;border:0;background:transparent}.subscribe-dialog .subscribe-note{display:none}
+.subscribe-close{position:absolute;top:10px;left:13px;width:36px;height:36px;border:0;border-radius:50%;color:var(--muted);background:transparent;font-size:28px;line-height:1;cursor:pointer}.subscribe-close:hover{background:rgba(0,0,0,.06)}
+.subscribe-later{display:block;margin:17px auto 0;border:0;color:var(--muted);background:transparent;text-decoration:underline;cursor:pointer}
