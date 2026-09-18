@@ -14,12 +14,15 @@ test("Google login is exchanged for an opaque 30-day server session", () => {
   assert.doesNotMatch(worker, /sessionCookie\(credential\)/);
 });
 
-test("login offers optional mailing-list consent and subscribes only when checked", () => {
+test("login offers mailing-list consent only after successful sign-in", () => {
   const auth = source("app/auth-ui.tsx");
-  assert.match(auth, /מעוניינים להצטרף לרשימת התפוצה של ראש בראש/);
-  assert.match(auth, /type="checkbox"/);
-  assert.match(auth, /if \(joinMailingListRef\.current\)/);
-  assert.match(auth, /fetch\("\/api\/subscribers", \{ method: "POST" \}\)/);
+  const subscribe = source("app/subscribe.tsx");
+  const page = source("app/page.tsx");
+  assert.match(auth, /sessionStorage\.setItem\("rosh-berosh-show-subscribe", "1"\)/);
+  assert.doesNotMatch(auth, /type="checkbox"/);
+  assert.match(subscribe, /function SubscribeAfterLogin/);
+  assert.match(subscribe, /fetch\("\/api\/subscribers", \{ method: "POST"/);
+  assert.match(page, /<SubscribeAfterLogin \/>/);
 });
 
 test("site vote checks and progress use the authenticated Google subject", () => {
