@@ -7,7 +7,14 @@ export type User = { email: string; name: string; picture?: string; isAdmin: boo
 declare global {
   interface Window {
     google?: { accounts: { id: {
-      initialize(options: { client_id: string; callback(response: { credential: string }): void; auto_select?: boolean }): void;
+      initialize(options: {
+        client_id: string;
+        callback(response: { credential: string }): void;
+        auto_select?: boolean;
+        cancel_on_tap_outside?: boolean;
+        context?: "signin" | "signup" | "use";
+        use_fedcm_for_prompt?: boolean;
+      }): void;
       renderButton(element: HTMLElement, options: Record<string, unknown>): void;
       prompt(): void;
     } } };
@@ -35,6 +42,10 @@ export function LoginScreen() {
         if (!active || !button.current || !window.google) return;
         window.google.accounts.id.initialize({
           client_id: clientId,
+          auto_select: false,
+          cancel_on_tap_outside: false,
+          context: "signin",
+          use_fedcm_for_prompt: true,
           callback: async ({ credential }) => {
             setError("");
             const response = await fetch("/api/auth/google", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ credential }) });
@@ -46,6 +57,10 @@ export function LoginScreen() {
           },
         });
         window.google.accounts.id.renderButton(button.current, { theme: "filled_blue", size: "large", shape: "pill", text: "continue_with", locale: "he", width: 280 });
+        // Show Google's account chooser immediately when the browser permits it.
+        // The rendered button stays available as a fallback when One Tap/FedCM is
+        // unavailable, was dismissed, or is blocked by the browser.
+        window.google.accounts.id.prompt();
       };
       if (window.google) return start();
       const script = document.createElement("script");
