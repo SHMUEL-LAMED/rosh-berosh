@@ -3,7 +3,7 @@ const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { normalizePhone, phone, resolvePostVoteTransfer } = require("./phone");
 const { SEC_WAIT, TRANSFER_KEY, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput, transferOnEmptyEntry } = require("./menu-input");
-const { sanitizeProgress, progressChanged } = require("./progress");
+const { sanitizeProgress, restoreTiming, markStageDone } = require("./progress");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 const { ADMIN_SECTIONS, adminReadOptions, resolveAdminCode, sectionShortcut } = require("./admin-menu");
 
@@ -1031,14 +1031,19 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
 
   const saved = preview ? null : await loadProgress(voterPhone);
   let selectedAlbums = [], selectedArtists = [], songIdsByAlbum = {}, menuLead = [];
+  // כל שיחה נספרת: ההתקדמות נשמרת כבר בכניסה כדי שתחילת ההצבעה ומספר
+  // השיחות יישארו גם אם המתקשר ניתק לפני הבחירה הראשונה.
+  let timing = preview ? null : restoreTiming(saved);
 
   if (saved) {
     const sanitized = sanitizeProgress(saved, catalog, rules);
     if (sanitized.albumIds.length) selectedAlbums = (catalog.albums || []).filter((a) => sanitized.albumIds.includes(a.id));
     songIdsByAlbum = sanitized.songIdsByAlbum;
     if (sanitized.artistIds.length) selectedArtists = (catalog.artists || []).filter((a) => sanitized.artistIds.includes(a.id));
-    if (progressChanged(saved, sanitized)) await saveProgress(voterPhone, sanitized);
+    await saveProgress(voterPhone, { ...sanitized, timing });
     menuLead = prompt(prompts, "system:welcome_back", "ברוכים השבים ממשיכים מאיפה שהפסקתם");
+  } else if (!preview) {
+    await saveProgress(voterPhone, { albumIds: [], songIdsByAlbum: {}, artistIds: [], timing });
   }
 
   // A stage introduction belongs to the entrance to that stage, not to every
@@ -1070,11 +1075,22 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
   const songsDone = () => !rules.songsEnabled || selectedAlbums.every((album) => (songIdsByAlbum[album.id] || []).length >= songMinQuotaOf(album));
   const artistsDone = () => !rules.artistsEnabled || selectedArtists.length >= artistMinQuota;
   const complete = () => albumsDone() && songsDone() && artistsDone();
-  const persistProgress = () => preview ? Promise.resolve() : saveProgress(voterPhone, {
-    albumIds: selectedAlbums.map((album) => album.id),
-    songIdsByAlbum,
-    artistIds: selectedArtists.map((artist) => artist.id),
-  });
+  const stampStages = () => {
+    if (!timing) return;
+    if (rules.albumsEnabled && albumsDone()) timing = markStageDone(timing, "albumsDoneAt");
+    if (rules.songsEnabled && albumsDone() && selectedAlbums.length && songsDone()) timing = markStageDone(timing, "songsDoneAt");
+    if (rules.artistsEnabled && artistsDone()) timing = markStageDone(timing, "artistsDoneAt");
+  };
+  const persistProgress = () => {
+    if (preview) return Promise.resolve();
+    stampStages();
+    return saveProgress(voterPhone, {
+      albumIds: selectedAlbums.map((album) => album.id),
+      songIdsByAlbum,
+      artistIds: selectedArtists.map((artist) => artist.id),
+      timing,
+    });
+  };
   const keepSongsForSelectedAlbums = () => {
     songIdsByAlbum = Object.fromEntries(selectedAlbums.map((album) => [album.id, songIdsByAlbum[album.id] || []]));
   };
@@ -1168,10 +1184,11 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
     return "תפריט מצב ותוצאות";
   }
 
+  stampStages();
   const submission = await api("/api/ballots", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ voterKey: voterPhone, albumIds: selectedAlbums.map((item) => item.id), songIdsByAlbum, artistIds: selectedArtists.map((item) => item.id), channel: "phone" }),
+    body: JSON.stringify({ voterKey: voterPhone, albumIds: selectedAlbums.map((item) => item.id), songIdsByAlbum, artistIds: selectedArtists.map((item) => item.id), channel: "phone", timing }),
   });
   if (submission.response.status === 409) {
     await clearProgress(voterPhone);

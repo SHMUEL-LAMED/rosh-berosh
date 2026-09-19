@@ -32,4 +32,19 @@ function progressChanged(saved, sanitized) {
   return JSON.stringify(original) !== JSON.stringify(sanitized);
 }
 
-module.exports = { sanitizeProgress, progressChanged };
+// זמני ההצבעה בקו: תחילת השיחה הראשונה, סיום כל שלב בפעם הראשונה ומספר
+// השיחות. נשמרים לצד הבחירות ונשלחים עם הפתק, כמו שהאתר עושה.
+function restoreTiming(saved, now = Math.floor(Date.now() / 1000)) {
+  const source = saved && saved.timing && typeof saved.timing === "object" ? saved.timing : {};
+  const startedAt = Number(source.startedAt) > 0 ? Math.floor(Number(source.startedAt)) : now;
+  const stamp = (value) => (Number(value) >= startedAt ? Math.floor(Number(value)) : undefined);
+  const sessions = (Number(source.sessions) > 0 ? Math.floor(Number(source.sessions)) : 0) + 1;
+  return { startedAt, albumsDoneAt: stamp(source.albumsDoneAt), songsDoneAt: stamp(source.songsDoneAt), artistsDoneAt: stamp(source.artistsDoneAt), sessions };
+}
+
+function markStageDone(timing, key, now = Math.floor(Date.now() / 1000)) {
+  if (!timing || timing[key]) return timing;
+  return { ...timing, [key]: now };
+}
+
+module.exports = { sanitizeProgress, progressChanged, restoreTiming, markStageDone };

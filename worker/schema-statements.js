@@ -1,7 +1,7 @@
 /**
  * בניית הסכמה בזמן ריצה: משפט SQL אחד בכל פריט, מופעל דרך `prepare` ולא דרך
  * `exec` — D1 מפצל את הקלט של `exec()` לפי שורות ואינו יכול להריץ משפט הפרוס
- * על כמה שורות. המשפטים כאן מכסים את `drizzle/0000`–`drizzle/0006` והם
+ * על כמה שורות. המשפטים כאן מכסים את `drizzle/0000`–`drizzle/0010` והם
  * idempotent, כך שמסד קיים אינו משתנה ומסד ריק נבנה במלואו.
  */
 
@@ -47,7 +47,12 @@ const TABLES = [
     voter_email TEXT,
     channel TEXT NOT NULL DEFAULT 'site',
     fingerprint TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    started_at INTEGER,
+    albums_done_at INTEGER,
+    songs_done_at INTEGER,
+    artists_done_at INTEGER,
+    sessions INTEGER
   )`,
   `CREATE TABLE IF NOT EXISTS blocked_fingerprints (
     survey_id TEXT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
@@ -156,6 +161,11 @@ const COLUMNS = [
   { table: "songs", column: "preview_end", definition: "INTEGER NOT NULL DEFAULT 0" },
   { table: "ballots", column: "fingerprint", definition: "TEXT" },
   { table: "ballots", column: "voter_email", definition: "TEXT" },
+  { table: "ballots", column: "started_at", definition: "INTEGER" },
+  { table: "ballots", column: "albums_done_at", definition: "INTEGER" },
+  { table: "ballots", column: "songs_done_at", definition: "INTEGER" },
+  { table: "ballots", column: "artists_done_at", definition: "INTEGER" },
+  { table: "ballots", column: "sessions", definition: "INTEGER" },
 ];
 
 // אינדקסים ייחודיים שהוחלפו ב-`drizzle/0001` ו-`drizzle/0002`.

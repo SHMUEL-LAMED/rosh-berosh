@@ -25,7 +25,28 @@ interface Env {
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
 type EdgeCacheStorage = CacheStorage & { default?: Cache };
-type Submission = { voterKey?: string; voterEmail?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string };
+type BallotTiming = { startedAt?: number; albumsDoneAt?: number; songsDoneAt?: number; artistsDoneAt?: number; sessions?: number };
+type Submission = { voterKey?: string; voterEmail?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string; timing?: BallotTiming };
+
+// זמני ההצבעה מגיעים מהלקוח (האתר או הקו) ולכן נבדקים: חותמת חייבת להיות
+// בעבר ולא לפני יותר משנה, וסיום שלב אינו יכול להקדים את ההתחלה. ערך פסול
+// הופך ל-null ואינו מפיל את ההצבעה — הנתונים הם תוספת, לא תנאי.
+function sanitizeTiming(timing: BallotTiming | undefined, now = Math.floor(Date.now() / 1000)) {
+  const stamp = (value: unknown, notBefore: number | null) => {
+    const seconds = Math.floor(Number(value));
+    if (!Number.isFinite(seconds) || seconds <= 0) return null;
+    if (seconds > now + 60 || seconds < now - 366 * 86400) return null;
+    if (notBefore !== null && seconds < notBefore) return null;
+    return seconds;
+  };
+  const startedAt = stamp(timing?.startedAt, null);
+  const albumsDoneAt = startedAt === null ? null : stamp(timing?.albumsDoneAt, startedAt);
+  const songsDoneAt = startedAt === null ? null : stamp(timing?.songsDoneAt, albumsDoneAt ?? startedAt);
+  const artistsDoneAt = startedAt === null ? null : stamp(timing?.artistsDoneAt, songsDoneAt ?? albumsDoneAt ?? startedAt);
+  const sessionsRaw = Math.floor(Number(timing?.sessions));
+  const sessions = startedAt !== null && Number.isFinite(sessionsRaw) && sessionsRaw >= 1 ? Math.min(sessionsRaw, 1000) : null;
+  return { startedAt, albumsDoneAt, songsDoneAt, artistsDoneAt, sessions };
+}
 type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; albumsMax: number; songsEnabled: number; songsMin: number; songsMax: number; artistsEnabled: number; artistsMin: number; artistsMax: number };
 const DEFAULT_RULES: Rules = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
 const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1), 'main')";
@@ -219,8 +240,9 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   }
 
   const ballotId = crypto.randomUUID();
+  const timing = sanitizeTiming(body.timing);
   const statements = [
-    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint) VALUES (?,?,?,?,?,?)").bind(ballotId, surveyId, voterKey, channel === "site" ? normalizeEmail(body.voterEmail) || null : null, channel, fingerprint || null),
+    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,started_at,albums_done_at,songs_done_at,artists_done_at,sessions) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(ballotId, surveyId, voterKey, channel === "site" ? normalizeEmail(body.voterEmail) || null : null, channel, fingerprint || null, timing.startedAt, timing.albumsDoneAt, timing.songsDoneAt, timing.artistsDoneAt, timing.sessions),
     ...albumIds.map((id) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(ballotId, id)),
     ...albumIds.flatMap((id) => (songMap[id] ?? []).map((songId) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(ballotId, id, songId))),
     ...artistIds.map((id) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(ballotId, id)),

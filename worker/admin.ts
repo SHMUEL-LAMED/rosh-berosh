@@ -1,4 +1,5 @@
 import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
+import { buildAnalytics } from "./analytics";
 import { ensureRuntimeSchema } from "./schema";
 import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrPrompts, readIvrRecorders, removeIvrRecorder, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
@@ -603,6 +604,11 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     try { await deleteSurveyData(env, id); }
     catch (error) { return json({ error: error instanceof Error ? error.message : "מחיקת הסקר נכשלה." }, 400); }
     return json({ ok: true, surveys: await listSurveys(env) });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/admin/analytics") {
+    try { return json(await buildAnalytics(env, surveyId)); }
+    catch (error) { console.error("analytics error", error); return json({ error: "לא הצלחנו לחשב את הנתונים המתקדמים." }, 500); }
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/overview") {

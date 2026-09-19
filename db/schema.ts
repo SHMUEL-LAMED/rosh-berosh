@@ -47,6 +47,13 @@ export const ballots = sqliteTable("ballots", {
   channel: text("channel").notNull().default("site"),
   fingerprint: text("fingerprint"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+  // זמני ההצבעה נשלחים מהאתר ומהקו יחד עם הפתק: תחילת ההצבעה, סיום כל שלב,
+  // ומספר הביקורים/השיחות שנדרשו עד האישור. ריק בפתקים ישנים.
+  startedAt: integer("started_at"),
+  albumsDoneAt: integer("albums_done_at"),
+  songsDoneAt: integer("songs_done_at"),
+  artistsDoneAt: integer("artists_done_at"),
+  sessions: integer("sessions"),
 }, (table) => [
   uniqueIndex("ballots_voter_survey_unique").on(table.surveyId, table.voterKey),
   index("ballots_survey_created_idx").on(table.surveyId, table.createdAt),

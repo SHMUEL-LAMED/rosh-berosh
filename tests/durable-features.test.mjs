@@ -36,7 +36,7 @@ test("site ballots keep the Google email and blocked computers are rejected serv
   const worker = source("worker/index.ts");
   const admin = source("worker/admin.ts");
   assert.match(worker, /voterEmail: user\.email/);
-  assert.match(worker, /INSERT INTO ballots \(id,survey_id,voter_key,voter_email,channel,fingerprint\)/);
+  assert.match(worker, /INSERT INTO ballots \(id,survey_id,voter_key,voter_email,channel,fingerprint,started_at,albums_done_at,songs_done_at,artists_done_at,sessions\)/);
   assert.match(worker, /SELECT 1 AS blocked FROM blocked_fingerprints/);
   assert.match(admin, /\/api\/admin\/blocked-fingerprints/);
   assert.match(admin, /COALESCE\(b\.voter_email,\(SELECT s\.email FROM auth_sessions/);
@@ -194,4 +194,35 @@ test("an album upload also stores the cover that came with the files", () => {
   const page = source("app/admin/page.tsx");
   assert.match(page, /if \(split\.cover\) \{/);
   assert.match(page, /coverForm\.set\("kind", "cover"\)/);
+});
+
+test("ballots carry voting timing from both channels and the schema stores it", () => {
+  const worker = source("worker/index.ts");
+  const schema = source("worker/schema-statements.js");
+  const site = source("app/page.tsx");
+  const phone = source("ivr-service/src/server.js");
+  for (const column of ["started_at", "albums_done_at", "songs_done_at", "artists_done_at", "sessions"]) {
+    assert.match(schema, new RegExp(`column: "${column}"`), `runtime schema adds ballots.${column}`);
+    assert.match(schema, new RegExp(`${column} INTEGER`), `fresh ballots table has ${column}`);
+  }
+  assert.match(worker, /const timing = sanitizeTiming\(body\.timing\)/);
+  assert.match(worker, /seconds > now \+ 60 \|\| seconds < now - 366 \* 86400/);
+  assert.match(site, /channel: "site", fingerprint: fp, timing \}/);
+  assert.match(site, /markStageDone\("albumsDoneAt"\)/);
+  assert.match(site, /markStageDone\("songsDoneAt"\)/);
+  assert.match(site, /markStageDone\("artistsDoneAt"\)/);
+  assert.match(phone, /channel: "phone", timing \}/);
+  assert.match(phone, /let timing = preview \? null : restoreTiming\(saved\)/);
+});
+
+test("the admin has a separate advanced-data tab that leaves results and voters untouched", () => {
+  const page = source("app/admin/page.tsx");
+  const admin = source("worker/admin.ts");
+  assert.match(page, /setTab\("analytics"\).*?>נתונים מתקדמים</s);
+  assert.match(page, /tab === "analytics" && <AnalyticsPanel/);
+  assert.match(page, /tab === "results" && data && <Results data=\{data\.results\}/);
+  assert.match(page, /tab === "voters" && <VotersPanel/);
+  assert.match(admin, /url\.pathname === "\/api\/admin\/analytics"/);
+  const analytics = source("worker/analytics.ts");
+  for (const key of ["albumBreakdown", "zeroVotes", "artistAlbums", "albumCompanions", "artistPairs", "combos", "timing", "daily", "blocked", "audit", "content"]) assert.match(analytics, new RegExp(`\\b${key}[,:]`), `analytics returns ${key}`);
 });

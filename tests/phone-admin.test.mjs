@@ -77,7 +77,8 @@ test("management code 75 previews the real voting flow without saving", () => {
   assert.equal(preview?.action, "preview-voting");
   assert.match(server, /runVotingFlow\(call, \{ preview: true, voterPhone: callerPhone \}\)/);
   assert.match(server, /const saved = preview \? null : await loadProgress/);
-  assert.match(server, /const persistProgress = \(\) => preview \? Promise\.resolve\(\)/);
+  assert.match(server, /const persistProgress = \(\) => \{\s*if \(preview\) return Promise\.resolve\(\);/);
+  assert.match(server, /let timing = preview \? null : restoreTiming\(saved\)/);
   const votingFlow = server.slice(server.indexOf("async function runVotingFlow"));
   const finish = votingFlow.slice(votingFlow.indexOf("if (preview) {"), votingFlow.indexOf('const submission = await api("/api/ballots"'));
   assert.match(finish, /שום הצבעה או התקדמות לא נשמרו/);
