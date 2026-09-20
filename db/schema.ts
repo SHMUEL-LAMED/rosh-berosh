@@ -58,6 +58,9 @@ export const ballots = sqliteTable("ballots", {
   uniqueIndex("ballots_voter_survey_unique").on(table.surveyId, table.voterKey),
   index("ballots_survey_created_idx").on(table.surveyId, table.createdAt),
   index("ballots_fingerprint_idx").on(table.fingerprint).where(sql`fingerprint is not null`),
+  index("ballots_survey_channel_idx").on(table.surveyId, table.createdAt, table.channel),
+  index("ballots_voter_key_idx").on(table.voterKey),
+  index("ballots_survey_fingerprint_idx").on(table.surveyId, table.fingerprint),
 ]);
 
 export const albumVotes = sqliteTable("album_votes", {
@@ -182,4 +185,5 @@ export const subscribers = sqliteTable("subscribers", {
 }, (table) => [
   uniqueIndex("subscribers_email_unique").on(table.email),
   index("subscribers_created_idx").on(table.createdAt),
+  index("subscribers_user_sub_idx").on(table.userSub),
 ]);

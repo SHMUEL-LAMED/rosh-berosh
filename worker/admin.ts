@@ -607,7 +607,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/analytics") {
-    try { return json(await buildAnalytics(env, surveyId)); }
+    try { return json(await buildAnalytics(env, surveyId, { fresh: url.searchParams.get("fresh") === "1" })); }
     catch (error) { console.error("analytics error", error); return json({ error: "לא הצלחנו לחשב את הנתונים המתקדמים." }, 500); }
   }
 

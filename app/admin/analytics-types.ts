@@ -29,7 +29,7 @@ export type Analytics = {
   albumCompanions: Array<{ id: string; title: string; votes: number; top: Array<{ id: string; title: string; votes: number; share: number }> }>;
   artistPairs: Array<{ a: string; b: string; votes: number; shareOfA: number; shareOfB: number }>;
   combos: { top: Array<{ albums: string[]; votes: number; share: number }>; distinct: number; repeated: number };
-  timing: { all: ChannelTiming; site: ChannelTiming; phone: ChannelTiming; untracked: number };
+  timing: { all: ChannelTiming; site: ChannelTiming; phone: ChannelTiming; untracked: number; sampled: boolean; sampleSize: number };
   daily: { series: DailyPoint[]; peak: DailyPoint | null; peakHour: { weekday: number; hour: number; votes: number } | null };
   /** תאים לפי יום בשבוע (0=ראשון) על שעה מקומית, בשעון ישראל. */
   activity: { cells: number[][]; site: number[][]; phone: number[][]; max: number };

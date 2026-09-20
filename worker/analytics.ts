@@ -1,4 +1,3 @@
-import { readIvrPrompts } from "./ivr-prompts";
 import { placeholders } from "./sql.js";
 import { competitionPlaces, concentrationIndex, giniCoefficient, israelParts, pearson, summarize } from "./analytics-math.js";
 import type {
@@ -30,10 +29,15 @@ export type { Analytics };
 
 // תקרה על מספר הפתקים שמשוך במלואו לחישוב זמנים. מעבר לה הסטטיסטיקה
 // מחושבת על הפתקים האחרונים והמסך אומר זאת, במקום למשוך מסד שלם לזיכרון.
-const TIMING_ROW_LIMIT = 20000;
+const TIMING_ROW_LIMIT = 5000;
 // עמוד אחד של רשימת R2. טיוטות הקו נספרות ממנו, וגלישה מסומנת כ"לפחות".
 const DRAFT_LIST_LIMIT = 1000;
 const RACE_SERIES = 5;
+// מטמון קצר בתוך האיזולייט. מסך השידור מרענן את עצמו, ובלעדיו כל רענון היה
+// מריץ את כל השאילתות מחדש ומתחרה בכתיבת הפתקים. בקשה עם ?fresh=1 מדלגת.
+const MEMO_SECONDS = 15;
+const memo = new Map<string, { at: number; value: Analytics }>();
+const heCollator = new Intl.Collator("he");
 
 const num = (value: unknown) => Number(value) || 0;
 const round = (value: number, digits = 1) => Math.round(value * 10 ** digits) / 10 ** digits;
@@ -41,7 +45,7 @@ const share = (part: number, whole: number) => (whole > 0 ? round((part / whole)
 const HOUR = 3600, DAY = 86400;
 
 function rankList(rows: ItemRow[], totalBallots: number, subtitle?: (row: ItemRow) => string | undefined): RankedItem[] {
-  const sorted = [...rows].sort((a, b) => num(b.votes) - num(a.votes) || a.title.localeCompare(b.title, "he"));
+  const sorted = [...rows].sort((a, b) => num(b.votes) - num(a.votes) || heCollator.compare(a.title, b.title));
   const sitePlaces = competitionPlaces(sorted, (row: ItemRow) => num(row.site));
   const phonePlaces = competitionPlaces(sorted, (row: ItemRow) => num(row.phone));
   return sorted.map((row, index) => {
@@ -107,8 +111,16 @@ function buildRace(rows: RaceRow[], leaders: ItemRow[], days: number[]): RaceSer
   });
 }
 
-export async function buildAnalytics(env: Env, surveyId: string): Promise<Analytics> {
+export async function buildAnalytics(env: Env, surveyId: string, options: { fresh?: boolean } = {}): Promise<Analytics> {
   const now = Math.floor(Date.now() / 1000);
+  const cached = memo.get(surveyId);
+  if (!options.fresh && cached && now - cached.at < MEMO_SECONDS) return cached.value;
+  const built = await computeAnalytics(env, surveyId, now);
+  memo.set(surveyId, { at: now, value: built });
+  return built;
+}
+
+async function computeAnalytics(env: Env, surveyId: string, now: number): Promise<Analytics> {
   const channelSums = "SUM(CASE WHEN b.channel='site' THEN 1 ELSE 0 END) AS site, SUM(CASE WHEN b.channel='phone' THEN 1 ELSE 0 END) AS phone";
   // שיר נספר לפי פתקים ולא לפי שורות, והחיבור מוגבל לאלבום של השיר עצמו:
   // `song_votes` ייחודי ל-(פתק, אלבום, שיר), ולכן שורה ישנה שנכתבה תחת
@@ -132,7 +144,7 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
     env.DB.prepare(`SELECT channel, created_at AS createdAt, started_at AS startedAt, albums_done_at AS albumsDoneAt, songs_done_at AS songsDoneAt, artists_done_at AS artistsDoneAt, sessions FROM ballots WHERE survey_id=?1 AND started_at IS NOT NULL ORDER BY created_at DESC LIMIT ${TIMING_ROW_LIMIT}`).bind(surveyId),
     env.DB.prepare("SELECT albums_enabled AS albums, songs_enabled AS songs, artists_enabled AS artists FROM poll_settings WHERE id=?1").bind(surveyId),
     env.DB.prepare("SELECT CAST(created_at/3600 AS INTEGER)*3600 AS bucket, channel, COUNT(*) AS votes FROM ballots WHERE survey_id=?1 GROUP BY bucket, channel ORDER BY bucket").bind(surveyId),
-    env.DB.prepare("SELECT bf.fingerprint, bf.blocked_by AS blockedBy, bf.created_at AS createdAt, (SELECT COUNT(*) FROM ballots b WHERE b.survey_id=bf.survey_id AND b.fingerprint=bf.fingerprint) AS ballots, (SELECT MAX(b.created_at) FROM ballots b WHERE b.survey_id=bf.survey_id AND b.fingerprint=bf.fingerprint) AS lastBallotAt FROM blocked_fingerprints bf WHERE bf.survey_id=?1 ORDER BY bf.created_at DESC").bind(surveyId),
+    env.DB.prepare("SELECT bf.fingerprint, bf.blocked_by AS blockedBy, bf.created_at AS createdAt, COUNT(b.id) AS ballots, MAX(b.created_at) AS lastBallotAt FROM blocked_fingerprints bf LEFT JOIN ballots b ON b.survey_id=bf.survey_id AND b.fingerprint=bf.fingerprint WHERE bf.survey_id=?1 GROUP BY bf.fingerprint, bf.blocked_by, bf.created_at ORDER BY bf.created_at DESC LIMIT 200").bind(surveyId),
   ]);
 
   const albumRows = albums.results as ItemRow[], songRows = songs.results as SongRow[], artistRows = artists.results as ItemRow[];
@@ -143,9 +155,7 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
     .bind(surveyId, ...leaders.map((item) => item.id));
   const emptyStatement = env.DB.prepare("SELECT NULL AS id, 0 AS bucket, 0 AS votes WHERE 0");
 
-  const [audit, auditTotalsRows, albumRace, artistRace, drafts, returningRow, surveyTotals, subscriberRows, dropoff] = await env.DB.batch([
-    env.DB.prepare("SELECT id, phone, action, target, status, created_at AS createdAt FROM ivr_admin_audit ORDER BY created_at DESC LIMIT 60"),
-    env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS failed FROM ivr_admin_audit WHERE created_at >= unixepoch() - 30*86400"),
+  const [albumRace, artistRace, drafts, returningRow, surveyTotals, subscriberRows, dropoff] = await env.DB.batch([
     albumLeaders.length ? raceStatement("album_votes", "album_id", albumLeaders) : emptyStatement,
     artistLeaders.length ? raceStatement("artist_votes", "artist_id", artistLeaders) : emptyStatement,
     // ההתקדמות נמחקת כששולחים את הפתק, ולכן שורה שנשארה היא באמת נטושה.
@@ -158,6 +168,17 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
     env.DB.prepare("SELECT v.album_id AS id, COUNT(*) AS withoutSong FROM album_votes v JOIN ballots b ON b.id=v.ballot_id LEFT JOIN song_votes sv ON sv.ballot_id=v.ballot_id AND sv.album_id=v.album_id WHERE b.survey_id=?1 AND sv.song_id IS NULL GROUP BY v.album_id").bind(surveyId),
   ]);
 
+  // יומן הקו והקריינויות יושבים בטבלאות שנוצרות בעצלתיים. הן נשאלות בנפרד
+  // ובנסיעה שנתפסת, כדי שמסד חדש יראה מסך מלא ובו רק החלק הזה ריק.
+  const optional = await env.DB.batch([
+    env.DB.prepare("SELECT id, phone, action, target, status, created_at AS createdAt FROM ivr_admin_audit ORDER BY created_at DESC LIMIT 60"),
+    env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS failed FROM ivr_admin_audit WHERE created_at >= unixepoch() - 30*86400"),
+    env.DB.prepare("SELECT key FROM ivr_prompts"),
+  ]).catch((error) => { console.error("optional analytics tables unavailable", error); return null; });
+  const audit = optional?.[0] ?? { results: [] };
+  const auditTotalsRows = optional?.[1] ?? { results: [] };
+  const promptKeyRows = optional?.[2] ?? { results: [] };
+
   const totals = ballots.results[0] as { total: number; site: number; phone: number; firstAt: number | null; lastAt: number | null } | undefined;
   const totalBallots = num(totals?.total);
   const albumTitle = new Map(albumRows.map((row) => [row.id, row.title]));
@@ -169,7 +190,7 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
   const songsByAlbum = new Map<string, SongRow[]>();
   for (const song of songRows) { const list = songsByAlbum.get(String(song.albumId)) || []; list.push(song); songsByAlbum.set(String(song.albumId), list); }
   const albumBreakdown: AlbumBreakdown[] = albumRows.map((album) => {
-    const list = (songsByAlbum.get(album.id) || []).slice().sort((a, b) => num(b.votes) - num(a.votes) || a.title.localeCompare(b.title, "he"));
+    const list = (songsByAlbum.get(album.id) || []).slice().sort((a, b) => num(b.votes) - num(a.votes) || heCollator.compare(a.title, b.title));
     const songVotes = list.reduce((sum, song) => sum + num(song.votes), 0);
     const items = list.map((song) => ({ id: song.id, title: song.title, votes: num(song.votes), share: share(num(song.votes), songVotes) }));
     const topSong = items.length && items[0].votes > 0 ? items[0] : null;
@@ -270,8 +291,7 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
     .sort((a, b) => b.share - a.share || b.withoutSong - a.withoutSong);
 
   // מצב התוכן: מה חסר כדי שהאתר והקו יהיו שלמים.
-  const prompts = await readIvrPrompts(env).catch(() => [] as Array<{ key: string }>);
-  const promptKeys = new Set(prompts.map((prompt) => prompt.key));
+  const promptKeys = new Set((promptKeyRows.results as Array<{ key: string }>).map((row) => row.key));
   const content = {
     songsWithoutAudio: songRows.filter((row) => !row.audioUrl).map((row) => ({ id: row.id, title: row.title, subtitle: row.albumTitle })),
     songsWithoutPreview: songRows.filter((row) => row.audioUrl && num(row.previewEnd) <= num(row.previewStart)).map((row) => ({ id: row.id, title: row.title, subtitle: row.albumTitle })),
@@ -361,7 +381,10 @@ function buildTiming(rows: TimingRow[], totalBallots: number, flags: StageFlags)
     const overall = summarize(durations);
     return { overall, stages: stageDurations(list), distribution: distribution(durations), sessions: sessionsHistogram(list), fastest: overall.min, slowest: overall.max };
   };
-  return { all: timingFor("all"), site: timingFor("site"), phone: timingFor("phone"), untracked: Math.max(0, totalBallots - rows.length) };
+  // מעבר לתקרה הסטטיסטיקה מתארת את הפתקים האחרונים, והמסך אומר זאת במקום
+  // להציג ממוצע שנראה כאילו הוא של כל הסקר.
+  const sampled = rows.length >= TIMING_ROW_LIMIT;
+  return { all: timingFor("all"), site: timingFor("site"), phone: timingFor("phone"), untracked: sampled ? 0 : Math.max(0, totalBallots - rows.length), sampled, sampleSize: rows.length };
 }
 
 function buildTime(hourRows: HourRow[], now: number) {

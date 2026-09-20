@@ -195,6 +195,12 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS media_uploads_created_idx ON media_uploads(created_at)",
   "CREATE UNIQUE INDEX IF NOT EXISTS subscribers_email_unique ON subscribers(email)",
   "CREATE INDEX IF NOT EXISTS subscribers_created_idx ON subscribers(created_at)",
+  // אינדקסים ללשונית הנתונים המתקדמים: פילוח לפי ערוץ, איתור מצביע חוזר
+  // בין סקרים, ספירת הפתקים של מחשב חסום, וקישור נרשם לרשימה למצביע.
+  "CREATE INDEX IF NOT EXISTS ballots_survey_channel_idx ON ballots(survey_id, created_at, channel)",
+  "CREATE INDEX IF NOT EXISTS ballots_voter_key_idx ON ballots(voter_key)",
+  "CREATE INDEX IF NOT EXISTS ballots_survey_fingerprint_idx ON ballots(survey_id, fingerprint)",
+  "CREATE INDEX IF NOT EXISTS subscribers_user_sub_idx ON subscribers(user_sub)",
 ];
 
 const SEEDS = [
