@@ -294,3 +294,41 @@ test("the charts are hand-written SVG with a validated palette and a text altern
   const svgCharts = charts.split("export function ").filter((block) => /<svg /.test(block));
   for (const block of svgCharts) assert.match(block, /role="img" aria-label=/, `a chart without a label: ${block.slice(0, 40)}`);
 });
+
+test("the features chosen for the announcement and the audience are built from the payload, not invented in the browser", () => {
+  const analytics = source("worker/analytics.ts");
+  const panel = source("app/admin/analytics-panel.tsx");
+  const types = source("app/admin/analytics-types.ts");
+  for (const key of ["composite", "tasteGroups", "anomalies", "abandonedPicks"]) {
+    assert.match(types, new RegExp(`${key}:`), `${key} is in the shared contract`);
+    assert.match(analytics, new RegExp(`\\b${key},`), `${key} is returned by the worker`);
+  }
+  assert.match(analytics, /function buildTasteGroups/);
+  assert.match(analytics, /function findAnomalies/);
+  // קבוצה אינה מתארת את עצמה: לא הזרע ולא האלבום שנתן לה את השם.
+  assert.match(analytics, /id !== seed && id !== group\[0\]/);
+  assert.match(panel, /function CompositeBallotCard/);
+  assert.match(panel, /function CatalogHeat/);
+  assert.match(panel, /function TasteSection/);
+  assert.match(panel, /function GoldenHour/);
+  assert.match(panel, /function ChangeStrip/);
+});
+
+test("the share image is drawn, not screenshotted, and never leaks a count in percent-only mode", () => {
+  const share = source("app/admin/analytics-share.ts");
+  const panel = source("app/admin/analytics-panel.tsx");
+  assert.match(share, /ctx\.direction = "rtl"/, "canvas does not inherit the document direction");
+  assert.match(share, /function fit\(/, "titles are shortened by measured width, never mid-character");
+  assert.match(panel, /value: format\.count\(item\.votes\)/, "the image takes its numbers from the same formatter as the screen");
+  assert.doesNotMatch(panel, /shareTopTen\(data, percentOnly/, "the raw flag is not threaded past the formatter");
+});
+
+test("what changed since the last visit reads the previous snapshot before overwriting it", () => {
+  const panel = source("app/admin/analytics-panel.tsx");
+  const strip = panel.slice(panel.indexOf("function ChangeStrip"), panel.indexOf("/** הפתק שמייצג"));
+  const readAt = strip.indexOf("readSnapshot(surveyKey)");
+  const writeAt = strip.indexOf("writeSnapshot(surveyKey");
+  assert.ok(readAt > -1 && writeAt > -1 && readAt < writeAt, "reading the baseline must happen before it is replaced");
+  assert.match(strip, /baselineWritten\.current === surveyKey/, "the baseline is fixed once per visit, so a refresh keeps comparing to the same point");
+  assert.match(panel, /catch \{ \/\* אחסון חסום/, "blocked storage hides the strip instead of throwing");
+});

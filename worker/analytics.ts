@@ -174,10 +174,15 @@ function buildTasteGroups(albumSets: string[][], albums: ItemRow[], totalBallots
     const group = members.get(seed)!.slice().sort((a, b) => (votesOf.get(b) || 0) - (votesOf.get(a) || 0));
     const voters = counts.get(seed) || 0;
     return {
-      id: seed, label: titleOf.get(seed) || `קבוצה ${index + 1}`,
+      id: seed,
+      // התווית היא האלבום המוביל בקבוצה ולא הזרע שממנו היא נבנתה: הזרע הוא
+      // פרט טכני, והקורא מזהה את הקבוצה לפי מה שבולט בה.
+      label: titleOf.get(group[0]) || titleOf.get(seed) || `קבוצה ${index + 1}`,
       albums: group.map((id) => titleOf.get(id) || ""),
       voters, share: share(voters, totalBallots),
-      signature: group.slice(1, 4).map((id) => ({ title: titleOf.get(id) || "", lift: round(lift(seed, id), 2) })),
+      // הזרע והאלבום שנתן לקבוצה את שמה מוחרגים מהחתימה: הראשון תמיד אפס
+      // ("נבחר יחד עם עצמו") והשני היה חוזר על הכותרת.
+      signature: group.filter((id) => id !== seed && id !== group[0]).slice(0, 3).map((id) => ({ title: titleOf.get(id) || "", lift: round(lift(seed, id), 2) })),
     };
   }).filter((group) => group.voters > 0).sort((a, b) => b.voters - a.voters);
 }

@@ -124,3 +124,35 @@
     .analytics-switch{width:100%}
   .analytics-button{flex:1}
 }
+
+/* מה השתנה מאז הביקור האחרון */
+.change-strip .change-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+.change-strip .change-row>b{font-size:20px}
+.change-strip .change-row>b.up{color:#137e69}
+.change-strip ul{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
+.change-strip li{padding:7px 11px;border-radius:10px;background:#f7f4ef;font-size:12px}
+.change-strip li.up{background:#e6f5f0}
+.change-strip li.down{background:#fbeef2}
+.change-strip li span{display:block;font-weight:700}
+.change-strip li small{color:var(--muted)}
+.anomaly-panel{border-color:#e9b8c8}
+.anomaly-panel h2{color:#b3325f}
+
+/* הפתק שמייצג את הקהל */
+.composite-grid{display:grid;gap:8px;margin-top:10px}
+.composite-grid article{display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px;border:1px solid #e4d8c4;border-radius:13px;background:#fff}
+.composite-grid img,.composite-grid .album-breakdown-cover{width:54px;height:54px;display:grid;place-items:center;border-radius:11px;object-fit:cover;color:#6d5210;background:#f2e8cc}
+.composite-grid b,.composite-grid small,.composite-grid span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.composite-grid small{margin-top:2px;color:var(--muted);font-size:12px}
+.composite-grid span{margin-top:4px;color:#0f7a86;font-size:12px}
+.composite-grid strong{color:#0f7a86;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* מפת חום על הקטלוג */
+.catalog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:10px 0 0;padding:0;list-style:none}
+.catalog-grid li{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;align-items:center;padding:11px 10px;border:1px solid #e4d8c4;border-radius:12px;background:linear-gradient(90deg,rgba(196,149,46,.30) var(--heat,0%),#fff var(--heat,0%))}
+.catalog-grid li>b{width:22px;height:22px;display:grid;place-items:center;border-radius:50%;color:#6d5210;background:rgba(255,255,255,.75);font-size:10px}
+.catalog-grid li>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.catalog-grid li>strong{grid-column:2;color:#6d5210;font-size:11px;font-variant-numeric:tabular-nums}
+
+.composite{margin-bottom:24px}
+.golden-hour{margin-top:24px}
