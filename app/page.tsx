@@ -18,10 +18,24 @@ type Stage = "albums" | "songs" | "artists" | "summary";
 type VoteTiming = { startedAt: number; albumsDoneAt?: number; songsDoneAt?: number; artistsDoneAt?: number; sessions: number };
 type SavedProgress = { albumIds?: string[]; songIdsByAlbum?: Record<string, string[]>; artistIds?: string[]; stageIndex?: number; songAlbumIndex?: number; timing?: Partial<VoteTiming> };
 const nowSeconds = () => Math.floor(Date.now() / 1000);
-function restoreTiming(saved?: Partial<VoteTiming> | null): VoteTiming {
+const VISIT_KEY = "rosh-berosh-visit-counted";
+/**
+ * "ביקור" הוא כניסה חדשה, לא רינדור ולא רענון. sessionStorage חי בדיוק
+ * לאורך הלשונית, ולכן רענון של אותה לשונית אינו מוסיף ביקור ולשונית חדשה
+ * כן. אחסון חסום מחזיר ספירה של ביקור אחד במקום להפיל את המדידה.
+ */
+function countVisit(): boolean {
+  try {
+    if (window.sessionStorage.getItem(VISIT_KEY)) return false;
+    window.sessionStorage.setItem(VISIT_KEY, "1");
+    return true;
+  } catch { return true; }
+}
+function restoreTiming(saved?: Partial<VoteTiming> | null, fresh = countVisit()): VoteTiming {
   const startedAt = Number(saved?.startedAt) > 0 ? Number(saved!.startedAt) : nowSeconds();
   const stamp = (value: unknown) => (Number(value) >= startedAt ? Number(value) : undefined);
-  return { startedAt, albumsDoneAt: stamp(saved?.albumsDoneAt), songsDoneAt: stamp(saved?.songsDoneAt), artistsDoneAt: stamp(saved?.artistsDoneAt), sessions: (Number(saved?.sessions) > 0 ? Number(saved!.sessions) : 0) + 1 };
+  const previous = Number(saved?.sessions) > 0 ? Number(saved!.sessions) : 0;
+  return { startedAt, albumsDoneAt: stamp(saved?.albumsDoneAt), songsDoneAt: stamp(saved?.songsDoneAt), artistsDoneAt: stamp(saved?.artistsDoneAt), sessions: Math.max(1, previous + (fresh ? 1 : 0)) };
 }
 type ReceiptAlbum = { id: string; title: string; artistName: string; coverUrl?: string | null; songs: string[] };
 type ReceiptArtist = { id: string; name: string; imageUrl?: string | null };
@@ -164,7 +178,12 @@ export default function Home() {
       const stageCount = [catalog.rules.albumsEnabled, catalog.rules.songsEnabled, catalog.rules.artistsEnabled].filter(Boolean).length + 1;
       setStageIndex(Math.max(0, Math.min(stageCount - 1, Number(progress.stageIndex) || 0)));
       setSongAlbumIndex(Math.max(0, Math.min(restoredAlbums.length - 1, Number(progress.songAlbumIndex) || 0)));
-    }).catch(() => notify("לא הצלחנו לשחזר את ההתקדמות השמורה.", "error"));
+    }).catch(() => {
+      // בלי הנפילה לאחור כאן מדידת הזמן נשארת ריקה לכל אורך הביקור, ואיתה
+      // גם שמירת ההתקדמות — האפקט שמטה מותנה בקיומה.
+      setTiming((current) => current ?? restoreTiming(null));
+      notify("לא הצלחנו לשחזר את ההתקדמות השמורה.", "error");
+    });
   }, [catalog, voted, preview, notify]);
 
   useEffect(() => {
@@ -261,7 +280,7 @@ export default function Home() {
     try {
       if (preview) { setDone(true); stop(); return; }
       const fp = await browserFingerprint().catch(() => "");
-      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site", fingerprint: fp, timing }) });
+      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site", fingerprint: fp, timing: timing && { ...timing, clientNow: nowSeconds() } }) });
       const result = await response.json();
       if (!response.ok) {
         if (response.status === 409) setVoted(true);

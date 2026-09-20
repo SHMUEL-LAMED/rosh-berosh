@@ -21,7 +21,8 @@ type Channel = "site" | "phone";
 type ItemRow = { id: string; title: string; albumId?: string; albumTitle?: string; artistName?: string; coverUrl?: string | null; imageUrl?: string | null; position: number; active: number; votes: number; site: number; phone: number };
 type SongRow = ItemRow & { audioUrl?: string | null; previewStart: number; previewEnd: number };
 type PairRow = { a: string; b: string; votes: number };
-type TimingRow = { channel: Channel; totalSeconds: number; albumsSeconds: number | null; songsSeconds: number | null; artistsSeconds: number | null; confirmSeconds: number | null; sessions: number | null };
+type TimingRow = { channel: Channel; createdAt: number; startedAt: number; albumsDoneAt: number | null; songsDoneAt: number | null; artistsDoneAt: number | null; sessions: number | null };
+type StageFlags = { albums: boolean; songs: boolean; artists: boolean };
 type HourRow = { bucket: number; channel: Channel; votes: number };
 type RaceRow = { id: string; bucket: number; votes: number };
 
@@ -117,7 +118,7 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
   // ולכן המזהים ממוינים שוב ב-JS לפני שמשווים שילובים.
   const comboSource = "SELECT av.ballot_id AS ballotId, GROUP_CONCAT(av.album_id, ',') AS combo FROM album_votes av JOIN ballots bl ON bl.id=av.ballot_id WHERE bl.survey_id=?1 GROUP BY av.ballot_id";
 
-  const [albums, songs, artists, ballots, artistAlbum, albumPairs, artistPairs, combos, timingRows, hourly, blocked] = await env.DB.batch([
+  const [albums, songs, artists, ballots, artistAlbum, albumPairs, artistPairs, combos, timingRows, stageFlagRows, hourly, blocked] = await env.DB.batch([
     env.DB.prepare(`SELECT a.id, a.title, a.artist_name AS artistName, a.cover_url AS coverUrl, a.position, a.active, COUNT(v.album_id) AS votes, ${channelSums} FROM albums a LEFT JOIN album_votes v ON v.album_id=a.id LEFT JOIN ballots b ON b.id=v.ballot_id WHERE a.survey_id=?1 GROUP BY a.id ORDER BY votes DESC, a.position, a.title`).bind(surveyId),
     env.DB.prepare(`SELECT s.id, s.title, s.album_id AS albumId, a.title AS albumTitle, s.position, s.active, s.audio_url AS audioUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd, COUNT(DISTINCT v.ballot_id) AS votes, ${songChannelSums} FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id AND v.album_id=s.album_id LEFT JOIN ballots b ON b.id=v.ballot_id WHERE a.survey_id=?1 GROUP BY s.id ORDER BY votes DESC, s.album_id, s.position, s.title`).bind(surveyId),
     env.DB.prepare(`SELECT a.id, a.name AS title, a.image_url AS imageUrl, a.position, a.active, COUNT(v.artist_id) AS votes, ${channelSums} FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id LEFT JOIN ballots b ON b.id=v.ballot_id WHERE a.survey_id=?1 GROUP BY a.id ORDER BY votes DESC, a.position, a.name`).bind(surveyId),
@@ -126,7 +127,10 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
     env.DB.prepare("SELECT x.album_id AS a, y.album_id AS b, COUNT(*) AS votes FROM album_votes x JOIN album_votes y ON y.ballot_id=x.ballot_id AND y.album_id>x.album_id JOIN ballots bl ON bl.id=x.ballot_id WHERE bl.survey_id=?1 GROUP BY x.album_id, y.album_id").bind(surveyId),
     env.DB.prepare("SELECT x.artist_id AS a, y.artist_id AS b, COUNT(*) AS votes FROM artist_votes x JOIN artist_votes y ON y.ballot_id=x.ballot_id AND y.artist_id>x.artist_id JOIN ballots bl ON bl.id=x.ballot_id WHERE bl.survey_id=?1 GROUP BY x.artist_id, y.artist_id ORDER BY votes DESC LIMIT 20").bind(surveyId),
     env.DB.prepare(`SELECT combo FROM (${comboSource})`).bind(surveyId),
-    env.DB.prepare(`SELECT channel, created_at - started_at AS totalSeconds, albums_done_at - started_at AS albumsSeconds, songs_done_at - albums_done_at AS songsSeconds, artists_done_at - COALESCE(songs_done_at, albums_done_at, started_at) AS artistsSeconds, created_at - COALESCE(artists_done_at, songs_done_at, albums_done_at) AS confirmSeconds, sessions FROM ballots WHERE survey_id=?1 AND started_at IS NOT NULL ORDER BY created_at DESC LIMIT ${TIMING_ROW_LIMIT}`).bind(surveyId),
+    // החותמות מוחזרות כמות שהן והחיסור נעשה ב-JS, כי רק שם ידוע אילו שלבים
+    // פעילים בסקר. COALESCE בין שלבים היה גורם לשלב אחד לבלוע שלב חסר.
+    env.DB.prepare(`SELECT channel, created_at AS createdAt, started_at AS startedAt, albums_done_at AS albumsDoneAt, songs_done_at AS songsDoneAt, artists_done_at AS artistsDoneAt, sessions FROM ballots WHERE survey_id=?1 AND started_at IS NOT NULL ORDER BY created_at DESC LIMIT ${TIMING_ROW_LIMIT}`).bind(surveyId),
+    env.DB.prepare("SELECT albums_enabled AS albums, songs_enabled AS songs, artists_enabled AS artists FROM poll_settings WHERE id=?1").bind(surveyId),
     env.DB.prepare("SELECT CAST(created_at/3600 AS INTEGER)*3600 AS bucket, channel, COUNT(*) AS votes FROM ballots WHERE survey_id=?1 GROUP BY bucket, channel ORDER BY bucket").bind(surveyId),
     env.DB.prepare("SELECT bf.fingerprint, bf.blocked_by AS blockedBy, bf.created_at AS createdAt, (SELECT COUNT(*) FROM ballots b WHERE b.survey_id=bf.survey_id AND b.fingerprint=bf.fingerprint) AS ballots, (SELECT MAX(b.created_at) FROM ballots b WHERE b.survey_id=bf.survey_id AND b.fingerprint=bf.fingerprint) AS lastBallotAt FROM blocked_fingerprints bf WHERE bf.survey_id=?1 ORDER BY bf.created_at DESC").bind(surveyId),
   ]);
@@ -221,7 +225,9 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
   const repeatedBallots = [...comboCounts.values()].filter((count) => count > 1).reduce((sum, count) => sum + count, 0);
 
   // זמני הצבעה. שלב "אישור" הוא מסיום השלב האחרון שנמדד ועד שמירת הפתק.
-  const timing = buildTiming(timingRows.results as TimingRow[], totalBallots);
+  const flagRow = stageFlagRows.results[0] as { albums: number; songs: number; artists: number } | undefined;
+  const stageFlags: StageFlags = { albums: flagRow ? !!num(flagRow.albums) : true, songs: flagRow ? !!num(flagRow.songs) : true, artists: flagRow ? !!num(flagRow.artists) : true };
+  const timing = buildTiming(timingRows.results as TimingRow[], totalBallots, stageFlags);
 
   // שעות ההצבעה: הדלי הוא שעת UTC, והשעה המקומית נגזרת ממנו בשעון ישראל,
   // כולל מעברי שעון קיץ. כך אין צורך למשוך פתק־פתק.
@@ -314,19 +320,29 @@ export async function buildAnalytics(env: Env, surveyId: string): Promise<Analyt
   };
 }
 
-function buildTiming(rows: TimingRow[], totalBallots: number): Analytics["timing"] {
-  const positive = (value: number | null | undefined) => (Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null);
+function buildTiming(rows: TimingRow[], totalBallots: number, flags: StageFlags): Analytics["timing"] {
+  const at = (value: number | null | undefined) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null);
+  // משך שלב נמדד רק כשגם נקודת ההתחלה שלו וגם נקודת הסיום קיימות. שלב
+  // כבוי בסקר מדלג לשלב שלפניו, ושלב חסר מחזיר null במקום להיבלע בשלב הבא.
+  const previousStamp = (row: TimingRow, stage: "songs" | "artists" | "confirm") => {
+    if (stage === "songs") return flags.albums ? at(row.albumsDoneAt) : at(row.startedAt);
+    const beforeArtists = flags.songs ? at(row.songsDoneAt) : flags.albums ? at(row.albumsDoneAt) : at(row.startedAt);
+    if (stage === "artists") return beforeArtists;
+    return flags.artists ? at(row.artistsDoneAt) : beforeArtists;
+  };
+  const delta = (from: number | null, to: number | null) => (from !== null && to !== null && to >= from ? to - from : null);
+  const durationOf = (row: TimingRow) => Math.max(0, num(row.createdAt) - num(row.startedAt));
+  const kept = (values: Array<number | null>) => values.filter((value): value is number => value !== null);
   const byChannel = (channel: Channel | "all") => rows.filter((row) => channel === "all" || row.channel === channel);
   const stageDurations = (list: TimingRow[]): StageDurations => ({
-    albums: summarize(list.map((row) => positive(row.albumsSeconds)).filter((value): value is number => value !== null)),
-    songs: summarize(list.map((row) => positive(row.songsSeconds)).filter((value): value is number => value !== null)),
-    artists: summarize(list.map((row) => positive(row.artistsSeconds)).filter((value): value is number => value !== null)),
-    summary: summarize(list.map((row) => positive(row.confirmSeconds)).filter((value): value is number => value !== null)),
+    albums: summarize(kept(list.map((row) => (flags.albums ? delta(at(row.startedAt), at(row.albumsDoneAt)) : null)))),
+    songs: summarize(kept(list.map((row) => (flags.songs ? delta(previousStamp(row, "songs"), at(row.songsDoneAt)) : null)))),
+    artists: summarize(kept(list.map((row) => (flags.artists ? delta(previousStamp(row, "artists"), at(row.artistsDoneAt)) : null)))),
+    summary: summarize(kept(list.map((row) => delta(previousStamp(row, "confirm"), at(row.createdAt))))),
   });
   // הדליים סוגרים כל משך בדיוק פעם אחת, כולל משך אפס.
   const bucketsSpec = [{ label: "עד דקה", max: 60 }, { label: "1–3 דקות", max: 180 }, { label: "3–5 דקות", max: 300 }, { label: "5–10 דקות", max: 600 }, { label: "10–30 דקות", max: 1800 }, { label: "יותר מחצי שעה", max: Infinity }];
-  const distribution = (list: TimingRow[]) => {
-    const durations = list.map((row) => positive(row.totalSeconds)).filter((value): value is number => value !== null);
+  const distribution = (durations: number[]) => {
     return bucketsSpec.map((bucket, index) => {
       const min = index ? bucketsSpec[index - 1].max : -Infinity;
       const count = durations.filter((value) => value > min && value <= bucket.max).length;
@@ -340,9 +356,10 @@ function buildTiming(rows: TimingRow[], totalBallots: number): Analytics["timing
   };
   const timingFor = (channel: Channel | "all") => {
     const list = byChannel(channel);
-    const durations = list.map((row) => positive(row.totalSeconds)).filter((value): value is number => value !== null);
+    // אוכלוסייה אחת לכל שלושת החישובים, אחרת האחוזים אינם מסתכמים למה שנספר.
+    const durations = list.map(durationOf);
     const overall = summarize(durations);
-    return { overall, stages: stageDurations(list), distribution: distribution(list), sessions: sessionsHistogram(list), fastest: overall.min, slowest: overall.max };
+    return { overall, stages: stageDurations(list), distribution: distribution(durations), sessions: sessionsHistogram(list), fastest: overall.min, slowest: overall.max };
   };
   return { all: timingFor("all"), site: timingFor("site"), phone: timingFor("phone"), untracked: Math.max(0, totalBallots - rows.length) };
 }

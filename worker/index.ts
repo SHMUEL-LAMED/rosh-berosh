@@ -25,24 +25,32 @@ interface Env {
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
 type EdgeCacheStorage = CacheStorage & { default?: Cache };
-type BallotTiming = { startedAt?: number; albumsDoneAt?: number; songsDoneAt?: number; artistsDoneAt?: number; sessions?: number };
+type BallotTiming = { startedAt?: number; albumsDoneAt?: number; songsDoneAt?: number; artistsDoneAt?: number; sessions?: number; clientNow?: number };
 type Submission = { voterKey?: string; voterEmail?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string; timing?: BallotTiming };
 
 // זמני ההצבעה מגיעים מהלקוח (האתר או הקו) ולכן נבדקים: חותמת חייבת להיות
 // בעבר ולא לפני יותר משנה, וסיום שלב אינו יכול להקדים את ההתחלה. ערך פסול
 // הופך ל-null ואינו מפיל את ההצבעה — הנתונים הם תוספת, לא תנאי.
 function sanitizeTiming(timing: BallotTiming | undefined, now = Math.floor(Date.now() / 1000)) {
+  // החותמות נמדדות בשעון הלקוח ואילו created_at נכתב בשעון השרת. הלקוח
+  // שולח גם את השעה שלו, וההפרש מוזז כאן, אחרת שעון שמפגר בחצי שעה היה
+  // נראה כמו הצבעה שנמשכה חצי שעה. הזזה מעבר ליממה נראית שבורה מכדי
+  // לתקן, ואז החותמות נשארות כמות שהן ונופלות על הבדיקות שמתחת.
+  const clientNow = Math.floor(Number(timing?.clientNow));
+  const rawSkew = Number.isFinite(clientNow) && clientNow > 0 ? now - clientNow : 0;
+  const skew = Math.abs(rawSkew) <= 86400 ? rawSkew : 0;
   const stamp = (value: unknown, notBefore: number | null) => {
-    const seconds = Math.floor(Number(value));
-    if (!Number.isFinite(seconds) || seconds <= 0) return null;
+    const raw = Math.floor(Number(value));
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    const seconds = raw + skew;
     if (seconds > now + 60 || seconds < now - 366 * 86400) return null;
     if (notBefore !== null && seconds < notBefore) return null;
     return seconds;
   };
   const startedAt = stamp(timing?.startedAt, null);
   const albumsDoneAt = startedAt === null ? null : stamp(timing?.albumsDoneAt, startedAt);
-  const songsDoneAt = startedAt === null ? null : stamp(timing?.songsDoneAt, albumsDoneAt ?? startedAt);
-  const artistsDoneAt = startedAt === null ? null : stamp(timing?.artistsDoneAt, songsDoneAt ?? albumsDoneAt ?? startedAt);
+  const songsDoneAt = startedAt === null ? null : stamp(timing?.songsDoneAt, startedAt);
+  const artistsDoneAt = startedAt === null ? null : stamp(timing?.artistsDoneAt, startedAt);
   const sessionsRaw = Math.floor(Number(timing?.sessions));
   const sessions = startedAt !== null && Number.isFinite(sessionsRaw) && sessionsRaw >= 1 ? Math.min(sessionsRaw, 1000) : null;
   return { startedAt, albumsDoneAt, songsDoneAt, artistsDoneAt, sessions };
@@ -521,10 +529,12 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     // secret instead; a request claiming "phone" without it is still rejected.
     const fromIvr = verifyIvrSecret(request, env);
     const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-    if (!fromIvr) {
-      await ensureRuntimeSchema(env);
-      if (!(await checkBallotRate(env.DB, clientIp))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
-    }
+    // שמירת פתק נוגעת בעמודות שנוספות בזמן ריצה, ולכן הסכמה נבנית כאן בשני
+    // הערוצים. בתפריטי הקו היא נשארת בחוץ מטעמי זמן תגובה, אבל שמירת הפתק
+    // קורית פעם אחת בסוף השיחה — ובלעדיה הצבעה טלפונית ראשונה אחרי פריסה
+    // נופלת על עמודה חסרה והמתקשר מאבד את ההצבעה.
+    await ensureRuntimeSchema(env);
+    if (!fromIvr && !(await checkBallotRate(env.DB, clientIp))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
     let original: Submission;
     try { original = await request.json<Submission>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
     if (original.channel === "phone") {

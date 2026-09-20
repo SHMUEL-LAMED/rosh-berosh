@@ -207,11 +207,15 @@ test("ballots carry voting timing from both channels and the schema stores it", 
   }
   assert.match(worker, /const timing = sanitizeTiming\(body\.timing\)/);
   assert.match(worker, /seconds > now \+ 60 \|\| seconds < now - 366 \* 86400/);
-  assert.match(site, /channel: "site", fingerprint: fp, timing \}/);
+  assert.match(site, /channel: "site", fingerprint: fp, timing: timing && \{ \.\.\.timing, clientNow: nowSeconds\(\) \}/, "the site reports its own clock so the server can correct for skew");
+  assert.match(site, /setTiming\(\(current\) => current \?\? restoreTiming\(null\)\)/, "a failed progress load must not silently disable the measurement");
+  assert.match(site, /sessionStorage\.getItem\(VISIT_KEY\)/, "a refresh of the same tab is not a new visit");
   assert.match(site, /markStageDone\("albumsDoneAt"\)/);
   assert.match(site, /markStageDone\("songsDoneAt"\)/);
   assert.match(site, /markStageDone\("artistsDoneAt"\)/);
-  assert.match(phone, /channel: "phone", timing \}/);
+  assert.match(phone, /channel: "phone", timing: timing && \{ \.\.\.timing, clientNow: /, "the phone line reports its clock too");
+  assert.match(phone, /const finishedOnEntry = \{/, "a stage already finished before this call is not stamped with the current time");
+  assert.match(phone, /const saveInBackground = /, "the entry write must not hold the caller before the first menu");
   assert.match(phone, /let timing = preview \? null : restoreTiming\(saved\)/);
 });
 
@@ -225,4 +229,31 @@ test("the admin has a separate advanced-data tab that leaves results and voters 
   assert.match(admin, /url\.pathname === "\/api\/admin\/analytics"/);
   const analytics = source("worker/analytics.ts");
   for (const key of ["albumBreakdown", "zeroVotes", "artistAlbums", "albumCompanions", "artistPairs", "combos", "timing", "daily", "blocked", "audit", "content"]) assert.match(analytics, new RegExp(`\\b${key}[,:]`), `analytics returns ${key}`);
+});
+
+test("a ballot submission builds the runtime schema on both channels", () => {
+  const worker = source("worker/index.ts");
+  const route = worker.slice(worker.indexOf('url.pathname === "/api/ballots" && request.method === "POST"'));
+  const guard = route.slice(0, route.indexOf("let original"));
+  assert.match(guard, /await ensureRuntimeSchema\(env\);/, "a phone ballot arriving first after a deploy must not hit a missing column");
+  assert.doesNotMatch(guard, /if \(!fromIvr\) \{\s*await ensureRuntimeSchema/, "the schema build is no longer behind the site-only branch");
+});
+
+test("each stage stamp is validated against the start, not against the stage before it", () => {
+  const worker = source("worker/index.ts");
+  // בקו אפשר לסיים שלבים בכל סדר, ושרשור הבדיקות מחק חותמות תקינות.
+  assert.match(worker, /const songsDoneAt = startedAt === null \? null : stamp\(timing\?\.songsDoneAt, startedAt\)/);
+  assert.match(worker, /const artistsDoneAt = startedAt === null \? null : stamp\(timing\?\.artistsDoneAt, startedAt\)/);
+  assert.match(worker, /const skew = Math\.abs\(rawSkew\) <= 86400 \? rawSkew : 0/, "a client clock is corrected, not trusted");
+});
+
+test("a song is counted once per ballot and cannot be filed under a foreign album", () => {
+  const worker = source("worker/index.ts");
+  const analytics = source("worker/analytics.ts");
+  const admin = source("worker/admin.ts");
+  assert.match(worker, /const misfiledSong = /);
+  assert.match(analytics, /COUNT\(DISTINCT v\.ballot_id\) AS votes/);
+  assert.match(analytics, /LEFT JOIN song_votes v ON v\.song_id=s\.id AND v\.album_id=s\.album_id/);
+  assert.match(admin, /COUNT\(DISTINCT v\.ballot_id\) AS votes/);
+  assert.doesNotMatch(admin, /COUNT\(v\.song_id\) AS votes/, "the results tab must agree with the advanced-data tab");
 });
