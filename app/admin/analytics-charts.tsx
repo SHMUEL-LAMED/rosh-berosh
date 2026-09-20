@@ -285,6 +285,62 @@ export function RankBars({ items, initial = 12, formatValue = fmt, emphasise }: 
   </div>;
 }
 
+/** צבעים קטגוריים למרוץ הדירוג, בסדר קבוע. כל קו נושא גם תווית בקצה. */
+export const RACE_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"] as const;
+
+export type RaceLine = { id: string; title: string; points: Array<{ bucket: number; cumulative: number }> };
+
+/** מרוץ הדירוג: קו מצטבר לכל פריט מוביל, עם תווית ישירה בקצה הקו. */
+export function RaceChart({ lines, height = 240, formatValue = fmt }: { lines: RaceLine[]; height?: number; formatValue?(value: number): string }) {
+  const { ref, width } = useMeasuredWidth();
+  const { hover, show, hide } = useHover<{ bucket: number; values: Array<{ title: string; color: string; value: number }> }>();
+  const pad = { top: 14, right: 52, bottom: 26, left: 92 };
+  const plotWidth = Math.max(10, width - pad.left - pad.right);
+  const plotHeight = Math.max(10, height - pad.top - pad.bottom);
+  const days = lines[0]?.points.length ?? 0;
+  const max = Math.max(1, ...lines.flatMap((line) => line.points.map((point) => point.cumulative)));
+  const ticks = niceTicks(max);
+  const top = Math.max(max, ticks[ticks.length - 1] || max);
+  const xAt = (index: number) => pad.left + plotWidth - (days < 2 ? plotWidth / 2 : (index / (days - 1)) * plotWidth);
+  const yAt = (value: number) => pad.top + plotHeight - (value / top) * plotHeight;
+
+  const onMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!days) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    const ratio = days < 2 ? 0 : (pad.left + plotWidth - (event.clientX - box.left)) / plotWidth;
+    const index = Math.min(days - 1, Math.max(0, Math.round(ratio * (days - 1))));
+    show({ bucket: lines[0].points[index].bucket, values: lines.map((line, order) => ({ title: line.title, color: RACE_COLORS[order % RACE_COLORS.length], value: line.points[index].cumulative })) }, xAt(index), pad.top);
+  };
+
+  if (!lines.length || days < 2) return <p className="analytics-empty">צריך לפחות יומיים של הצבעות כדי להראות מרוץ.</p>;
+  return <div className="chart" ref={ref} style={{ height }}>
+    <svg width={width} height={height} role="img" aria-label={`מרוץ הדירוג בין ${lines.map((line) => line.title).join(", ")}.`} onPointerMove={onMove} onPointerLeave={hide} onPointerDown={onMove}>
+      {ticks.map((tick) => <g key={tick}>
+        <line x1={pad.left} x2={pad.left + plotWidth} y1={yAt(tick)} y2={yAt(tick)} stroke={GRID} strokeWidth={1} />
+        <text x={pad.left + plotWidth + 6} y={yAt(tick) + 4} fill={AXIS_INK} fontSize={11} textAnchor="start">{formatValue(tick)}</text>
+      </g>)}
+      {hover && <line x1={hover.x} x2={hover.x} y1={pad.top} y2={pad.top + plotHeight} stroke={AXIS_INK} strokeWidth={1} strokeOpacity={0.45} />}
+      {lines.map((line, order) => {
+        const color = RACE_COLORS[order % RACE_COLORS.length];
+        const path = line.points.map((point, index) => `${index ? "L" : "M"}${xAt(index).toFixed(1)},${yAt(point.cumulative).toFixed(1)}`).join(" ");
+        const endY = yAt(line.points[line.points.length - 1].cumulative);
+        return <g key={line.id}>
+          <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={xAt(days - 1)} cy={endY} r={4.5} fill={color} stroke="#fff" strokeWidth={2} />
+          {/* תווית ישירה בקצה: הזיהוי אינו נשען על הצבע בלבד. */}
+          <text x={pad.left - 8} y={endY + 4} fill={AXIS_INK} fontSize={11} textAnchor="end">{line.title.length > 14 ? `${line.title.slice(0, 13)}…` : line.title}</text>
+        </g>;
+      })}
+      <text x={xAt(0)} y={height - 8} fill={AXIS_INK} fontSize={11} textAnchor="end">{dayLabel(lines[0].points[0].bucket)}</text>
+      <text x={xAt(days - 1)} y={height - 8} fill={AXIS_INK} fontSize={11} textAnchor="start">{dayLabel(lines[0].points[days - 1].bucket)}</text>
+    </svg>
+    {hover && <Tooltip x={hover.x} y={hover.y} width={width}>
+      <b>{dayLabel(hover.item.bucket)}</b>
+      {hover.item.values.map((value) => <span key={value.title}><i style={{ background: value.color }} aria-hidden="true" />{value.title} {formatValue(value.value)}</span>)}
+    </Tooltip>}
+  </div>;
+}
+
 export function dayLabel(bucketSeconds: number): string {
   return new Date(bucketSeconds * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "short" });
 }

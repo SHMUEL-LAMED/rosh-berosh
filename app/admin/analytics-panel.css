@@ -1,8 +1,18 @@
 /* לשונית "נתונים מתקדמים" בניהול */
-.analytics{display:grid;gap:18px}
+.analytics{display:grid;gap:16px}
+.analytics-nav{display:flex;flex-wrap:wrap;gap:7px;position:sticky;top:0;z-index:4;padding:10px;border:1px solid #e4d8c4;border-radius:14px;background:rgba(255,255,255,.94);backdrop-filter:blur(6px)}
+.analytics-nav button{min-height:38px;padding:0 14px;border:1px solid #e4d8c4;border-radius:99px;color:#5f5838;background:#fff;font-size:13px;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.analytics-nav button:hover{border-color:#c49a2e;color:#5a4610;background:#fbf5e6}
+.analytics-nav button.active{border-color:transparent;color:#fff;font-weight:700;background:linear-gradient(105deg,#2b3a7a,#c4952e)}
+.chart-title{margin:22px 0 4px;font-size:15px}
+.table-caption{padding:10px 2px;color:var(--muted);font-size:12px;text-align:right;caption-side:top}
+.analytics-stats b.up{color:#137e69}
+.analytics-stats b.down{color:#b3325f}
+.concentration-stats article b{font-size:30px}
 .analytics-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-bottom:16px}
 .analytics-switch{display:flex;align-items:center;gap:7px;margin-inline-end:auto;color:var(--muted);font-size:13px;cursor:pointer}
 .analytics-switch input{width:18px;height:18px;accent-color:#b89530}
+.analytics-switch small{color:var(--muted);font-size:11px}
 .analytics-button{height:42px;padding:0 15px;border:1px solid rgba(184,149,48,.4);border-radius:11px;color:var(--text);background:transparent;cursor:pointer}
 .analytics-button:disabled{opacity:.45;cursor:default}
 .analytics-button.primary{border:0;color:#fff;font-weight:800;background:linear-gradient(105deg,#2b3a7a,#c4952e)}
@@ -90,6 +100,7 @@
 .timing-dist>b{display:block;margin-bottom:4px;font-size:13px}
 
 /* לפי יום */
+.daily-table td{font-variant-numeric:tabular-nums}
 .daily-chart{display:flex;align-items:flex-end;gap:4px;height:180px;margin-top:14px;padding:0 4px;overflow-x:auto}
 .daily-col{flex:1 0 22px;min-width:22px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch}
 .daily-stack{display:flex;flex-direction:column-reverse;min-height:2px;border-radius:5px 5px 0 0;overflow:hidden}
@@ -115,16 +126,19 @@
 .broadcast-controls button.active{border-color:rgba(196,160,53,.7);color:#fff;background:rgba(196,160,53,.22)}
 .broadcast-list{flex:1;margin:clamp(16px,3vw,34px) 0 0;padding:0;list-style:none;display:grid;gap:clamp(8px,1.4vw,14px);align-content:start}
 .broadcast-list li{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:clamp(12px,2vw,24px);align-items:center;padding:clamp(10px,1.6vw,18px) clamp(14px,2vw,26px);border-radius:16px;background:rgba(255,255,255,.04);overflow:hidden;font-size:clamp(18px,2.6vw,32px)}
-.broadcast-list li::before{content:"";position:absolute;inset:0 auto 0 0;width:var(--fill,0%);background:linear-gradient(90deg,rgba(196,160,53,.35),rgba(196,160,53,.08));transition:width .8s ease}
+.broadcast-list li::before{content:"";position:absolute;inset-block:0;inset-inline-start:0;inset-inline-end:auto;width:var(--fill,0%);background:linear-gradient(to left,rgba(196,160,53,.38),rgba(196,160,53,.08));transition:width .8s ease}
 .broadcast-list li>*{position:relative}
 .broadcast-list li b{width:1.9em;height:1.9em;display:grid;place-items:center;border-radius:50%;background:#252a46;font-size:.8em}
 .broadcast-list li:first-child b{color:#1a1810;background:linear-gradient(135deg,#e0cd82,#c4952e)}
 .broadcast-list li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.broadcast-list li span small{display:block;color:var(--muted);font-size:.55em}
+.broadcast-list li span small{display:block;color:#a9b0c6;font-size:.55em}
 .broadcast-list li strong{color:#84e4cc;font-variant-numeric:tabular-nums}
-.broadcast footer{margin-top:16px;color:var(--muted);font-size:14px}
+.broadcast footer{margin-top:16px;color:#a9b0c6;font-size:14px}
+.broadcast{outline:0}
 
 @media(max-width:700px){
+  .analytics-nav{position:static;gap:6px;padding:8px}
+  .analytics-nav button{min-height:34px;padding:0 11px;font-size:12px}
   .album-breakdown article>button{grid-template-columns:44px minmax(0,1fr) 20px}
   .album-breakdown-top{grid-column:2;margin-top:4px}
   .album-breakdown-songs>div{grid-template-columns:28px minmax(0,1fr) auto}

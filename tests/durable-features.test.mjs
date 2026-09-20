@@ -257,3 +257,40 @@ test("a song is counted once per ballot and cannot be filed under a foreign albu
   assert.match(admin, /COUNT\(DISTINCT v\.ballot_id\) AS votes/);
   assert.doesNotMatch(admin, /COUNT\(v\.song_id\) AS votes/, "the results tab must agree with the advanced-data tab");
 });
+
+test("the advanced-data tab is browsed through an internal menu, not one long page", () => {
+  const page = source("app/admin/analytics-panel.tsx");
+  assert.match(page, /const SECTIONS: Array<\{ key: Section; label: string; help: string \}>/);
+  assert.match(page, /<nav className="analytics-nav"/);
+  assert.match(page, /section === "pace" &&/, "only the chosen section is rendered");
+  assert.doesNotMatch(page, /function Block\(/, "the collapsible stack is gone");
+  const css = source("app/admin/analytics-panel.css");
+  assert.match(css, /\.analytics-nav\{[^}]*position:sticky/, "the menu stays reachable while a section scrolls");
+});
+
+test("percent-only mode cannot leak an exact count, because every count goes through one formatter", () => {
+  const page = source("app/admin/analytics-panel.tsx");
+  const body = page.slice(page.indexOf("export function AnalyticsPanel"));
+  // מותר להשתמש ב-toLocaleString רק בתוך הפורמטר עצמו ובתאריכים.
+  assert.doesNotMatch(body, /\.toLocaleString\("he-IL"\)/, "counts must not be formatted directly");
+  assert.match(page, /const count = \(votes: number, whole = total\) => \(percentOnly \? /);
+  for (const component of ["TimingSection", "OpsSection", "CrossSections", "PeopleSection", "ContentSection"]) {
+    assert.match(page, new RegExp(`function ${component}\\(\\{ data, format \\}`), `${component} receives the formatter`);
+  }
+});
+
+test("the charts are hand-written SVG with a validated palette and a text alternative", () => {
+  const charts = source("app/admin/analytics-charts.tsx");
+  const pkg = JSON.parse(source("package.json"));
+  for (const dependency of Object.keys(pkg.dependencies)) {
+    assert.ok(!/chart|d3|recharts|plotly|victory/i.test(dependency), `no chart library may be added: ${dependency}`);
+  }
+  assert.match(charts, /CHANNEL_COLOR = \{ site: "#1699a8", phone: "#b3831f" \}/);
+  assert.match(charts, /HEAT_STEPS = \["#cfa94f", "#b38a2c", "#8f6e1e", "#6d5314", "#4b380b"\]/);
+  for (const chart of ["CumulativeChart", "DailyColumns", "ActivityHeatmap", "RaceChart", "ChannelSplit", "RankBars"]) {
+    assert.match(charts, new RegExp(`export function ${chart}`), `${chart} exists`);
+  }
+  // כל גרף נושא חלופה טקסטואלית, ואף אחד אינו נשען על צבע בלבד.
+  const svgCharts = charts.split("export function ").filter((block) => /<svg /.test(block));
+  for (const block of svgCharts) assert.match(block, /role="img" aria-label=/, `a chart without a label: ${block.slice(0, 40)}`);
+});
