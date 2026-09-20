@@ -1,8 +1,8 @@
 import { placeholders } from "./sql.js";
 import { competitionPlaces, concentrationIndex, giniCoefficient, israelParts, pearson, summarize } from "./analytics-math.js";
 import type {
-  AbandonedStage, AlbumBreakdown, Analytics, Concentration, DailyPoint, PaceWindow,
-  PositionBias, RaceSeries, RankedItem, StageDurations, SurveyComparison,
+  AbandonedStage, AlbumBreakdown, Analytics, Anomaly, CompositeBallot, Concentration, DailyPoint,
+  PaceWindow, PositionBias, RaceSeries, RankedItem, StageDurations, SurveyComparison, TasteGroup,
 } from "../app/admin/analytics-types";
 
 /**
@@ -33,6 +33,10 @@ const TIMING_ROW_LIMIT = 5000;
 // עמוד אחד של רשימת R2. טיוטות הקו נספרות ממנו, וגלישה מסומנת כ"לפחות".
 const DRAFT_LIST_LIMIT = 1000;
 const RACE_SERIES = 5;
+// חלון החריגה, וכמה קולות דרושים לפני שקפיצה נחשבת לאות ולא לרעש.
+const ANOMALY_WINDOW = 24 * 3600;
+const ANOMALY_MIN_VOTES = 8;
+const TASTE_GROUPS = 4;
 // מטמון קצר בתוך האיזולייט. מסך השידור מרענן את עצמו, ובלעדיו כל רענון היה
 // מריץ את כל השאילתות מחדש ומתחרה בכתיבת הפתקים. בקשה עם ?fresh=1 מדלגת.
 const MEMO_SECONDS = 15;
@@ -46,6 +50,7 @@ const HOUR = 3600, DAY = 86400;
 
 function rankList(rows: ItemRow[], totalBallots: number, subtitle?: (row: ItemRow) => string | undefined): RankedItem[] {
   const sorted = [...rows].sort((a, b) => num(b.votes) - num(a.votes) || heCollator.compare(a.title, b.title));
+  const votePlaces = competitionPlaces(sorted, (row: ItemRow) => num(row.votes));
   const sitePlaces = competitionPlaces(sorted, (row: ItemRow) => num(row.site));
   const phonePlaces = competitionPlaces(sorted, (row: ItemRow) => num(row.phone));
   return sorted.map((row, index) => {
@@ -53,19 +58,25 @@ function rankList(rows: ItemRow[], totalBallots: number, subtitle?: (row: ItemRo
     const above = index > 0 ? num(sorted[index - 1].votes) : null;
     const below = index < sorted.length - 1 ? num(sorted[index + 1].votes) : null;
     return {
-      id: row.id, title: row.title, subtitle: subtitle?.(row), votes, site: num(row.site), phone: num(row.phone), share: share(votes, totalBallots), place: index + 1,
+      id: row.id, title: row.title, subtitle: subtitle?.(row), votes, site: num(row.site), phone: num(row.phone), share: share(votes, totalBallots), place: votePlaces.get(row.id) || index + 1,
       sitePlace: sitePlaces.get(row.id) || 0, phonePlace: phonePlaces.get(row.id) || 0,
       gapAbove: above === null ? null : above - votes, gapBelow: below === null ? null : votes - below,
     };
   });
 }
 
-// זמר "שייך" לאלבום כששמו מופיע בשדה האמן של האלבום. ההשוואה סובלת ניקוד,
-// רווחים כפולים וסימני פיסוק, אך אינה מנחשת מעבר לכך.
-const normalizeName = (value: string) => value.toLowerCase().replace(/[֑-ׇ]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+// זמר "שייך" לאלבום כששמו מופיע בשדה האמן שלו. ההשוואה היא על קטע קרדיט
+// שלם ולא על תת-מחרוזת — "מאיר" אינו "יצחק מאיר" — ומכירה בוו החיבור,
+// אחרת כל אלבום דואט ("אייל גולן ואיתי לוי") היה מפספס את השותף.
+const normalizeName = (value: string) => value.toLowerCase().replace(/[\u0591-\u05C7]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const CREDIT_SPLIT = /\s*(?:,|&|\||\/|\bעם\b|\bfeat\b|\bft\b)\s*/;
 function albumBelongsToArtist(albumArtist: string, artistName: string): boolean {
-  const album = ` ${normalizeName(albumArtist)} `, artist = normalizeName(artistName);
-  return artist.length >= 2 && album.includes(` ${artist} `);
+  const artist = normalizeName(artistName);
+  if (artist.length < 2) return false;
+  return normalizeName(albumArtist)
+    .split(CREDIT_SPLIT)
+    .flatMap((part) => part.split(/ (?=ו[\u05d0-\u05ea])/))
+    .some((segment) => segment.trim() === artist || segment.trim() === "ו" + artist);
 }
 
 /** ריכוזיות: כמה המרוץ סגור. כולל כמה פריטים מחזיקים יחד חצי מהקולות. */
@@ -109,6 +120,83 @@ function buildRace(rows: RaceRow[], leaders: ItemRow[], days: number[]): RaceSer
     for (const bucket of days) points.push({ bucket, cumulative: (points[points.length - 1]?.cumulative ?? 0) + (perDay.get(bucket) || 0) });
     return { id: item.id, title: item.title, points, finalPlace: index + 1 };
   });
+}
+
+/**
+ * קבוצות טעם: אלבומים שנוטים להיבחר יחד מקובצים לפי "הרמה" — כמה יותר
+ * הם מופיעים יחד ממה שהיה צפוי במקרה — וכל פתק משויך לקבוצה שבה נמצאים
+ * רוב האלבומים שבחר. עונה על השאלה אם מול המצעד עומד קהל אחד או כמה.
+ */
+function buildTasteGroups(albumSets: string[][], albums: ItemRow[], totalBallots: number): TasteGroup[] {
+  const ranked = albums.filter((album) => num(album.votes) > 0).sort((a, b) => num(b.votes) - num(a.votes));
+  if (ranked.length < 4 || totalBallots < 20) return [];
+  const votesOf = new Map(ranked.map((album) => [album.id, num(album.votes)]));
+  const together = new Map<string, number>();
+  const key = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  for (const set of albumSets) {
+    for (let i = 0; i < set.length; i++) for (let j = i + 1; j < set.length; j++) together.set(key(set[i], set[j]), (together.get(key(set[i], set[j])) || 0) + 1);
+  }
+  // הרמה: צפי הוא מכפלת השכיחויות; מעל 1 פירושו שהזוג נבחר יחד יותר מהמקרה.
+  const lift = (a: string, b: string) => {
+    const expected = ((votesOf.get(a) || 0) * (votesOf.get(b) || 0)) / Math.max(1, totalBallots);
+    return expected > 0 ? (together.get(key(a, b)) || 0) / expected : 0;
+  };
+  // זרעים: האלבום המוביל, ואחריו האלבומים הרחוקים ביותר מהזרעים שכבר נבחרו.
+  const seeds: string[] = [ranked[0].id];
+  while (seeds.length < Math.min(TASTE_GROUPS, ranked.length)) {
+    let best: { id: string; score: number } | null = null;
+    for (const album of ranked) {
+      if (seeds.includes(album.id)) continue;
+      const score = Math.max(...seeds.map((seed) => lift(seed, album.id)));
+      if (!best || score < best.score) best = { id: album.id, score };
+    }
+    if (!best) break;
+    seeds.push(best.id);
+  }
+  const members = new Map<string, string[]>(seeds.map((seed) => [seed, [seed]]));
+  for (const album of ranked) {
+    if (seeds.includes(album.id)) continue;
+    let home = seeds[0], bestLift = -1;
+    for (const seed of seeds) { const value = lift(seed, album.id); if (value > bestLift) { bestLift = value; home = seed; } }
+    members.get(home)!.push(album.id);
+  }
+  const titleOf = new Map(albums.map((album) => [album.id, album.title]));
+  const counts = new Map<string, number>(seeds.map((seed) => [seed, 0]));
+  for (const set of albumSets) {
+    let home: string | null = null, bestOverlap = 0;
+    for (const seed of seeds) {
+      const overlap = set.filter((id) => members.get(seed)!.includes(id)).length;
+      if (overlap > bestOverlap) { bestOverlap = overlap; home = seed; }
+    }
+    if (home) counts.set(home, (counts.get(home) || 0) + 1);
+  }
+  return seeds.map((seed, index) => {
+    const group = members.get(seed)!.slice().sort((a, b) => (votesOf.get(b) || 0) - (votesOf.get(a) || 0));
+    const voters = counts.get(seed) || 0;
+    return {
+      id: seed, label: titleOf.get(seed) || `קבוצה ${index + 1}`,
+      albums: group.map((id) => titleOf.get(id) || ""),
+      voters, share: share(voters, totalBallots),
+      signature: group.slice(1, 4).map((id) => ({ title: titleOf.get(id) || "", lift: round(lift(seed, id), 2) })),
+    };
+  }).filter((group) => group.voters > 0).sort((a, b) => b.voters - a.voters);
+}
+
+/** חריגה: פריט שחלקו ביממה האחרונה גדול בהרבה מחלקו לאורך הסקר כולו. */
+function findAnomalies(kind: Anomaly["kind"], recent: Map<string, number>, items: ItemRow[], recentTotal: number, totalBallots: number): Anomaly[] {
+  if (recentTotal < ANOMALY_MIN_VOTES || totalBallots < 40) return [];
+  const found: Anomaly[] = [];
+  for (const item of items) {
+    const count = recent.get(item.id) || 0;
+    if (count < ANOMALY_MIN_VOTES) continue;
+    const baselineShare = share(num(item.votes) - count, Math.max(1, totalBallots - recentTotal));
+    const recentShare = share(count, recentTotal);
+    if (baselineShare <= 0) continue;
+    const ratio = round(recentShare / baselineShare, 2);
+    if (ratio < 2) continue;
+    found.push({ kind, id: item.id, title: item.title, recent: count, recentShare, baselineShare, ratio, severity: ratio >= 3 ? "high" : "watch" });
+  }
+  return found.sort((a, b) => b.ratio - a.ratio).slice(0, 6);
 }
 
 export async function buildAnalytics(env: Env, surveyId: string, options: { fresh?: boolean } = {}): Promise<Analytics> {
@@ -155,7 +243,7 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
     .bind(surveyId, ...leaders.map((item) => item.id));
   const emptyStatement = env.DB.prepare("SELECT NULL AS id, 0 AS bucket, 0 AS votes WHERE 0");
 
-  const [albumRace, artistRace, drafts, returningRow, surveyTotals, subscriberRows, dropoff] = await env.DB.batch([
+  const [albumRace, artistRace, drafts, returningRow, surveyTotals, subscriberRows, dropoff, recentAlbums, recentArtists, draftPicks] = await env.DB.batch([
     albumLeaders.length ? raceStatement("album_votes", "album_id", albumLeaders) : emptyStatement,
     artistLeaders.length ? raceStatement("artist_votes", "artist_id", artistLeaders) : emptyStatement,
     // ההתקדמות נמחקת כששולחים את הפתק, ולכן שורה שנשארה היא באמת נטושה.
@@ -166,6 +254,10 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
     // הקישור המהימן; כתובת דואר נשמרת בפתק רק בערוץ האתר.
     env.DB.prepare("SELECT (SELECT COUNT(*) FROM subscribers WHERE unsubscribed_at IS NULL) AS total, (SELECT COUNT(DISTINCT b.voter_key) FROM ballots b JOIN subscribers s ON s.user_sub=b.voter_key WHERE b.survey_id=?1 AND b.channel='site' AND s.unsubscribed_at IS NULL) AS fromSurvey").bind(surveyId),
     env.DB.prepare("SELECT v.album_id AS id, COUNT(*) AS withoutSong FROM album_votes v JOIN ballots b ON b.id=v.ballot_id LEFT JOIN song_votes sv ON sv.ballot_id=v.ballot_id AND sv.album_id=v.album_id WHERE b.survey_id=?1 AND sv.song_id IS NULL GROUP BY v.album_id").bind(surveyId),
+    env.DB.prepare("SELECT v.album_id AS id, COUNT(*) AS votes FROM album_votes v JOIN ballots b ON b.id=v.ballot_id WHERE b.survey_id=?1 AND b.created_at >= ?2 GROUP BY v.album_id").bind(surveyId, now - ANOMALY_WINDOW),
+    env.DB.prepare("SELECT v.artist_id AS id, COUNT(*) AS votes FROM artist_votes v JOIN ballots b ON b.id=v.ballot_id WHERE b.survey_id=?1 AND b.created_at >= ?2 GROUP BY v.artist_id").bind(surveyId, now - ANOMALY_WINDOW),
+    // מה בחרו מי שפתחו טיוטה ולא שלחו: התוכן יושב ב-data_json ולא נקרא עד היום.
+    env.DB.prepare("SELECT picks.value AS id, COUNT(*) AS drafts FROM site_ballot_progress p, json_each(json_extract(p.data_json,'$.albumIds')) AS picks WHERE p.survey_id=?1 GROUP BY picks.value").bind(surveyId),
   ]);
 
   // יומן הקו והקריינויות יושבים בטבלאות שנוצרות בעצלתיים. הן נשאלות בנפרד
@@ -235,9 +327,11 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
   // שילובי אלבומים: המזהים ממוינים כאן ולא ב-SQL, כדי ששני פתקים עם אותה
   // חמישייה בסדר אחר ייספרו כשילוב אחד.
   const comboCounts = new Map<string, number>();
+  const albumSets: string[][] = [];
   for (const row of combos.results as Array<{ combo: string | null }>) {
     const ids = String(row.combo || "").split(",").map((id) => id.trim()).filter(Boolean).sort();
     if (!ids.length) continue;
+    albumSets.push(ids);
     const key = ids.join(",");
     comboCounts.set(key, (comboCounts.get(key) || 0) + 1);
   }
@@ -264,7 +358,9 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
   const concentration = { albums: concentrationOf(albumRows), artists: concentrationOf(artistRows), songs: concentrationOf(songRows) };
   const positionBias = { albums: positionBiasOf(albumRows), artists: positionBiasOf(artistRows), songs: positionBiasOf(songRows) };
 
-  const stageLabels = ["בחירת אלבומים", "בחירת שירים", "בחירת זמרים", "אישור ההצבעה"];
+  // stageIndex הוא מיקום ברשימת השלבים הפעילים שהאתר בונה, לא מספר קבוע:
+  // עם שלב כבוי, רשימה קבועה הייתה מדביקה לטיוטה את שם השלב הקודם.
+  const stageLabels = [stageFlags.albums && "בחירת אלבומים", stageFlags.songs && "בחירת שירים", stageFlags.artists && "בחירת זמרים", "אישור ההצבעה"].filter(Boolean) as string[];
   const siteDrafts: AbandonedStage[] = (drafts.results as Array<{ stage: number; total: number; oldestAt: number; newestAt: number }>).map((row) => ({
     stage: num(row.stage), label: stageLabels[num(row.stage)] || `שלב ${num(row.stage) + 1}`, count: num(row.total), oldestAt: row.oldestAt ?? null, newestAt: row.newestAt ?? null,
   }));
@@ -289,6 +385,38 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
     .map((album) => ({ id: album.id, title: album.title, albumVotes: num(album.votes), withoutSong: dropoffById.get(album.id) || 0, share: share(dropoffById.get(album.id) || 0, num(album.votes)) }))
     .filter((row) => row.withoutSong > 0)
     .sort((a, b) => b.share - a.share || b.withoutSong - a.withoutSong);
+
+  // הפתק שמייצג את הקהל: הנבחרים בכל שלב, ובכמה פתקים הם מופיעים יחד.
+  const settingsMax = { albums: albumLeaders.length ? 5 : 0, artists: 3 };
+  const compositeAlbums = rankedAlbums.filter((item) => item.votes > 0).slice(0, settingsMax.albums).map((item) => {
+    const album = albumBreakdown.find((row) => row.id === item.id);
+    const source = albumRows.find((row) => row.id === item.id);
+    return { id: item.id, title: item.title, artistName: String(source?.artistName || ""), coverUrl: source?.coverUrl ?? null, votes: item.votes, share: item.share, song: album?.topSong ?? null };
+  });
+  const compositeAlbumIds = compositeAlbums.map((item) => item.id);
+  const composite: CompositeBallot = {
+    albums: compositeAlbums,
+    artists: rankedArtists.filter((item) => item.votes > 0).slice(0, settingsMax.artists).map((item) => ({ id: item.id, title: item.title, votes: item.votes, share: item.share })),
+    matching: compositeAlbumIds.length ? albumSets.filter((set) => compositeAlbumIds.every((id) => set.includes(id))).length : 0,
+  };
+
+  const tasteGroups = buildTasteGroups(albumSets, albumRows, totalBallots);
+
+  const recentAlbumMap = new Map((recentAlbums.results as Array<{ id: string; votes: number }>).map((row) => [row.id, num(row.votes)]));
+  const recentArtistMap = new Map((recentArtists.results as Array<{ id: string; votes: number }>).map((row) => [row.id, num(row.votes)]));
+  const recentBallots = hourRows.reduce((sum, row) => (num(row.bucket) >= now - ANOMALY_WINDOW ? sum + num(row.votes) : sum), 0);
+  const anomalies = [
+    ...findAnomalies("album", recentAlbumMap, albumRows, recentBallots, totalBallots),
+    ...findAnomalies("artist", recentArtistMap, artistRows, recentBallots, totalBallots),
+  ].sort((a, b) => b.ratio - a.ratio);
+
+  const abandonedPicks = (draftPicks.results as Array<{ id: string; drafts: number }>)
+    .map((row) => {
+      const album = albumRows.find((item) => item.id === row.id);
+      return { id: row.id, title: album?.title || "", drafts: num(row.drafts), share: share(num(row.drafts), siteDraftTotal), finishedShare: share(num(album?.votes), totalBallots) };
+    })
+    .filter((row) => row.title)
+    .sort((a, b) => b.drafts - a.drafts);
 
   // מצב התוכן: מה חסר כדי שהאתר והקו יהיו שלמים.
   const promptKeys = new Set((promptKeyRows.results as Array<{ key: string }>).map((row) => row.key));
@@ -334,6 +462,10 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
     },
     subscribers: { total: num(subscriberRow?.total), fromThisSurvey: num(subscriberRow?.fromSurvey), share: share(num(subscriberRow?.fromSurvey), siteBallots) },
     stageDropoff,
+    composite,
+    tasteGroups,
+    anomalies,
+    abandonedPicks,
     blocked: (blocked.results as Array<{ fingerprint: string; blockedBy: string; createdAt: number; ballots: number; lastBallotAt: number | null }>).map((row) => ({ ...row, ballots: num(row.ballots) })),
     audit: { recent: audit.results as Analytics["audit"]["recent"], last30Days: { total: num(auditTotals?.total), failed: num(auditTotals?.failed) } },
     content,
@@ -404,7 +536,18 @@ function buildTime(hourRows: HourRow[], now: number) {
     const point = dayMap.get(dayStart) || { bucket: dayStart, site: 0, phone: 0, total: 0, cumulative: 0 };
     point[channel] += votes; point.total += votes; dayMap.set(dayStart, point);
   }
-  const daily = [...dayMap.values()].sort((a, b) => a.bucket - b.bucket);
+  const observed = [...dayMap.values()].sort((a, b) => a.bucket - b.bucket);
+  // הגרפים ממקמים לפי מיקום ברשימה, ולכן יום בלי הצבעות חייב להופיע כשורה
+  // של אפסים; בלעדיו שבוע שקט נדחס לרוחב של יום ומשנה את שיפוע הקו המצטבר.
+  const daily: DailyPoint[] = [];
+  for (const point of observed) {
+    const previous = daily[daily.length - 1];
+    if (previous) {
+      const missing = Math.min(400, Math.round((point.bucket - previous.bucket) / DAY) - 1);
+      for (let step = 1; step <= missing; step++) daily.push({ bucket: previous.bucket + step * DAY, site: 0, phone: 0, total: 0, cumulative: 0 });
+    }
+    daily.push(point);
+  }
   let running = 0;
   for (const point of daily) { running += point.total; point.cumulative = running; }
 

@@ -290,6 +290,8 @@ async function clearCurrentPoll(env: AdminEnv, surveyId?: string) {
     env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(survey),
     env.DB.prepare("DELETE FROM ballots WHERE survey_id=?").bind(survey),
     env.DB.prepare("DELETE FROM blocked_fingerprints WHERE survey_id=?").bind(survey),
+    // גם טיוטות האתר: בלעדיהן מדד "השלמת הצבעה" ממשיך לספור טיוטות של סקר שאופס.
+    env.DB.prepare("DELETE FROM site_ballot_progress WHERE survey_id=?").bind(survey),
     env.DB.prepare("DELETE FROM songs WHERE album_id IN (SELECT id FROM albums WHERE survey_id=?)").bind(survey),
     env.DB.prepare("DELETE FROM albums WHERE survey_id=?").bind(survey),
     env.DB.prepare("DELETE FROM artists WHERE survey_id=?").bind(survey),
@@ -307,6 +309,7 @@ export async function resetPollVotes(env: AdminEnv, surveyId: string): Promise<n
       env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id IN (SELECT id FROM ballots WHERE survey_id=?)").bind(surveyId),
       env.DB.prepare("DELETE FROM ballots WHERE survey_id=?").bind(surveyId),
       env.DB.prepare("DELETE FROM blocked_fingerprints WHERE survey_id=?").bind(surveyId),
+      env.DB.prepare("DELETE FROM site_ballot_progress WHERE survey_id=?").bind(surveyId),
     ]);
   }
   await clearIvrProgress(env, surveyId);

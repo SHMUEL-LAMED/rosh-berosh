@@ -100,19 +100,6 @@ export function pearson(xs, ys) {
   return Math.round((covariance / Math.sqrt(varianceX * varianceY)) * 1000) / 1000;
 }
 
-/**
- * תחזית פשוטה לסך ההצבעות בסוף: הקצב של החלון האחרון מוכפל בזמן שנותר,
- * ונוסף למה שכבר יש. מחזירה null כשאין מספיק היסטוריה או כשאין תאריך סיום,
- * כדי שלא נציג מספר שנראה בטוח ואינו.
- */
-export function projectTotal({ current, windowVotes, windowSeconds, secondsRemaining }) {
-  if (!Number.isFinite(secondsRemaining) || secondsRemaining <= 0) return null;
-  if (!Number.isFinite(windowSeconds) || windowSeconds <= 0) return null;
-  if (!Number.isFinite(windowVotes) || windowVotes <= 0) return null;
-  const perSecond = windowVotes / windowSeconds;
-  return Math.round(current + perSecond * secondsRemaining);
-}
-
 /** דירוג תחרותי: תיקו מקבל את אותו מקום, והמקום הבא מדלג. */
 export function competitionPlaces(entries, valueOf) {
   const ordered = [...entries].sort((a, b) => valueOf(b) - valueOf(a));

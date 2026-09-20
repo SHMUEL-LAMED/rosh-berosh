@@ -18,6 +18,16 @@ export type Concentration = { index: number; gini: number; topFiveShare: number;
 export type PositionBias = { correlation: number | null; items: number; verdict: "none" | "weak" | "clear" };
 export type AbandonedStage = { stage: number; label: string; count: number; oldestAt: number | null; newestAt: number | null };
 export type SurveyComparison = { id: string; name: string; total: number; firstAt: number | null; atSameElapsed: number | null };
+/** הפתק שמייצג את הקהל: מה שנבחר הכי הרבה בכל שלב, כמו קבלת הצבעה. */
+export type CompositeBallot = {
+  albums: Array<{ id: string; title: string; artistName: string; coverUrl?: string | null; votes: number; share: number; song: { id: string; title: string; votes: number; share: number } | null }>;
+  artists: Array<{ id: string; title: string; votes: number; share: number }>;
+  matching: number;
+};
+/** קבוצת טעם: אלבומים שנוטים להיבחר יחד, והמצביעים ששויכו להם. */
+export type TasteGroup = { id: string; label: string; albums: string[]; voters: number; share: number; signature: Array<{ title: string; lift: number }> };
+/** חריגה: פריט שקפץ פתאום ביחס לעצמו. */
+export type Anomaly = { kind: "album" | "artist"; id: string; title: string; recent: number; recentShare: number; baselineShare: number; ratio: number; severity: "watch" | "high" };
 
 export type Analytics = {
   generatedAt: number;
@@ -41,6 +51,11 @@ export type Analytics = {
   returning: { voters: number; share: number; surveys: SurveyComparison[]; previous: SurveyComparison | null };
   subscribers: { total: number; fromThisSurvey: number; share: number };
   stageDropoff: Array<{ id: string; title: string; albumVotes: number; withoutSong: number; share: number }>;
+  composite: CompositeBallot;
+  tasteGroups: TasteGroup[];
+  anomalies: Anomaly[];
+  /** מה בחרו מי שפתחו טיוטה ולא שלחו אותה. */
+  abandonedPicks: Array<{ id: string; title: string; drafts: number; share: number; finishedShare: number }>;
   blocked: Array<{ fingerprint: string; blockedBy: string; createdAt: number; ballots: number; lastBallotAt: number | null }>;
   audit: { recent: AuditRow[]; last30Days: { total: number; failed: number } };
   content: { songsWithoutAudio: NamedItem[]; songsWithoutPreview: NamedItem[]; albumsWithoutCover: NamedItem[]; artistsWithoutImage: NamedItem[]; missingPrompts: NamedItem[]; inactive: { albums: number; songs: number; artists: number } };

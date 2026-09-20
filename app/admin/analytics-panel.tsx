@@ -114,12 +114,12 @@ export function AnalyticsPanel({ onMessage }: { onMessage(text: string): void })
         <button type="button" className="analytics-button" onClick={() => downloadTablesXlsx(buildSheets(data), "rosh-berosh-analytics.xlsx")}>הורדת Excel</button>
         <button type="button" className="analytics-button primary" onClick={() => setBroadcast(true)}>מסך שידור</button>
       </div>
+      {/* סך ההצבעות ופילוח הערוצים כבר מופיעים בכרטיסים שמעל מסך הניהול,
+          ולכן כאן רק מה שאין שם: התקופה שהסקר מכסה והחלוקה היחסית. */}
       <div className="analytics-stats">
-        <Stat label="פתקים" value={percentOnly ? "100%" : format.n(total)} />
-        <Stat label="מהאתר" value={format.count(data.totals.site)} />
-        <Stat label="מהטלפון" value={format.count(data.totals.phone)} />
-        <Stat label="הצבעה ראשונה" value={fmtDate(data.totals.firstAt) || "—"} />
-        <Stat label="הצבעה אחרונה" value={fmtDate(data.totals.lastAt) || "—"} />
+        <Stat label="הסקר מכסה" value={data.daily.series.length ? `${format.n(data.daily.series.length)} ימים` : "—"} note={data.totals.firstAt ? `מ-${fmtDate(data.totals.firstAt)} עד ${fmtDate(data.totals.lastAt)}` : undefined} />
+        <Stat label="ממוצע ליום" value={format.count(data.pace.perDay)} />
+        <Stat label="פריטים בסקר" value={`${format.n(data.totals.albums)} · ${format.n(data.totals.songs)} · ${format.n(data.totals.artists)}`} note="אלבומים · שירים · זמרים" />
       </div>
       <ChannelSplit site={data.totals.site} phone={data.totals.phone} formatValue={(value) => format.count(value)} />
     </section>
@@ -340,7 +340,7 @@ function TimingSection({ data, format }: { data: Analytics; format: Formatter })
       </article>;
     })}</div>
     {data.timing.sampled
-      ? <p className="analytics-note">המדידה מחושבת על {format.n(data.timing.sampleSize)} הפתקים האחרונים, כדי לא למשוך את כל הסקר לזיכרון.</p>
+      ? <p className="analytics-note">המדידה מחושבת על {format.count(data.timing.sampleSize)} הפתקים האחרונים, כדי לא למשוך את כל הסקר לזיכרון.</p>
       : data.timing.untracked > 0 && <p className="analytics-note">{format.count(data.timing.untracked)} פתקים נשלחו לפני שהמדידה נוספה ואינם נספרים כאן.</p>}
     <div className="timing-grid">
       <div className="cross-card">
