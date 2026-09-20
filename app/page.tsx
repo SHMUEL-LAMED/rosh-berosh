@@ -13,7 +13,30 @@ type Artist = { id: string; name: string; imageUrl?: string | null };
 type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; albumsMax: number; songsEnabled: number; songsMin: number; songsMax: number; artistsEnabled: number; artistsMin: number; artistsMax: number };
 type Catalog = { surveyId: string; albums: Album[]; songs: Song[]; artists: Artist[]; rules: Rules };
 type Stage = "albums" | "songs" | "artists" | "summary";
-type SavedProgress = { albumIds?: string[]; songIdsByAlbum?: Record<string, string[]>; artistIds?: string[]; stageIndex?: number; songAlbumIndex?: number };
+// זמני ההצבעה: מתי התחילו, מתי הושלם כל שלב בפעם הראשונה, ובכמה ביקורים.
+// נשמרים יחד עם ההתקדמות כדי שרענון או חזרה מאוחרת ימשיכו את אותה מדידה.
+type VoteTiming = { startedAt: number; albumsDoneAt?: number; songsDoneAt?: number; artistsDoneAt?: number; sessions: number };
+type SavedProgress = { albumIds?: string[]; songIdsByAlbum?: Record<string, string[]>; artistIds?: string[]; stageIndex?: number; songAlbumIndex?: number; timing?: Partial<VoteTiming> };
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+const VISIT_KEY = "rosh-berosh-visit-counted";
+/**
+ * "ביקור" הוא כניסה חדשה, לא רינדור ולא רענון. sessionStorage חי בדיוק
+ * לאורך הלשונית, ולכן רענון של אותה לשונית אינו מוסיף ביקור ולשונית חדשה
+ * כן. אחסון חסום מחזיר ספירה של ביקור אחד במקום להפיל את המדידה.
+ */
+function countVisit(): boolean {
+  try {
+    if (window.sessionStorage.getItem(VISIT_KEY)) return false;
+    window.sessionStorage.setItem(VISIT_KEY, "1");
+    return true;
+  } catch { return true; }
+}
+function restoreTiming(saved?: Partial<VoteTiming> | null, fresh = countVisit()): VoteTiming {
+  const startedAt = Number(saved?.startedAt) > 0 ? Number(saved!.startedAt) : nowSeconds();
+  const stamp = (value: unknown) => (Number(value) >= startedAt ? Number(value) : undefined);
+  const previous = Number(saved?.sessions) > 0 ? Number(saved!.sessions) : 0;
+  return { startedAt, albumsDoneAt: stamp(saved?.albumsDoneAt), songsDoneAt: stamp(saved?.songsDoneAt), artistsDoneAt: stamp(saved?.artistsDoneAt), sessions: Math.max(1, previous + (fresh ? 1 : 0)) };
+}
 type ReceiptAlbum = { id: string; title: string; artistName: string; coverUrl?: string | null; songs: string[] };
 type ReceiptArtist = { id: string; name: string; imageUrl?: string | null };
 type Receipt = { albums: ReceiptAlbum[]; artists: ReceiptArtist[] };
@@ -59,6 +82,7 @@ export default function Home() {
   const [albums, setAlbums] = useState<string[]>([]);
   const [songs, setSongs] = useState<Record<string, string[]>>({});
   const [artists, setArtists] = useState<string[]>([]);
+  const [timing, setTiming] = useState<VoteTiming | null>(null);
   const { song: player, play, stop, setSiblings } = usePlayer();
   const [user] = useCurrentUser();
   const requestedPreview = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("preview") : null;
@@ -140,6 +164,7 @@ export default function Home() {
       if (!response.ok) throw new Error();
       return response.json() as Promise<{ progress?: SavedProgress | null }>;
     }).then(({ progress }) => {
+      setTiming(restoreTiming(progress?.timing));
       if (!progress) return;
       const albumSet = new Set(catalog.albums.map((item) => item.id));
       const artistSet = new Set(catalog.artists.map((item) => item.id));
@@ -153,16 +178,21 @@ export default function Home() {
       const stageCount = [catalog.rules.albumsEnabled, catalog.rules.songsEnabled, catalog.rules.artistsEnabled].filter(Boolean).length + 1;
       setStageIndex(Math.max(0, Math.min(stageCount - 1, Number(progress.stageIndex) || 0)));
       setSongAlbumIndex(Math.max(0, Math.min(restoredAlbums.length - 1, Number(progress.songAlbumIndex) || 0)));
-    }).catch(() => notify("לא הצלחנו לשחזר את ההתקדמות השמורה.", "error"));
+    }).catch(() => {
+      // בלי הנפילה לאחור כאן מדידת הזמן נשארת ריקה לכל אורך הביקור, ואיתה
+      // גם שמירת ההתקדמות — האפקט שמטה מותנה בקיומה.
+      setTiming((current) => current ?? restoreTiming(null));
+      notify("לא הצלחנו לשחזר את ההתקדמות השמורה.", "error");
+    });
   }, [catalog, voted, preview, notify]);
 
   useEffect(() => {
-    if (preview || !catalog || voted !== false || !progressReady.current || done) return;
+    if (preview || !catalog || voted !== false || !progressReady.current || done || !timing) return;
     const timer = window.setTimeout(() => {
-      void fetch("/api/ballots/progress", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, stageIndex, songAlbumIndex }) });
+      void fetch("/api/ballots/progress", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, stageIndex, songAlbumIndex, timing }) });
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [catalog, voted, preview, done, albums, songs, artists, stageIndex, songAlbumIndex]);
+  }, [catalog, voted, preview, done, albums, songs, artists, stageIndex, songAlbumIndex, timing]);
   const stages = useMemo(() => {
     if (!catalog) return [] as { key: Stage; label: string }[];
     return [
@@ -203,6 +233,8 @@ export default function Home() {
   const toggleArtist = (id: string) => toggleLimited(artists, id, catalog?.rules.artistsMax ?? 3, setArtists, `אפשר לבחור עד ${catalog?.rules.artistsMax ?? 3} זמרים.`);
 
   const scrollTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
+  // סיום שלב נמדד בפעם הראשונה שעוברים ממנו הלאה; חזרה אחורה אינה מאפסת אותו.
+  const markStageDone = (key: "albumsDoneAt" | "songsDoneAt" | "artistsDoneAt") => setTiming((current) => current && !current[key] ? { ...current, [key]: nowSeconds() } : current);
   const goToStage = (index: number) => { setStageIndex(Math.max(0, Math.min(stages.length - 1, index))); scrollTop(); };
   const next = () => {
     if (!catalog) return;
@@ -214,6 +246,7 @@ export default function Home() {
       const albumsRequired = Math.min(r.albumsMin, catalog.albums.length);
       if (albums.length < albumsRequired || albums.length > r.albumsMax) return fail(`יש לבחור ${rangeText(albumsRequired, Math.min(r.albumsMax, catalog.albums.length), "אלבומים")}.`);
       setSongAlbumIndex(0);
+      markStageDone("albumsDoneAt");
       return goToStage(stageIndex + 1);
     }
     if (stage === "songs") {
@@ -225,11 +258,13 @@ export default function Home() {
       const required = Math.min(r.songsMin, available);
       if (album && (chosen < required || chosen > r.songsMax)) return fail(`יש לבחור ${rangeText(required, Math.min(r.songsMax, available), "שירים")} מ״${album.title}״.`);
       if (songAlbumIndex < selectedAlbums.length - 1) { setSongAlbumIndex(songAlbumIndex + 1); return scrollTop(); }
+      markStageDone("songsDoneAt");
       return goToStage(stageIndex + 1);
     }
     // Same for the singers: a short list must not become a dead end.
     const artistsRequired = Math.min(r.artistsMin, catalog.artists.length);
     if (stage === "artists" && (artists.length < artistsRequired || artists.length > r.artistsMax)) return fail(`יש לבחור ${rangeText(artistsRequired, Math.min(r.artistsMax, catalog.artists.length), "זמרים")}.`);
+    if (stage === "artists") markStageDone("artistsDoneAt");
     goToStage(stageIndex + 1);
   };
   const back = () => {
@@ -245,7 +280,7 @@ export default function Home() {
     try {
       if (preview) { setDone(true); stop(); return; }
       const fp = await browserFingerprint().catch(() => "");
-      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site", fingerprint: fp }) });
+      const response = await fetch("/api/ballots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ albumIds: albums, songIdsByAlbum: songs, artistIds: artists, channel: "site", fingerprint: fp, timing: timing && { ...timing, clientNow: nowSeconds() } }) });
       const result = await response.json();
       if (!response.ok) {
         if (response.status === 409) setVoted(true);

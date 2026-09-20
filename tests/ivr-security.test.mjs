@@ -11,7 +11,7 @@ import { hasStageChoices } from "../app/voting-stage.js";
 const require = createRequire(import.meta.url);
 const { DEFAULT_POST_VOTE_TRANSFER, normalizePhone: normalizeIvrPhone, phone, resolvePostVoteTransfer } = require("../ivr-service/src/phone.js");
 const { TRANSFER_KEY, continuousMenuInput, menuCode, menuReadOptions, transferOnEmptyEntry } = require("../ivr-service/src/menu-input.js");
-const { sanitizeProgress, progressChanged } = require("../ivr-service/src/progress.js");
+const { sanitizeProgress, progressChanged, restoreTiming, markStageDone } = require("../ivr-service/src/progress.js");
 
 function ivrRecorderEnv(initial = []) {
   const recorders = new Set();
@@ -618,4 +618,19 @@ test("an empty entry requires explicit confirmation before transfer", () => {
   assert.ok(prompts.some((item) => item.key === "system:confirm_transfer"), "הודעת האישור חייבת להיות ניתנת להקלטה");
   assert.ok(prompts.some((item) => item.key === "system:transferring"), "הודעת ההעברה חייבת להיות ניתנת להקלטה");
   assert.ok(server.includes("system:transferring"));
+});
+
+test("phone voting timing starts on the first call, counts every call and stamps each stage once", () => {
+  const first = restoreTiming(null, 1000);
+  assert.deepEqual(first, { startedAt: 1000, albumsDoneAt: undefined, songsDoneAt: undefined, artistsDoneAt: undefined, sessions: 1 });
+  const stamped = markStageDone(first, "albumsDoneAt", 1300);
+  assert.equal(stamped.albumsDoneAt, 1300);
+  assert.equal(markStageDone(stamped, "albumsDoneAt", 1900).albumsDoneAt, 1300, "a stage is stamped only the first time it completes");
+  const second = restoreTiming({ albumIds: [], timing: stamped }, 5000);
+  assert.equal(second.startedAt, 1000, "a later call keeps the original start");
+  assert.equal(second.sessions, 2, "every call counts");
+  assert.equal(second.albumsDoneAt, 1300);
+  const broken = restoreTiming({ timing: { startedAt: 4000, albumsDoneAt: 100, sessions: "x" } }, 5000);
+  assert.equal(broken.albumsDoneAt, undefined, "a stage stamp before the start is dropped");
+  assert.equal(broken.sessions, 1);
 });

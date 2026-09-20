@@ -25,7 +25,36 @@ interface Env {
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
 type EdgeCacheStorage = CacheStorage & { default?: Cache };
-type Submission = { voterKey?: string; voterEmail?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string };
+type BallotTiming = { startedAt?: number; albumsDoneAt?: number; songsDoneAt?: number; artistsDoneAt?: number; sessions?: number; clientNow?: number };
+type Submission = { voterKey?: string; voterEmail?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string; timing?: BallotTiming };
+
+// זמני ההצבעה מגיעים מהלקוח (האתר או הקו) ולכן נבדקים: חותמת חייבת להיות
+// בעבר ולא לפני יותר משנה, וסיום שלב אינו יכול להקדים את ההתחלה. ערך פסול
+// הופך ל-null ואינו מפיל את ההצבעה — הנתונים הם תוספת, לא תנאי.
+function sanitizeTiming(timing: BallotTiming | undefined, now = Math.floor(Date.now() / 1000)) {
+  // החותמות נמדדות בשעון הלקוח ואילו created_at נכתב בשעון השרת. הלקוח
+  // שולח גם את השעה שלו, וההפרש מוזז כאן, אחרת שעון שמפגר בחצי שעה היה
+  // נראה כמו הצבעה שנמשכה חצי שעה. הזזה מעבר ליממה נראית שבורה מכדי
+  // לתקן, ואז החותמות נשארות כמות שהן ונופלות על הבדיקות שמתחת.
+  const clientNow = Math.floor(Number(timing?.clientNow));
+  const rawSkew = Number.isFinite(clientNow) && clientNow > 0 ? now - clientNow : 0;
+  const skew = Math.abs(rawSkew) <= 86400 ? rawSkew : 0;
+  const stamp = (value: unknown, notBefore: number | null) => {
+    const raw = Math.floor(Number(value));
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    const seconds = raw + skew;
+    if (seconds > now + 60 || seconds < now - 366 * 86400) return null;
+    if (notBefore !== null && seconds < notBefore) return null;
+    return seconds;
+  };
+  const startedAt = stamp(timing?.startedAt, null);
+  const albumsDoneAt = startedAt === null ? null : stamp(timing?.albumsDoneAt, startedAt);
+  const songsDoneAt = startedAt === null ? null : stamp(timing?.songsDoneAt, startedAt);
+  const artistsDoneAt = startedAt === null ? null : stamp(timing?.artistsDoneAt, startedAt);
+  const sessionsRaw = Math.floor(Number(timing?.sessions));
+  const sessions = startedAt !== null && Number.isFinite(sessionsRaw) && sessionsRaw >= 1 ? Math.min(sessionsRaw, 1000) : null;
+  return { startedAt, albumsDoneAt, songsDoneAt, artistsDoneAt, sessions };
+}
 type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; albumsMax: number; songsEnabled: number; songsMin: number; songsMax: number; artistsEnabled: number; artistsMin: number; artistsMax: number };
 const DEFAULT_RULES: Rules = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
 const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1), 'main')";
@@ -214,13 +243,20 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   const validArtists = artistIds.length ? await env.DB.prepare(`SELECT id FROM artists WHERE active=1 AND survey_id=? AND id IN (${placeholders(artistIds.length)})`).bind(surveyId, ...artistIds).all<{ id: string }>() : { results: [] };
   const songIds = unique(albumIds.flatMap((id) => songMap[id] ?? []));
   const validSongs = songIds.length ? await env.DB.prepare(`SELECT s.id, s.album_id AS albumId FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.survey_id=? AND s.id IN (${placeholders(songIds.length)})`).bind(surveyId, ...songIds).all<{ id: string; albumId: string }>() : { results: [] };
-  if (validAlbums.results.length !== albumIds.length || validArtists.results.length !== artistIds.length || validSongs.results.length !== songIds.length || validSongs.results.some((song) => !songMap[song.albumId]?.includes(song.id))) {
+  // שיר חייב להישלח תחת האלבום שלו ורק תחתיו. בלי הבדיקה הזו אפשר היה
+  // לרשום את אותו שיר תחת כל האלבומים שנבחרו: האינדקס הייחודי של
+  // `song_votes` כולל את מזהה האלבום, ולכן כל שורה כזו נחשבת חוקית
+  // ומכפילה את משקלו של שיר אחד עד פי מספר האלבומים שבפתק.
+  const songAlbum = new Map(validSongs.results.map((song) => [song.id, song.albumId]));
+  const misfiledSong = albumIds.some((albumId) => (songMap[albumId] ?? []).some((songId) => songAlbum.get(songId) !== albumId));
+  if (validAlbums.results.length !== albumIds.length || validArtists.results.length !== artistIds.length || validSongs.results.length !== songIds.length || misfiledSong) {
     return json({ error: "אחת הבחירות אינה קיימת או אינה פעילה." }, 400);
   }
 
   const ballotId = crypto.randomUUID();
+  const timing = sanitizeTiming(body.timing);
   const statements = [
-    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint) VALUES (?,?,?,?,?,?)").bind(ballotId, surveyId, voterKey, channel === "site" ? normalizeEmail(body.voterEmail) || null : null, channel, fingerprint || null),
+    env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,started_at,albums_done_at,songs_done_at,artists_done_at,sessions) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(ballotId, surveyId, voterKey, channel === "site" ? normalizeEmail(body.voterEmail) || null : null, channel, fingerprint || null, timing.startedAt, timing.albumsDoneAt, timing.songsDoneAt, timing.artistsDoneAt, timing.sessions),
     ...albumIds.map((id) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(ballotId, id)),
     ...albumIds.flatMap((id) => (songMap[id] ?? []).map((songId) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(ballotId, id, songId))),
     ...artistIds.map((id) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(ballotId, id)),
@@ -493,10 +529,12 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     // secret instead; a request claiming "phone" without it is still rejected.
     const fromIvr = verifyIvrSecret(request, env);
     const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
-    if (!fromIvr) {
-      await ensureRuntimeSchema(env);
-      if (!(await checkBallotRate(env.DB, clientIp))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
-    }
+    // שמירת פתק נוגעת בעמודות שנוספות בזמן ריצה, ולכן הסכמה נבנית כאן בשני
+    // הערוצים. בתפריטי הקו היא נשארת בחוץ מטעמי זמן תגובה, אבל שמירת הפתק
+    // קורית פעם אחת בסוף השיחה — ובלעדיה הצבעה טלפונית ראשונה אחרי פריסה
+    // נופלת על עמודה חסרה והמתקשר מאבד את ההצבעה.
+    await ensureRuntimeSchema(env);
+    if (!fromIvr && !(await checkBallotRate(env.DB, clientIp))) return json({ error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
     let original: Submission;
     try { original = await request.json<Submission>(); } catch { return json({ error: "בקשה לא תקינה." }, 400); }
     if (original.channel === "phone") {

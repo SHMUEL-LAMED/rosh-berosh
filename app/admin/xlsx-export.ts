@@ -117,3 +117,31 @@ export function downloadSubscribersXlsx(rows: SubscriberRow[], filename: string)
   ];
   downloadXlsx(files, filename);
 }
+
+/** גיליון כללי: כותרות ושורות של טקסט או מספרים. לשונית "נתונים" מייצאת כמה גיליונות בקובץ אחד. */
+export type TableSheet = { name: string; columns: string[]; rows: Array<Array<string | number | null | undefined>> };
+
+const sheetName = (name: string, index: number) => (name.replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 28) || `גיליון ${index + 1}`);
+
+function buildTableSheet(sheet: TableSheet) {
+  const column = (index: number) => { let label = "", n = index; do { label = String.fromCharCode(65 + (n % 26)) + label; n = Math.floor(n / 26) - 1; } while (n >= 0); return label; };
+  const rows = [
+    `<row r="1">${sheet.columns.map((heading, index) => textCell(`${column(index)}1`, heading, 1)).join("")}</row>`,
+    ...sheet.rows.map((cells, rowIndex) => { const line = rowIndex + 2; return `<row r="${line}">${cells.map((value, index) => typeof value === "number" ? numberCell(`${column(index)}${line}`, value) : textCell(`${column(index)}${line}`, value ?? "")).join("")}</row>`; }),
+  ].join("");
+  const widths = sheet.columns.map((_, index) => `<col min="${index + 1}" max="${index + 1}" width="${index === 0 ? 34 : 18}" customWidth="1"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0"/></sheetViews><cols>${widths}</cols><sheetData>${rows}</sheetData></worksheet>`;
+}
+
+export function downloadTablesXlsx(sheets: TableSheet[], filename: string) {
+  const list = sheets.length ? sheets : [{ name: "ריק", columns: ["אין נתונים"], rows: [] }];
+  const files = [
+    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${list.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
+    { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+    { name: "xl/workbook.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${list.map((sheet, index) => `<sheet name="${xml(sheetName(sheet.name, index))}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("")}</sheets></workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${list.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("")}<Relationship Id="rId${list.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+    { name: "xl/styles.xml", content: STYLES_XML },
+    ...list.map((sheet, index) => ({ name: `xl/worksheets/sheet${index + 1}.xml`, content: buildTableSheet(sheet) })),
+  ];
+  downloadXlsx(files, filename);
+}

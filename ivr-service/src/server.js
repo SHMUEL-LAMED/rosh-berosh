@@ -3,7 +3,7 @@ const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
 const { normalizePhone, phone, resolvePostVoteTransfer } = require("./phone");
 const { SEC_WAIT, TRANSFER_KEY, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput, transferOnEmptyEntry } = require("./menu-input");
-const { sanitizeProgress, progressChanged } = require("./progress");
+const { sanitizeProgress, restoreTiming, markStageDone } = require("./progress");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 const { ADMIN_SECTIONS, adminReadOptions, resolveAdminCode, sectionShortcut } = require("./admin-menu");
 
@@ -1008,8 +1008,12 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
     call.id_list_message([text("לא ניתן להצביע ממספר חסוי נא להתקשר ממספר מזוהה ולנסות שוב")], { prependToNextAction: true });
     return call.hangup();
   }
+  // "לא הצבעת" ו"לא הצלחנו לבדוק" אינם אותו דבר: כשהבדיקה לא הצליחה אין
+  // כותבים טיוטה חדשה למי שאולי כבר הצביע, כדי שלא יישאר קובץ יתום.
+  let voteCheckSucceeded = false;
   if (!preview) try {
-    const { result: check } = await api(`/api/ballots/check?voterKey=${encodeURIComponent(voterPhone)}`);
+    const { response, result: check } = await api(`/api/ballots/check?voterKey=${encodeURIComponent(voterPhone)}`);
+    voteCheckSucceeded = Boolean(response?.ok);
     if (check.voted) {
       call.id_list_message(prompt(prompts, "system:already_voted", "כבר הצבעתם במצעד ממספר זה תודה"), { prependToNextAction: true });
       return finishCall(call);
@@ -1031,14 +1035,21 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
 
   const saved = preview ? null : await loadProgress(voterPhone);
   let selectedAlbums = [], selectedArtists = [], songIdsByAlbum = {}, menuLead = [];
+  // כל שיחה נספרת. ההתקדמות נשמרת כבר בכניסה כדי שתחילת ההצבעה ומספר
+  // השיחות יישמרו גם אם המתקשר ניתק לפני הבחירה הראשונה — אבל הכתיבה אינה
+  // מעוכבת: היא כתיבה ל-R2 דרך השרת, והמתקשר לא ימתין לה בשקט לפני התפריט.
+  let timing = preview ? null : restoreTiming(saved);
+  const saveInBackground = (payload) => { void Promise.resolve(saveProgress(voterPhone, payload)).catch(() => {}); };
 
   if (saved) {
     const sanitized = sanitizeProgress(saved, catalog, rules);
     if (sanitized.albumIds.length) selectedAlbums = (catalog.albums || []).filter((a) => sanitized.albumIds.includes(a.id));
     songIdsByAlbum = sanitized.songIdsByAlbum;
     if (sanitized.artistIds.length) selectedArtists = (catalog.artists || []).filter((a) => sanitized.artistIds.includes(a.id));
-    if (progressChanged(saved, sanitized)) await saveProgress(voterPhone, sanitized);
+    saveInBackground({ ...sanitized, timing });
     menuLead = prompt(prompts, "system:welcome_back", "ברוכים השבים ממשיכים מאיפה שהפסקתם");
+  } else if (!preview && voteCheckSucceeded) {
+    saveInBackground({ albumIds: [], songIdsByAlbum: {}, artistIds: [], timing });
   }
 
   // A stage introduction belongs to the entrance to that stage, not to every
@@ -1070,11 +1081,30 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
   const songsDone = () => !rules.songsEnabled || selectedAlbums.every((album) => (songIdsByAlbum[album.id] || []).length >= songMinQuotaOf(album));
   const artistsDone = () => !rules.artistsEnabled || selectedArtists.length >= artistMinQuota;
   const complete = () => albumsDone() && songsDone() && artistsDone();
-  const persistProgress = () => preview ? Promise.resolve() : saveProgress(voterPhone, {
-    albumIds: selectedAlbums.map((album) => album.id),
-    songIdsByAlbum,
-    artistIds: selectedArtists.map((artist) => artist.id),
-  });
+  // שלב שכבר היה גמור כשהשיחה התחילה אינו מקבל חותמת עכשיו: מי שבחר
+  // אלבומים אתמול וחזר היום היה נרשם כמי שסיים את השלב בשנייה אחת. שלב כזה
+  // נשאר בלי חותמת, והניתוח מדלג עליו במקום להמציא לו משך.
+  const finishedOnEntry = {
+    albumsDoneAt: !timing?.albumsDoneAt && rules.albumsEnabled && albumsDone(),
+    songsDoneAt: !timing?.songsDoneAt && rules.songsEnabled && selectedAlbums.length > 0 && songsDone(),
+    artistsDoneAt: !timing?.artistsDoneAt && rules.artistsEnabled && artistsDone(),
+  };
+  const stampStages = () => {
+    if (!timing) return;
+    if (rules.albumsEnabled && albumsDone() && !finishedOnEntry.albumsDoneAt) timing = markStageDone(timing, "albumsDoneAt");
+    if (rules.songsEnabled && albumsDone() && selectedAlbums.length && songsDone() && !finishedOnEntry.songsDoneAt) timing = markStageDone(timing, "songsDoneAt");
+    if (rules.artistsEnabled && artistsDone() && !finishedOnEntry.artistsDoneAt) timing = markStageDone(timing, "artistsDoneAt");
+  };
+  const persistProgress = () => {
+    if (preview) return Promise.resolve();
+    stampStages();
+    return saveProgress(voterPhone, {
+      albumIds: selectedAlbums.map((album) => album.id),
+      songIdsByAlbum,
+      artistIds: selectedArtists.map((artist) => artist.id),
+      timing,
+    });
+  };
   const keepSongsForSelectedAlbums = () => {
     songIdsByAlbum = Object.fromEntries(selectedAlbums.map((album) => [album.id, songIdsByAlbum[album.id] || []]));
   };
@@ -1168,10 +1198,11 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
     return "תפריט מצב ותוצאות";
   }
 
+  stampStages();
   const submission = await api("/api/ballots", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ voterKey: voterPhone, albumIds: selectedAlbums.map((item) => item.id), songIdsByAlbum, artistIds: selectedArtists.map((item) => item.id), channel: "phone" }),
+    body: JSON.stringify({ voterKey: voterPhone, albumIds: selectedAlbums.map((item) => item.id), songIdsByAlbum, artistIds: selectedArtists.map((item) => item.id), channel: "phone", timing: timing && { ...timing, clientNow: Math.floor(Date.now() / 1000) } }),
   });
   if (submission.response.status === 409) {
     await clearProgress(voterPhone);

@@ -1,4 +1,5 @@
 import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
+import { buildAnalytics } from "./analytics";
 import { ensureRuntimeSchema } from "./schema";
 import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrPrompts, readIvrRecorders, removeIvrRecorder, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
@@ -209,7 +210,9 @@ async function insertPollSnapshot(env: AdminEnv, snapshot: PollSnapshot, surveyI
     ...snapshot.albums.map((row) => env.DB.prepare("INSERT INTO albums (id,survey_id,title,artist_name,cover_url,position,active) VALUES (?,?,?,?,?,?,?)").bind(row.id, surveyId, row.title, row.artist_name, restoredUrl(row.cover_url, urls), row.position, row.active)),
     ...snapshot.songs.map((row) => env.DB.prepare("INSERT INTO songs (id,album_id,title,audio_url,cover_url,preview_start,preview_end,position,active) VALUES (?,?,?,?,?,?,?,?,?)").bind(row.id, row.album_id, row.title, restoredUrl(row.audio_url, urls), restoredUrl(row.cover_url, urls) || null, row.preview_start || 0, row.preview_end || 0, row.position, row.active)),
     ...snapshot.artists.map((row) => env.DB.prepare("INSERT INTO artists (id,survey_id,name,image_url,position,active) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.name, restoredUrl(row.image_url, urls), row.position, row.active)),
-    ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,created_at) VALUES (?,?,?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.voter_email || null, row.channel, row.fingerprint || null, row.created_at)),
+    // גם עמודות הזמנים משוחזרות: בלעדיהן שחזור ארכיון היה מוחק את כל מדידת
+    // הזמן של הסקר. ארכיון ישן שאין בו את השדות משוחזר עם NULL.
+    ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,created_at,started_at,albums_done_at,songs_done_at,artists_done_at,sessions) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.voter_email || null, row.channel, row.fingerprint || null, row.created_at, row.started_at ?? null, row.albums_done_at ?? null, row.songs_done_at ?? null, row.artists_done_at ?? null, row.sessions ?? null)),
     ...snapshot.albumVotes.map((row) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(row.ballot_id, row.album_id)),
     ...snapshot.songVotes.map((row) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(row.ballot_id, row.album_id, row.song_id)),
     ...snapshot.artistVotes.map((row) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(row.ballot_id, row.artist_id)),
@@ -605,6 +608,11 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     return json({ ok: true, surveys: await listSurveys(env) });
   }
 
+  if (request.method === "GET" && url.pathname === "/api/admin/analytics") {
+    try { return json(await buildAnalytics(env, surveyId, { fresh: url.searchParams.get("fresh") === "1" })); }
+    catch (error) { console.error("analytics error", error); return json({ error: "לא הצלחנו לחשב את הנתונים המתקדמים." }, 500); }
+  }
+
   if (request.method === "GET" && url.pathname === "/api/admin/overview") {
     try {
       const [albums, songs, artists, ballots, settings, albumResults, songResults, artistResults, hourlyVotes, dailyVotes] = await env.DB.batch([
@@ -614,7 +622,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
         env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN channel = 'phone' THEN 1 ELSE 0 END) AS phone, SUM(CASE WHEN channel = 'site' THEN 1 ELSE 0 END) AS site FROM ballots WHERE survey_id=?").bind(surveyId),
         env.DB.prepare("SELECT voting_open AS votingOpen, albums_enabled AS albumsEnabled, albums_min AS albumsMin, albums_max AS albumsMax, songs_enabled AS songsEnabled, songs_min AS songsMin, songs_max AS songsMax, artists_enabled AS artistsEnabled, artists_min AS artistsMin, artists_max AS artistsMax FROM poll_settings WHERE id = ?").bind(surveyId),
         env.DB.prepare("SELECT a.id,a.title,COUNT(v.album_id) AS votes FROM albums a LEFT JOIN album_votes v ON v.album_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.title").bind(surveyId),
-        env.DB.prepare("SELECT s.id,s.title,a.title AS albumTitle,COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id WHERE a.survey_id=? GROUP BY s.id ORDER BY votes DESC,s.title").bind(surveyId),
+        env.DB.prepare("SELECT s.id,s.title,a.title AS albumTitle,COUNT(DISTINCT v.ballot_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id AND v.album_id=s.album_id WHERE a.survey_id=? GROUP BY s.id ORDER BY votes DESC,s.title").bind(surveyId),
         env.DB.prepare("SELECT a.id,a.name,COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC,a.name").bind(surveyId),
         env.DB.prepare("SELECT CAST(created_at/3600 AS INTEGER)*3600 AS bucket,channel,COUNT(*) AS votes FROM ballots WHERE survey_id=? AND created_at>=unixepoch()-86400 GROUP BY bucket,channel ORDER BY bucket").bind(surveyId),
         env.DB.prepare("SELECT CAST(created_at/86400 AS INTEGER)*86400 AS bucket,channel,COUNT(*) AS votes FROM ballots WHERE survey_id=? AND created_at>=unixepoch()-2592000 GROUP BY bucket,channel ORDER BY bucket").bind(surveyId),
@@ -1015,7 +1023,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const offset = (page - 1) * pageSize;
     let query: string;
     if (kind === "songs") {
-      query = `SELECT s.title, a.title AS albumTitle, COUNT(v.song_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id WHERE a.survey_id=? GROUP BY s.id ORDER BY votes DESC, s.title LIMIT ${pageSize} OFFSET ${offset}`;
+      query = `SELECT s.title, a.title AS albumTitle, COUNT(DISTINCT v.ballot_id) AS votes FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id AND v.album_id=s.album_id WHERE a.survey_id=? GROUP BY s.id ORDER BY votes DESC, s.title LIMIT ${pageSize} OFFSET ${offset}`;
     } else if (kind === "artists") {
       query = `SELECT a.name AS title, '' AS albumTitle, COUNT(v.artist_id) AS votes FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id WHERE a.survey_id=? GROUP BY a.id ORDER BY votes DESC, a.name LIMIT ${pageSize} OFFSET ${offset}`;
     } else {
