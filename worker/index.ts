@@ -235,7 +235,13 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   const validArtists = artistIds.length ? await env.DB.prepare(`SELECT id FROM artists WHERE active=1 AND survey_id=? AND id IN (${placeholders(artistIds.length)})`).bind(surveyId, ...artistIds).all<{ id: string }>() : { results: [] };
   const songIds = unique(albumIds.flatMap((id) => songMap[id] ?? []));
   const validSongs = songIds.length ? await env.DB.prepare(`SELECT s.id, s.album_id AS albumId FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.survey_id=? AND s.id IN (${placeholders(songIds.length)})`).bind(surveyId, ...songIds).all<{ id: string; albumId: string }>() : { results: [] };
-  if (validAlbums.results.length !== albumIds.length || validArtists.results.length !== artistIds.length || validSongs.results.length !== songIds.length || validSongs.results.some((song) => !songMap[song.albumId]?.includes(song.id))) {
+  // שיר חייב להישלח תחת האלבום שלו ורק תחתיו. בלי הבדיקה הזו אפשר היה
+  // לרשום את אותו שיר תחת כל האלבומים שנבחרו: האינדקס הייחודי של
+  // `song_votes` כולל את מזהה האלבום, ולכן כל שורה כזו נחשבת חוקית
+  // ומכפילה את משקלו של שיר אחד עד פי מספר האלבומים שבפתק.
+  const songAlbum = new Map(validSongs.results.map((song) => [song.id, song.albumId]));
+  const misfiledSong = albumIds.some((albumId) => (songMap[albumId] ?? []).some((songId) => songAlbum.get(songId) !== albumId));
+  if (validAlbums.results.length !== albumIds.length || validArtists.results.length !== artistIds.length || validSongs.results.length !== songIds.length || misfiledSong) {
     return json({ error: "אחת הבחירות אינה קיימת או אינה פעילה." }, 400);
   }
 

@@ -249,3 +249,110 @@ test("a ballot submitted with timing keeps it, and a bogus timing is dropped ins
   assert.equal(bogus.status, 201);
   assert.deepEqual({ ...db.prepare("SELECT started_at AS startedAt, sessions FROM ballots WHERE voter_key='0500000002'").get() }, { startedAt: null, sessions: null });
 });
+
+test("the advanced-data endpoint reports pace, activity by local hour, the rank race, concentration and abandoned ballots", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAnalytics(db);
+  // סקר קודם, כדי שההשוואה בין סקרים תהיה על נתונים אמיתיים.
+  db.prepare("INSERT INTO surveys (id,name,active,created_at) VALUES ('old','מצעד קודם',0,1)").run();
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES ('old-1','old','voter-b1','site',500000)").run();
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES ('old-2','old','voter-old','site',500100)").run();
+  // טיוטות שנטושות באתר: ההתקדמות נמחקת בשליחה, ולכן שורה שנשארה נטושה.
+  db.prepare("INSERT INTO site_ballot_progress (survey_id,user_sub,data_json,updated_at) VALUES ('main','draft-1','{\"stageIndex\":1,\"albumIds\":[\"a1\"]}',1000500)").run();
+  db.prepare("INSERT INTO site_ballot_progress (survey_id,user_sub,data_json,updated_at) VALUES ('main','draft-2','{\"stageIndex\":1}',1000600)").run();
+  db.prepare("INSERT INTO site_ballot_progress (survey_id,user_sub,data_json,updated_at) VALUES ('main','draft-3','{\"stageIndex\":3}',1000700)").run();
+  // נרשם לרשימת התפוצה שגם הצביע באתר בסקר הזה.
+  db.prepare("INSERT INTO subscribers (id,email,user_sub,source,created_at) VALUES ('sub-1','a@example.com','voter-b1','site',1)").run();
+  db.prepare("INSERT INTO subscribers (id,email,user_sub,source,created_at) VALUES ('sub-2','b@example.com','nobody','site',1)").run();
+
+  const response = await worker.fetch(new Request("http://localhost/api/admin/analytics", { headers: { cookie } }), env, ctx);
+  assert.equal(response.status, 200, `הנתונים המתקדמים החזירו ${response.status}: ${await response.clone().text()}`);
+  const body = await response.json();
+
+  // הפעילות מסודרת לפי שעון ישראל, ולכן סכום התאים שווה לסך ההצבעות.
+  const activityTotal = body.activity.cells.flat().reduce((sum, value) => sum + value, 0);
+  assert.equal(activityTotal, 3, "every ballot lands in exactly one weekday-hour cell");
+  assert.equal(body.activity.cells.length, 7);
+  assert.equal(body.activity.cells[0].length, 24);
+  assert.equal(body.activity.site.flat().reduce((sum, value) => sum + value, 0), 2);
+  assert.equal(body.activity.phone.flat().reduce((sum, value) => sum + value, 0), 1);
+  assert.ok(body.daily.peakHour && body.daily.peakHour.votes >= 1);
+
+  assert.deepEqual(body.pace.windows.map((window) => window.label), ["השעה האחרונה", "24 השעות האחרונות", "שבעת הימים האחרונים"]);
+  assert.equal(body.pace.windows[0].votes, 0, "the seeded ballots are decades old, so the recent windows are empty");
+  assert.ok(body.pace.quietHours > 0, "the panel can say how long the poll has been silent");
+
+  // מרוץ הדירוג: מצטבר לכל יום, לא ספירה יומית.
+  const leader = body.race.albums[0];
+  assert.equal(leader.title, "אלבום א");
+  assert.equal(leader.points.length, body.daily.series.length);
+  assert.deepEqual(leader.points.map((point) => point.cumulative), [2, 3], "the cumulative line never goes down");
+
+  assert.ok(body.concentration.albums.index > 0 && body.concentration.albums.index <= 100);
+  assert.equal(body.concentration.albums.itemsForHalf, 1, "one album already holds half the album votes");
+  assert.equal(body.concentration.albums.topFiveShare, 100);
+  assert.ok(["none", "weak", "clear"].includes(body.positionBias.albums.verdict));
+
+  assert.equal(body.abandoned.siteTotal, 3);
+  assert.deepEqual(body.abandoned.site.map((row) => [row.stage, row.count]), [[1, 2], [3, 1]]);
+  assert.equal(body.abandoned.site[0].label, "בחירת שירים");
+  assert.equal(body.abandoned.phoneTotal, 0, "no phone drafts in the object store fake");
+  assert.equal(body.abandoned.completionRate, 50, "three finished ballots out of six that were started");
+
+  assert.equal(body.returning.voters, 1, "voter-b1 also voted in the older survey");
+  assert.equal(body.returning.previous.id, "old");
+  assert.equal(body.returning.previous.total, 2);
+  assert.equal(typeof body.returning.previous.atSameElapsed, "number");
+
+  assert.equal(body.subscribers.total, 2);
+  assert.equal(body.subscribers.fromThisSurvey, 1);
+  assert.equal(body.subscribers.share, 50, "one of the two site voters is on the mailing list");
+
+  // b3 בחר את אלבום א ושיר מתוכו, ולכן אין נשירה בין השלבים.
+  assert.deepEqual(body.stageDropoff, [], "every album vote here is backed by a song vote");
+});
+
+test("identical album combinations are counted as one however the ballot ordered them", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAnalytics(db);
+  // אותו זוג אלבומים, בסדר הפוך בטבלה — חייב להיספר כשילוב אחד.
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES ('b4','main','voter-b4','site',1000400)").run();
+  db.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES ('b4','a2')").run();
+  db.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES ('b4','a1')").run();
+
+  const response = await worker.fetch(new Request("http://localhost/api/admin/analytics", { headers: { cookie } }), env, ctx);
+  const body = await response.json();
+  const pair = body.combos.top.find((combo) => combo.albums.length === 2);
+  assert.equal(pair.votes, 3, "three ballots hold the same two albums, whatever order they were inserted in");
+  assert.equal(body.combos.distinct, 2, "that pair and the single-album ballot");
+});
+
+test("a ballot cannot file one song under several albums to multiply its vote", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAnalytics(db);
+  // s1 שייך ל-a1 בלבד. פתק ששולח אותו גם תחת a2 היה כותב שתי שורות
+  // ב-song_votes, ושתיהן חוקיות מול האינדקס הייחודי (ballot, album, song).
+  const response = await worker.fetch(new Request("http://localhost/api/ballots", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ivr-secret": "secret" },
+    body: JSON.stringify({ voterKey: "0500000009", channel: "phone", albumIds: ["a1", "a2"], songIdsByAlbum: { a1: ["s1"], a2: ["s1"] }, artistIds: ["r1"] }),
+  }), { ...env, IVR_SECRET: "secret" }, ctx);
+
+  assert.equal(response.status, 400, "a song filed under an album it does not belong to is refused");
+  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM ballots WHERE voter_key='0500000009'").get().total, 0, "nothing is written for a refused ballot");
+
+  // וגם אם שורות כאלה כבר יושבות במסד מלפני התיקון, הספירה היא לפי פתקים.
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES ('legacy','main','voter-legacy','site',1000450)").run();
+  db.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES ('legacy','a1')").run();
+  db.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES ('legacy','a2')").run();
+  db.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES ('legacy','a1','s1')").run();
+  db.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES ('legacy','a2','s1')").run();
+
+  const analytics = await (await worker.fetch(new Request("http://localhost/api/admin/analytics", { headers: { cookie } }), env, ctx)).json();
+  const song = analytics.rankings.songs.find((item) => item.id === "s1");
+  assert.equal(song.votes, 3, "two seeded ballots plus the legacy one count once each, not four times");
+  assert.ok(song.votes <= analytics.totals.ballots, "a song can never hold more votes than there are ballots");
+
+  const overview = await (await worker.fetch(new Request("http://localhost/api/admin/overview", { headers: { cookie } }), env, ctx)).json();
+  assert.equal(overview.results.songs.find((item) => item.id === "s1").votes, 3, "the results tab agrees with the advanced-data tab");
+});
