@@ -8,7 +8,6 @@ import {
   israelParts,
   pearson,
   percentile,
-  projectTotal,
   summarize,
 } from "../worker/analytics-math.js";
 
@@ -68,12 +67,6 @@ test("correlation detects position bias and refuses to report one without varian
   assert.equal(pearson([1, 2, 3, 4], [8, 6, 4, 2]), -1);
   assert.equal(pearson([1, 2, 3], [5, 5, 5]), null, "every item tied means there is no correlation to report");
   assert.equal(pearson([1, 2], [3, 4]), null, "two points are not evidence");
-});
-
-test("the projection refuses to guess without a rate or a deadline", () => {
-  assert.equal(projectTotal({ current: 100, windowVotes: 10, windowSeconds: 3600, secondsRemaining: 7200 }), 120);
-  assert.equal(projectTotal({ current: 100, windowVotes: 0, windowSeconds: 3600, secondsRemaining: 7200 }), null, "a dead window projects nothing");
-  assert.equal(projectTotal({ current: 100, windowVotes: 10, windowSeconds: 3600, secondsRemaining: 0 }), null, "a closed poll has nothing to project");
 });
 
 test("ties share a place and the next place skips, as in a real chart", () => {

@@ -8,6 +8,7 @@ import {
   ActivityHeatmap, ChannelSplit, ChartLegend, CHANNEL_COLOR, CHANNEL_LABEL, CumulativeChart,
   DailyColumns, HeatLegend, RaceChart, RankBars, dayLabel,
 } from "./analytics-charts";
+import { downloadShareImage, type ShareRow } from "./analytics-share";
 import "./analytics-panel.css";
 
 /**
@@ -20,7 +21,7 @@ import "./analytics-panel.css";
  * הפורמטר שמקבל את המצב, וכך אי אפשר לשכוח מקום אחד.
  */
 
-type Section = "pace" | "when" | "race" | "albums" | "cross" | "gaps" | "combos" | "timing" | "people" | "ops";
+type Section = "pace" | "when" | "race" | "albums" | "cross" | "gaps" | "combos" | "timing" | "taste" | "people" | "ops";
 type Kind = "albums" | "songs" | "artists";
 
 /**
@@ -29,14 +30,15 @@ type Kind = "albums" | "songs" | "artists";
  * וגרפים לא יעבדו ברקע.
  */
 const SECTIONS: Array<{ key: Section; label: string; help: string }> = [
-  { key: "pace", label: "סקירה וקצב", help: "כמה נכנס עכשיו לעומת התקופה הקודמת באותו אורך, והקו המצטבר מתחילת הסקר." },
+  { key: "pace", label: "סקירה וקצב", help: "הפתק שמייצג את הקהל, כמה נכנס עכשיו לעומת התקופה הקודמת באותו אורך, והקו המצטבר מתחילת הסקר." },
   { key: "when", label: "מתי מצביעים", help: "פעילות לפי יום בשבוע ושעה, בשעון ישראל. שימושי לתזמון פרסום ותזכורות." },
   { key: "race", label: "מרוץ הדירוג", help: "הקולות המצטברים של חמשת המובילים בכל יום — מי הוביל מתי, והאם המקום הראשון החליף ידיים." },
-  { key: "albums", label: "אלבומים ושירים", help: "השיר המוביל בכל אלבום, פיזור הקולות בתוכו, ומי לא קיבל אף קול." },
+  { key: "albums", label: "אלבומים ושירים", help: "השיר המוביל בכל אלבום, פיזור הקולות בתוכו, מפת חום על הקטלוג, ומי לא קיבל אף קול." },
   { key: "cross", label: "הצלבות", help: "מה הולך עם מה: האלבומים של מי שהצביעו לזמר, אלבומים שנבחרים יחד, וצמדי זמרים." },
   { key: "gaps", label: "פערים וריכוזיות", help: "לכל פריט: הקולות מכל ערוץ, המקום בכל ערוץ בנפרד, וכמה חסר כדי לעלות מקום. ומעליהם — כמה המרוץ סגור." },
   { key: "combos", label: "חמישיות", help: "שילובי אלבומים שחוזרים על עצמם בפתקים שונים, בלי תלות בסדר שבו נבחרו." },
   { key: "timing", label: "זמן ההצבעה", help: "כמה זמן לוקחת הצבעה מהכניסה ועד האישור, בנפרד לאתר ולקו, לפי שלב, ובכמה ביקורים או שיחות הושלמה." },
+  { key: "taste", label: "קבוצות טעם", help: "אלבומים שנוטים להיבחר יחד יותר מהמקרה, והקהל שמתחלק סביבם. מראה אם מול המצעד עומד קהל אחד או כמה." },
   { key: "people", label: "מי מצביע", help: "מצביעים חוזרים, השוואה לסקר הקודם באותה נקודת זמן, מי התחיל ולא סיים, והצטרפות לרשימת התפוצה." },
   { key: "ops", label: "תפעול ותוכן", help: "מחשבים חסומים, יומן הניהול בקו, ומה חסר בתוכן כדי שהאתר והקו יהיו שלמים." },
 ];
@@ -112,17 +114,28 @@ export function AnalyticsPanel({ onMessage }: { onMessage(text: string): void })
         <label className="analytics-switch"><input type="checkbox" checked={percentOnly} onChange={(event) => setPercentOnly(event.target.checked)} /> אחוזים בלבד <small>להסתרת מספרים מדויקים בצילום מסך</small></label>
         <button type="button" className="analytics-button" onClick={() => void load(true)} disabled={loading}>{loading ? "מרענן…" : "רענון"}</button>
         <button type="button" className="analytics-button" onClick={() => downloadTablesXlsx(buildSheets(data), "rosh-berosh-analytics.xlsx")}>הורדת Excel</button>
+        <button type="button" className="analytics-button" onClick={() => shareTopTen(data, format)}>תמונה לשיתוף</button>
         <button type="button" className="analytics-button primary" onClick={() => setBroadcast(true)}>מסך שידור</button>
       </div>
+      {/* סך ההצבעות ופילוח הערוצים כבר מופיעים בכרטיסים שמעל מסך הניהול,
+          ולכן כאן רק מה שאין שם: התקופה שהסקר מכסה והחלוקה היחסית. */}
       <div className="analytics-stats">
-        <Stat label="פתקים" value={percentOnly ? "100%" : format.n(total)} />
-        <Stat label="מהאתר" value={format.count(data.totals.site)} />
-        <Stat label="מהטלפון" value={format.count(data.totals.phone)} />
-        <Stat label="הצבעה ראשונה" value={fmtDate(data.totals.firstAt) || "—"} />
-        <Stat label="הצבעה אחרונה" value={fmtDate(data.totals.lastAt) || "—"} />
+        <Stat label="הסקר מכסה" value={data.daily.series.length ? `${format.n(data.daily.series.length)} ימים` : "—"} note={data.totals.firstAt ? `מ-${fmtDate(data.totals.firstAt)} עד ${fmtDate(data.totals.lastAt)}` : undefined} />
+        <Stat label="ממוצע ליום" value={format.count(data.pace.perDay)} />
+        <Stat label="פריטים בסקר" value={`${format.n(data.totals.albums)} · ${format.n(data.totals.songs)} · ${format.n(data.totals.artists)}`} note="אלבומים · שירים · זמרים" />
       </div>
       <ChannelSplit site={data.totals.site} phone={data.totals.phone} formatValue={(value) => format.count(value)} />
     </section>
+
+    <ChangeStrip data={data} format={format} />
+    {data.anomalies.length > 0 && <section className="admin-panel anomaly-panel">
+      <h2>התראת חריגה</h2>
+      <p className="panel-help">פריט שחלקו ביממה האחרונה גדול פי שניים או יותר מחלקו לאורך הסקר. זה יכול להיות פרסום מוצלח וזה יכול להיות קמפיין מאורגן — כאן רק מסומן שמשהו קפץ.</p>
+      <ul className="ops-list">{data.anomalies.map((item) => <li key={`${item.kind}-${item.id}`} className={item.severity === "high" ? "failed" : ""}>
+        <b>{item.title} <small>({item.kind === "album" ? "אלבום" : "זמר"})</small></b>
+        <small>{format.count(item.recent)} ביממה האחרונה · {item.recentShare}% מהפתקים החדשים מול {item.baselineShare}% קודם · פי {item.ratio}</small>
+      </li>)}</ul>
+    </section>}
 
     <nav className="analytics-nav" aria-label="נושאי הנתונים">
       {SECTIONS.map((item) => <button key={item.key} type="button" className={item.key === section ? "active" : ""} aria-current={item.key === section ? "page" : undefined} onClick={() => setSection(item.key)}>{item.label}</button>)}
@@ -131,10 +144,10 @@ export function AnalyticsPanel({ onMessage }: { onMessage(text: string): void })
     <section className="admin-panel">
       <h2>{active.label}</h2>
       <p className="panel-help">{active.help}</p>
-      {section === "pace" && <PaceSection data={data} format={format} />}
+      {section === "pace" && <><CompositeBallotCard data={data} format={format} /><PaceSection data={data} format={format} /></>}
       {section === "when" && <WhenSection data={data} format={format} />}
       {section === "race" && <RaceSection data={data} format={format} />}
-      {section === "albums" && <><AlbumBreakdownList data={data} format={format} /><StageDropoff data={data} format={format} /><ZeroVotes data={data} format={format} /></>}
+      {section === "albums" && <><CatalogHeat data={data} format={format} /><AlbumBreakdownList data={data} format={format} /><StageDropoff data={data} format={format} /><ZeroVotes data={data} format={format} /></>}
       {section === "cross" && <CrossSections data={data} format={format} />}
       {section === "gaps" && <><ConcentrationCards data={data} format={format} /><GapsTable data={data} format={format} /></>}
       {section === "combos" && <>
@@ -142,9 +155,165 @@ export function AnalyticsPanel({ onMessage }: { onMessage(text: string): void })
         {data.combos.top.length ? <ol className="combo-list">{data.combos.top.map((combo, index) => <li key={index}><b>{format.votes(combo.votes)}</b><span>{combo.albums.join(" · ")}</span></li>)}</ol> : <p className="analytics-empty">עדיין אין פתקים.</p>}
       </>}
       {section === "timing" && <TimingSection data={data} format={format} />}
+      {section === "taste" && <TasteSection data={data} format={format} />}
       {section === "people" && <PeopleSection data={data} format={format} />}
       {section === "ops" && <><OpsSection data={data} format={format} /><ContentSection data={data} format={format} /></>}
     </section>
+  </div>;
+}
+
+/** עשירייה כתמונה — גם מהסרגל וגם ממסך השידור, דרך אותו ציור. */
+function shareTopTen(data: Analytics, format: Formatter, kind: Kind = "albums", shape: "post" | "story" = "post") {
+  const list = data.rankings[kind].slice(0, 10);
+  const max = Math.max(1, ...list.map((item) => item.votes));
+  const rows: ShareRow[] = list.map((item) => ({
+    place: item.place, title: item.title, subtitle: item.subtitle,
+    value: format.count(item.votes), fill: item.votes / max,
+  }));
+  downloadShareImage({
+    title: KIND_LABEL[kind], kicker: "ראש בראש · המצעד", rows, shape,
+    footer: format.percentOnly ? "אחוזים מתוך כלל ההצבעות" : `${format.n(data.totals.ballots)} הצבעות · ${fmtDate(data.generatedAt)}`,
+  }, `rosh-berosh-${kind}.png`);
+}
+
+/**
+ * מה השתנה מאז הביקור האחרון. התמונה הקודמת נשמרת בדפדפן של המנהל בלבד
+ * ולכל סקר בנפרד; אחסון חסום פשוט אינו מציג את הסרגל.
+ */
+const SNAPSHOT_KEY = "rosh-berosh-analytics-seen";
+type Snapshot = { at: number; ballots: number; places: Record<string, number> };
+function readSnapshot(surveyKey: string): Snapshot | null {
+  try {
+    const raw = window.localStorage.getItem(`${SNAPSHOT_KEY}:${surveyKey}`);
+    const parsed = raw ? JSON.parse(raw) as Snapshot : null;
+    return parsed && typeof parsed.ballots === "number" && parsed.places ? parsed : null;
+  } catch { return null; }
+}
+function writeSnapshot(surveyKey: string, snapshot: Snapshot) {
+  try { window.localStorage.setItem(`${SNAPSHOT_KEY}:${surveyKey}`, JSON.stringify(snapshot)); } catch { /* אחסון חסום — הסרגל פשוט לא יופיע בפעם הבאה */ }
+}
+
+function ChangeStrip({ data, format }: { data: Analytics; format: Formatter }) {
+  const surveyKey = String(data.totals.firstAt ?? "main");
+  const [previous, setPrevious] = useState<Snapshot | null>(null);
+  const baselineWritten = useRef<string | null>(null);
+
+  // הבסיס נקבע פעם אחת בכניסה: קוראים את מה שנשמר בביקור הקודם ורק אחר כך
+  // כותבים את המצב הנוכחי, אחרת הכתיבה הייתה מוחקת את מה שאמורים להשוות
+  // אליו. רענון בתוך אותו ביקור ממשיך להשוות לאותה נקודה.
+  useEffect(() => {
+    if (baselineWritten.current === surveyKey) return;
+    baselineWritten.current = surveyKey;
+    const seen = readSnapshot(surveyKey);
+    const places: Record<string, number> = {};
+    for (const item of data.rankings.albums) places[`a:${item.id}`] = item.place;
+    for (const item of data.rankings.artists) places[`r:${item.id}`] = item.place;
+    writeSnapshot(surveyKey, { at: data.generatedAt, ballots: data.totals.ballots, places });
+    const timer = window.setTimeout(() => setPrevious(seen), 0);
+    return () => window.clearTimeout(timer);
+  }, [surveyKey, data]);
+
+  const moves = useMemo(() => {
+    if (!previous) return [];
+    const all = [
+      ...data.rankings.albums.map((item) => ({ key: `a:${item.id}`, title: item.title, place: item.place })),
+      ...data.rankings.artists.map((item) => ({ key: `r:${item.id}`, title: item.title, place: item.place })),
+    ];
+    return all
+      .map((item) => ({ ...item, was: previous.places[item.key] }))
+      .filter((item) => typeof item.was === "number" && item.was !== item.place)
+      .map((item) => ({ ...item, delta: (item.was as number) - item.place }))
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+      .slice(0, 6);
+  }, [previous, data]);
+
+  if (!previous) return null;
+  const added = data.totals.ballots - previous.ballots;
+  if (!added && !moves.length) return null;
+  return <section className="admin-panel change-strip">
+    <h2>מאז שהיית כאן</h2>
+    <p className="panel-help">מצב הדירוג נשמר בדפדפן הזה בלבד, בביקור הקודם שלך ב-{fmtDateTime(previous.at)}.</p>
+    <div className="change-row">
+      <b className={added > 0 ? "up" : ""}>{added > 0 ? `+${format.count(added)}` : format.count(added)} הצבעות</b>
+      {moves.length ? <ul>{moves.map((move) => <li key={move.key} className={move.delta > 0 ? "up" : "down"}>
+        <span>{move.title}</span><small>{move.delta > 0 ? `עלה ${move.delta}` : `ירד ${Math.abs(move.delta)}`} · מקום {move.place}</small>
+      </li>)}</ul> : <small>אף פריט לא החליף מקום.</small>}
+    </div>
+  </section>;
+}
+
+/** הפתק שמייצג את הקהל, בצורת קבלת ההצבעה שהמצביע עצמו מקבל. */
+function CompositeBallotCard({ data, format }: { data: Analytics; format: Formatter }) {
+  const composite = data.composite;
+  if (!composite.albums.length) return null;
+  return <div className="composite">
+    <h3 className="chart-title">הפתק שמייצג את הקהל</h3>
+    <p className="analytics-note">מה שנבחר הכי הרבה בכל שלב, מורכב לפתק אחד. {format.count(composite.matching)} פתקים בחרו בדיוק את חמשת האלבומים האלה.</p>
+    <div className="composite-grid">
+      {composite.albums.map((album) => <article key={album.id}>
+        {album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" /> : <span className="album-breakdown-cover" aria-hidden="true">♫</span>}
+        <div><b>{album.title}</b><small>{album.artistName}</small>{album.song ? <span>{album.song.title}</span> : <span className="analytics-empty">אין שיר מוביל</span>}</div>
+        <strong>{format.count(album.votes)}</strong>
+      </article>)}
+    </div>
+    {composite.artists.length > 0 && <p className="analytics-note">והזמרים: {composite.artists.map((artist) => `${artist.title} (${format.count(artist.votes)})`).join(" · ")}</p>}
+  </div>;
+}
+
+/** מפת חום על הקטלוג: אותה רשת שהמצביע רואה, צבועה לפי קולות. */
+function CatalogHeat({ data, format }: { data: Analytics; format: Formatter }) {
+  const list = data.rankings.albums;
+  const max = Math.max(1, ...list.map((item) => item.votes));
+  if (!list.length) return null;
+  return <div className="catalog-heat">
+    <h3 className="chart-title">מפת חום על הקטלוג</h3>
+    <p className="analytics-note">האלבומים בסדר שבו הם מוצגים למצביע, צבועים לפי הקולות שקיבלו. אם הצבע דוהה משמאל למטה, המיקום ברשימה משפיע.</p>
+    <ol className="catalog-grid">{[...list].sort((a, b) => a.place - b.place).map((item) => {
+      const intensity = item.votes / max;
+      return <li key={item.id} style={{ "--heat": `${Math.round(intensity * 100)}%` } as React.CSSProperties} title={`${item.title}: ${format.count(item.votes)}`}>
+        <b>{item.place}</b><span>{item.title}</span><strong>{format.count(item.votes)}</strong>
+      </li>;
+    })}</ol>
+  </div>;
+}
+
+function TasteSection({ data, format }: { data: Analytics; format: Formatter }) {
+  if (!data.tasteGroups.length) return <p className="analytics-empty">צריך יותר פתקים ויותר אלבומים כדי לזהות קבוצות טעם.</p>;
+  return <>
+    <div className="analytics-stats">{data.tasteGroups.map((group) => <Stat key={group.id} label={`סביב „${group.label}”`} value={`${group.share}%`} note={<>{format.count(group.voters)} מצביעים · {group.albums.slice(0, 3).join(" · ")}</>} />)}</div>
+    <div className="timing-grid">{data.tasteGroups.map((group) => <div key={group.id} className="cross-card">
+      <h3>{group.label}</h3>
+      <p className="analytics-note">{format.count(group.voters)} מצביעים ({group.share}%). האלבומים שנוטים להיבחר יחד איתו:</p>
+      <ul className="own-list">{group.signature.map((item) => <li key={item.title}><b>{item.title}</b><small>נבחר יחד פי {item.lift} מהצפוי במקרה</small></li>)}</ul>
+      {group.albums.length > 4 && <p className="analytics-note">ועוד: {group.albums.slice(4).join(" · ")}</p>}
+    </div>)}</div>
+    <p className="analytics-note">הקבוצות נבנות מהאלבומים בלבד, לפי כמה הם נבחרים יחד יותר ממה שהיה צפוי במקרה. פתק משויך לקבוצה שבה נמצאים רוב האלבומים שבחר.</p>
+  </>;
+}
+
+/** שעת הזהב: מתי לשלוח את התזכורת הבאה, לפי מפת הפעילות. */
+function GoldenHour({ data, format }: { data: Analytics; format: Formatter }) {
+  const hours = useMemo(() => {
+    const flat: Array<{ weekday: number; hour: number; votes: number }> = [];
+    data.activity.cells.forEach((row, weekday) => row.forEach((votes, hour) => flat.push({ weekday, hour, votes })));
+    return flat.filter((slot) => slot.votes > 0).sort((a, b) => b.votes - a.votes).slice(0, 3);
+  }, [data]);
+  if (!hours.length) return null;
+  const next = (weekday: number, hour: number) => {
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(hour, 0, 0, 0);
+    const days = (weekday - now.getDay() + 7) % 7;
+    target.setDate(now.getDate() + (days === 0 && target <= now ? 7 : days));
+    return target.toLocaleString("he-IL", { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  };
+  return <div className="golden-hour">
+    <h3 className="chart-title">שעת הזהב לפרסום</h3>
+    <p className="analytics-note">השעות שבהן נכנסו הכי הרבה הצבעות עד היום. תזכורת שנשלחת רגע לפניהן תופסת קהל שכבר ער ובטלפון.</p>
+    <ul className="own-list">{hours.map((slot) => <li key={`${slot.weekday}-${slot.hour}`}>
+      <b>{WEEKDAYS[slot.weekday]} ב-{String(slot.hour).padStart(2, "0")}:00</b>
+      <small>{format.count(slot.votes)} הצבעות נכנסו בשעה הזו · הפעם הבאה: {next(slot.weekday, slot.hour)}</small>
+    </li>)}</ul>
   </div>;
 }
 
@@ -192,6 +361,7 @@ function WhenSection({ data, format }: { data: Analytics; format: Formatter }) {
     <div className="gaps-table-wrap"><table className="gaps-table"><caption className="table-caption">פעילות לפי יום בשבוע</caption><thead><tr><th>יום</th><th>הצבעות</th><th>חלק מהשבוע</th></tr></thead><tbody>
       {byWeekday.map((row) => <tr key={row.weekday}><td>{WEEKDAYS[row.weekday]}</td><td>{format.count(row.total)}</td><td>{pct(row.total, data.totals.ballots)}%</td></tr>)}
     </tbody></table></div>
+    <GoldenHour data={data} format={format} />
   </>;
 }
 
@@ -340,7 +510,7 @@ function TimingSection({ data, format }: { data: Analytics; format: Formatter })
       </article>;
     })}</div>
     {data.timing.sampled
-      ? <p className="analytics-note">המדידה מחושבת על {format.n(data.timing.sampleSize)} הפתקים האחרונים, כדי לא למשוך את כל הסקר לזיכרון.</p>
+      ? <p className="analytics-note">המדידה מחושבת על {format.count(data.timing.sampleSize)} הפתקים האחרונים, כדי לא למשוך את כל הסקר לזיכרון.</p>
       : data.timing.untracked > 0 && <p className="analytics-note">{format.count(data.timing.untracked)} פתקים נשלחו לפני שהמדידה נוספה ואינם נספרים כאן.</p>}
     <div className="timing-grid">
       <div className="cross-card">
@@ -381,6 +551,12 @@ function PeopleSection({ data, format }: { data: Analytics; format: Formatter })
         {data.abandoned.site.length
           ? <RankBars initial={6} items={data.abandoned.site.map((row) => ({ id: String(row.stage), title: row.label, subtitle: row.newestAt ? `אחרון: ${fmtDateTime(row.newestAt)}` : undefined, value: row.count, display: format.count(row.count, data.abandoned.siteTotal || 1) }))} formatValue={(value) => format.count(value)} />
           : <p className="analytics-empty">אין טיוטות פתוחות באתר.</p>}
+        {data.abandonedPicks.length > 0 && <>
+          <p className="analytics-note">מה כבר הספיקו לבחור, ומה החלק שלו אצל מי שכן סיים:</p>
+          <ul className="own-list">{data.abandonedPicks.slice(0, 6).map((pick) => <li key={pick.id}>
+            <b>{pick.title}</b><small>{pick.share}% מהטיוטות · {pick.finishedShare}% מהפתקים שנשלחו{pick.share > pick.finishedShare + 10 ? " · מבוקש אצל מי שנתקע" : ""}</small>
+          </li>)}</ul>
+        </>}
         <p className="analytics-note">טיוטה נמחקת ברגע שההצבעה נשלחת, ולכן מה שנשאר כאן הוא באמת מי שלא סיים. בקו יש {format.count(data.abandoned.phoneTotal, data.abandoned.phoneTotal || 1)} טיוטות פתוחות{data.abandoned.phoneTruncated ? " לפחות" : ""}.</p>
       </div>
       <div className="cross-card">
@@ -470,6 +646,7 @@ function BroadcastScreen({ initial, percentOnly, onClose }: { initial: Analytics
       <div className="broadcast-controls">
         {(Object.keys(KIND_LABEL) as Kind[]).map((key) => <button key={key} type="button" className={key === kind ? "active" : ""} onClick={() => { setKind(key); setAuto(false); }}>{KIND_LABEL[key]}</button>)}
         <button type="button" className={auto ? "active" : ""} onClick={() => setAuto(!auto)}>{auto ? "מתחלף לבד" : "קבוע"}</button>
+        <button type="button" onClick={() => shareTopTen(data, format, kind, "story")}>שמירה כתמונה</button>
         <button type="button" onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.(); }}>מסך מלא</button>
         <button type="button" onClick={onClose}>סגירה</button>
       </div>

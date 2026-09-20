@@ -26,29 +26,21 @@
 .analytics-stats article.warn{border-color:#e9b8c8}
 .analytics-stats article.warn b{color:#b3325f}
 .analytics-stats article.ok b{color:#137e69}
-.analytics-block-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0;border:0;color:inherit;background:transparent;text-align:right;cursor:pointer}
-.analytics-block-head h2{margin:0}
-.analytics-block:not(.open) .analytics-block-head h2{margin:0}
-.analytics-block.open .analytics-block-head{margin-bottom:12px}
-.analytics-block-head span{width:32px;height:32px;display:grid;place-items:center;border:1px solid #dcd4b8;border-radius:9px;color:#8a6b1a;font-size:18px}
 .analytics-note{margin:12px 0 6px;color:var(--muted);font-size:13px;line-height:1.6}
 .analytics-empty{margin:8px 0;color:var(--muted);font-size:13px}
-.analytics-bar{display:block;height:8px;min-width:2px;border-radius:99px;background:linear-gradient(90deg,#c4952e,#e0cd82)}
-.analytics-bar.site{background:linear-gradient(90deg,#1699a8,#5fc6d2)}
-.analytics-bar.phone{background:linear-gradient(90deg,#c4952e,#e0cd82)}
 
 /* השיר המוביל בכל אלבום */
 .album-breakdown{display:grid;gap:8px}
 .album-breakdown article{overflow:hidden;border:1px solid #e4d8c4;border-radius:14px;background:#fff}
 .album-breakdown article>button{width:100%;display:grid;grid-template-columns:52px minmax(0,1.2fr) minmax(0,1fr) 24px;gap:13px;align-items:center;padding:11px;border:0;color:inherit;background:transparent;text-align:right;cursor:pointer}
-.album-breakdown img,.album-breakdown-cover{width:52px;height:52px;display:grid;place-items:center;border-radius:10px;object-fit:cover;color:#8a6b1a;background:#f2e8cc}
+.album-breakdown img,.album-breakdown-cover{width:52px;height:52px;display:grid;place-items:center;border-radius:10px;object-fit:cover;color:#6d5210;background:#f2e8cc}
 .album-breakdown-main b,.album-breakdown-top b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .album-breakdown-main small,.album-breakdown-top small{display:block;margin-top:4px;color:var(--muted);font-size:12px}
 .album-breakdown-top b{color:#137e69}
 .album-breakdown article>button>i{color:#8a6b1a;font-style:normal;font-size:11px}
 .album-breakdown-songs{display:grid;gap:6px;padding:4px 14px 14px}
 .album-breakdown-songs>div{display:grid;grid-template-columns:28px minmax(0,1fr) minmax(80px,1.2fr) auto;gap:10px;align-items:center;font-size:13px}
-.album-breakdown-songs>div>b{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;color:#8a6b1a;background:#f2e8cc;font-size:12px}
+.album-breakdown-songs>div>b{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;color:#6d5210;background:#f2e8cc;font-size:12px}
 .album-breakdown-songs strong{color:#137e69;white-space:nowrap}
 .zero-votes{margin-top:22px}
 .zero-votes h3,.cross-card h3{margin:0 0 10px;font-size:16px}
@@ -64,16 +56,12 @@
 .cross-card{min-width:0;padding:15px;border:1px solid #eee7f0;border-radius:14px;background:#fbfafc}
 .cross-card h3 small{color:var(--muted);font-weight:400;font-size:12px}
 .cross-card select{width:100%;height:42px;padding:0 10px;border:1px solid #dcd4b8;border-radius:10px;color:var(--text);background:#fff}
-.share-list,.own-list,.pair-list,.combo-list,.ops-list{margin:8px 0 0;padding:0;list-style:none;display:grid;gap:8px}
-.share-list li{display:grid;grid-template-columns:minmax(0,1fr) minmax(60px,1fr) auto;gap:10px;align-items:center;font-size:13px}
-.share-list li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.share-list strong{color:#137e69;white-space:nowrap}
-.share-list strong small{color:var(--muted);font-weight:400}
+.own-list,.pair-list,.combo-list,.ops-list{margin:8px 0 0;padding:0;list-style:none;display:grid;gap:8px}
 .own-list li b,.pair-list li span,.combo-list li span,.ops-list li b{display:block}
 .own-list li small,.pair-list li small,.ops-list li small{display:block;margin-top:3px;color:var(--muted);font-size:12px;line-height:1.5}
 .pair-list,.combo-list{counter-reset:pair}
 .pair-list li,.combo-list li{position:relative;padding:9px 34px 9px 9px;border-radius:10px;background:#f7f4ef;font-size:13px}
-.pair-list li::before,.combo-list li::before{counter-increment:pair;content:counter(pair);position:absolute;inset-inline-start:8px;top:9px;width:22px;height:22px;display:grid;place-items:center;border-radius:50%;color:#8a6b1a;background:#f2e8cc;font-size:11px}
+.pair-list li::before,.combo-list li::before{counter-increment:pair;content:counter(pair);position:absolute;inset-inline-start:8px;top:9px;width:22px;height:22px;display:grid;place-items:center;border-radius:50%;color:#6d5210;background:#f2e8cc;font-size:11px}
 .pair-list strong{color:#137e69}
 .combo-list li{display:grid;gap:4px}
 .combo-list li b{color:#137e69}
@@ -85,7 +73,7 @@
 .gaps-table th{padding:9px;border-bottom:1px solid rgba(184,149,48,.3);text-align:right;color:var(--muted);font-size:11px;font-weight:700;white-space:nowrap}
 .gaps-table td{padding:10px 9px;border-bottom:1px solid #eee7f0;vertical-align:top}
 .gaps-table td small{display:block;margin-top:3px;color:var(--muted);font-size:11px}
-.gaps-table td>b{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;color:#8a6b1a;background:#f2e8cc;font-size:12px}
+.gaps-table td>b{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;color:#6d5210;background:#f2e8cc;font-size:12px}
 .gaps-table tr.diverging td{background:#fdf6e3}
 .channel-cell{display:grid;gap:4px;min-width:80px}
 
@@ -101,16 +89,6 @@
 
 /* לפי יום */
 .daily-table td{font-variant-numeric:tabular-nums}
-.daily-chart{display:flex;align-items:flex-end;gap:4px;height:180px;margin-top:14px;padding:0 4px;overflow-x:auto}
-.daily-col{flex:1 0 22px;min-width:22px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch}
-.daily-stack{display:flex;flex-direction:column-reverse;min-height:2px;border-radius:5px 5px 0 0;overflow:hidden}
-.daily-stack i,.daily-legend i{display:block;min-height:0}
-.daily-stack i.site,.daily-legend i.site{background:#1699a8}
-.daily-stack i.phone,.daily-legend i.phone{background:#c4952e}
-.daily-col small{margin-top:5px;color:var(--muted);font-size:9px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.daily-legend{display:flex;gap:16px;margin:10px 0 14px;color:var(--muted);font-size:12px}
-.daily-legend span{display:flex;align-items:center;gap:6px}
-.daily-legend i{width:12px;height:12px;border-radius:3px}
 
 /* תפעול ומצב התוכן */
 .ops-list li{padding:9px;border-radius:10px;background:#f7f4ef;font-size:13px}
@@ -120,7 +98,8 @@
 /* מסך שידור */
 .broadcast{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;padding:clamp(18px,4vw,50px);color:#f8f7ff;background:radial-gradient(circle at 75% 0,rgba(196,160,53,.25),transparent 35%),#070817;overflow:auto}
 .broadcast header{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:16px}
-.broadcast h1{margin:0;font-size:clamp(34px,6vw,64px)}
+.broadcast h1{margin:0;color:#f8f7ff;font-size:clamp(34px,6vw,64px)}
+.broadcast .kicker{color:#e0cd82}
 .broadcast-controls{display:flex;flex-wrap:wrap;gap:8px}
 .broadcast-controls button{min-height:40px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:10px;color:#d4d9e8;background:rgba(255,255,255,.05);cursor:pointer}
 .broadcast-controls button.active{border-color:rgba(196,160,53,.7);color:#fff;background:rgba(196,160,53,.22)}
@@ -142,7 +121,38 @@
   .album-breakdown article>button{grid-template-columns:44px minmax(0,1fr) 20px}
   .album-breakdown-top{grid-column:2;margin-top:4px}
   .album-breakdown-songs>div{grid-template-columns:28px minmax(0,1fr) auto}
-  .album-breakdown-songs .analytics-bar{display:none}
-  .analytics-switch{width:100%}
+    .analytics-switch{width:100%}
   .analytics-button{flex:1}
 }
+
+/* מה השתנה מאז הביקור האחרון */
+.change-strip .change-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+.change-strip .change-row>b{font-size:20px}
+.change-strip .change-row>b.up{color:#137e69}
+.change-strip ul{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
+.change-strip li{padding:7px 11px;border-radius:10px;background:#f7f4ef;font-size:12px}
+.change-strip li.up{background:#e6f5f0}
+.change-strip li.down{background:#fbeef2}
+.change-strip li span{display:block;font-weight:700}
+.change-strip li small{color:var(--muted)}
+.anomaly-panel{border-color:#e9b8c8}
+.anomaly-panel h2{color:#b3325f}
+
+/* הפתק שמייצג את הקהל */
+.composite-grid{display:grid;gap:8px;margin-top:10px}
+.composite-grid article{display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px;border:1px solid #e4d8c4;border-radius:13px;background:#fff}
+.composite-grid img,.composite-grid .album-breakdown-cover{width:54px;height:54px;display:grid;place-items:center;border-radius:11px;object-fit:cover;color:#6d5210;background:#f2e8cc}
+.composite-grid b,.composite-grid small,.composite-grid span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.composite-grid small{margin-top:2px;color:var(--muted);font-size:12px}
+.composite-grid span{margin-top:4px;color:#0f7a86;font-size:12px}
+.composite-grid strong{color:#0f7a86;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* מפת חום על הקטלוג */
+.catalog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:10px 0 0;padding:0;list-style:none}
+.catalog-grid li{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;align-items:center;padding:11px 10px;border:1px solid #e4d8c4;border-radius:12px;background:linear-gradient(90deg,rgba(196,149,46,.30) var(--heat,0%),#fff var(--heat,0%))}
+.catalog-grid li>b{width:22px;height:22px;display:grid;place-items:center;border-radius:50%;color:#6d5210;background:rgba(255,255,255,.75);font-size:10px}
+.catalog-grid li>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.catalog-grid li>strong{grid-column:2;color:#6d5210;font-size:11px;font-variant-numeric:tabular-nums}
+
+.composite{margin-bottom:24px}
+.golden-hour{margin-top:24px}

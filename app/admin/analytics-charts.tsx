@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "./analytics-charts.css";
 
 /**
@@ -22,7 +22,7 @@ export const CHANNEL_LABEL = { site: "אתר", phone: "טלפון" } as const;
 /** רמפה סדרתית בגוון אחד, בהיר→כהה, עם קצה בהיר שנבדל מהרקע. */
 export const HEAT_STEPS = ["#cfa94f", "#b38a2c", "#8f6e1e", "#6d5314", "#4b380b"] as const;
 const GRID = "#e7e0d2";
-const AXIS_INK = "#8b8478";
+const AXIS_INK = "#756e62";
 
 export type Channel = keyof typeof CHANNEL_COLOR;
 export type SeriesPoint = { bucket: number; site: number; phone: number; total: number; cumulative?: number };
@@ -37,12 +37,17 @@ const niceTicks = (max: number, count = 4): number[] => {
   return ticks;
 };
 const fmt = (value: number) => Math.round(value).toLocaleString("he-IL");
+/** ספירת שורות — לעולם לא עוברת בפורמטר של קולות, שעשוי להציג אחוזים. */
+const rows = (value: number) => Math.round(value).toLocaleString("he-IL");
 
-/** רוחב אמיתי בפיקסלים, כדי שטקסט לא יימתח עם viewBox. */
-function useMeasuredWidth(fallback = 640) {
+/**
+ * רוחב אמיתי בפיקסלים, כדי שטקסט לא יימתח עם viewBox. המדידה נעשית לפני
+ * הצביעה ומתחילה באפס: רוחב מנחש היה מצייר פריים אחד רחב מהפאנל ואז קופץ.
+ */
+function useMeasuredWidth() {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(fallback);
-  useEffect(() => {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     const apply = () => setWidth(Math.max(240, Math.round(element.clientWidth)));
@@ -55,7 +60,7 @@ function useMeasuredWidth(fallback = 640) {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  return { ref, width };
+  return { ref, width, ready: width > 0 };
 }
 
 /** טולטיפ אחד לכל הגרפים: עובד בעכבר ובמגע, ונצמד לגבולות המכל. */
@@ -68,7 +73,7 @@ function useHover<T>() {
 
 function Tooltip({ x, y, width, children }: { x: number; y: number; width: number; children: ReactNode }) {
   const clamped = Math.min(Math.max(x, 80), Math.max(80, width - 80));
-  return <div className="chart-tip" style={{ left: `${clamped}px`, top: `${Math.max(0, y)}px` }} role="status">{children}</div>;
+  return <div className="chart-tip" style={{ left: `${clamped}px`, top: `${Math.max(0, y)}px` }} aria-hidden="true">{children}</div>;
 }
 
 export function ChartLegend({ items }: { items: Array<{ label: string; color: string; note?: string }> }) {
@@ -80,7 +85,7 @@ export function ChartLegend({ items }: { items: Array<{ label: string; color: st
  * מסומנת עם טבעת ברקע, וקו הצלבה שנע עם הסמן.
  */
 export function CumulativeChart({ series, label, height = 230, formatValue = fmt }: { series: SeriesPoint[]; label: string; height?: number; formatValue?(value: number): string }) {
-  const { ref, width } = useMeasuredWidth();
+  const { ref, width, ready } = useMeasuredWidth();
   const { hover, show, hide } = useHover<{ point: SeriesPoint; siteTotal: number; phoneTotal: number }>();
   const pad = { top: 14, right: 46, bottom: 26, left: 14 };
   const plotWidth = Math.max(10, width - pad.left - pad.right);
@@ -115,7 +120,7 @@ export function CumulativeChart({ series, label, height = 230, formatValue = fmt
 
   const summary = running.length ? `${label}: ${formatValue(running[running.length - 1].siteTotal + running[running.length - 1].phoneTotal)} בסך הכול על פני ${running.length} ימים.` : label;
   return <div className="chart" ref={ref} style={{ height }}>
-    <svg width={width} height={height} role="img" aria-label={summary} onPointerMove={onMove} onPointerLeave={hide} onPointerDown={onMove}>
+    {!ready ? <div className="chart-skeleton" aria-hidden="true" /> : <svg width={width} height={height} role="img" aria-label={summary} onPointerMove={onMove} onPointerLeave={hide} onPointerDown={onMove}>
       {ticks.map((tick) => <g key={tick}>
         <line x1={pad.left} x2={pad.left + plotWidth} y1={yAt(tick)} y2={yAt(tick)} stroke={GRID} strokeWidth={1} />
         <text x={pad.left + plotWidth + 6} y={yAt(tick) + 4} fill={AXIS_INK} fontSize={11} textAnchor="start">{formatValue(tick)}</text>
@@ -131,7 +136,7 @@ export function CumulativeChart({ series, label, height = 230, formatValue = fmt
       {hover && <line x1={hover.x} x2={hover.x} y1={pad.top} y2={pad.top + plotHeight} stroke={AXIS_INK} strokeWidth={1} strokeOpacity={0.45} />}
       {running.length > 0 && <text x={xAt(0)} y={height - 8} fill={AXIS_INK} fontSize={11} textAnchor="end">{dayLabel(running[0].point.bucket)}</text>}
       {running.length > 1 && <text x={xAt(running.length - 1)} y={height - 8} fill={AXIS_INK} fontSize={11} textAnchor="start">{dayLabel(running[running.length - 1].point.bucket)}</text>}
-    </svg>
+    </svg>}
     {hover && <Tooltip x={hover.x} y={hover.y} width={width}>
       <b>{dayLabel(hover.item.point.bucket)}</b>
       <span><i style={{ background: CHANNEL_COLOR.site }} aria-hidden="true" />{CHANNEL_LABEL.site} {formatValue(hover.item.siteTotal)}</span>
@@ -143,7 +148,7 @@ export function CumulativeChart({ series, label, height = 230, formatValue = fmt
 
 /** עמודות מוערמות ליום, עם רווח של 2 פיקסלים בצבע הרקע בין המקטעים. */
 export function DailyColumns({ series, height = 200, formatValue = fmt }: { series: SeriesPoint[]; height?: number; formatValue?(value: number): string }) {
-  const { ref, width } = useMeasuredWidth();
+  const { ref, width, ready } = useMeasuredWidth();
   const { hover, show, hide } = useHover<SeriesPoint>();
   const pad = { top: 12, right: 46, bottom: 26, left: 10 };
   const plotWidth = Math.max(10, width - pad.left - pad.right);
@@ -158,7 +163,7 @@ export function DailyColumns({ series, height = 200, formatValue = fmt }: { seri
 
   const summary = `הצבעות לפי יום: ${series.length} ימים, שיא של ${formatValue(max)} ביום אחד.`;
   return <div className="chart" ref={ref} style={{ height }}>
-    <svg width={width} height={height} role="img" aria-label={summary} onPointerLeave={hide}>
+    {!ready ? <div className="chart-skeleton" aria-hidden="true" /> : <svg width={width} height={height} role="img" aria-label={summary} onPointerLeave={hide}>
       {ticks.map((tick) => <g key={tick}>
         <line x1={pad.left} x2={pad.left + plotWidth} y1={pad.top + plotHeight - scale(tick)} y2={pad.top + plotHeight - scale(tick)} stroke={GRID} strokeWidth={1} />
         <text x={pad.left + plotWidth + 6} y={pad.top + plotHeight - scale(tick) + 4} fill={AXIS_INK} fontSize={11} textAnchor="start">{formatValue(tick)}</text>
@@ -178,7 +183,7 @@ export function DailyColumns({ series, height = 200, formatValue = fmt }: { seri
       <line x1={pad.left} x2={pad.left + plotWidth} y1={pad.top + plotHeight} y2={pad.top + plotHeight} stroke={GRID} strokeWidth={1} />
       {series.length > 0 && <text x={pad.left + plotWidth} y={height - 8} fill={AXIS_INK} fontSize={11} textAnchor="end">{dayLabel(series[0].bucket)}</text>}
       {series.length > 1 && <text x={pad.left} y={height - 8} fill={AXIS_INK} fontSize={11} textAnchor="start">{dayLabel(series[series.length - 1].bucket)}</text>}
-    </svg>
+    </svg>}
     {hover && <Tooltip x={hover.x} y={hover.y} width={width}>
       <b>{dayLabel(hover.item.bucket)}</b>
       <span><i style={{ background: CHANNEL_COLOR.site }} aria-hidden="true" />{CHANNEL_LABEL.site} {formatValue(hover.item.site)}</span>
@@ -193,15 +198,15 @@ const WEEKDAY_SHORT = ["א", "ב", "ג", "ד", "ה", "ו", "ש"];
 
 /** מפת חום יום-בשבוע על שעה, בגוון אחד עם מקרא ורמת ערך בכל תא. */
 export function ActivityHeatmap({ cells, formatValue = fmt }: { cells: number[][]; formatValue?(value: number): string }) {
-  const { ref, width } = useMeasuredWidth();
+  const { ref, width, ready } = useMeasuredWidth();
   const { hover, show, hide } = useHover<{ weekday: number; hour: number; value: number }>();
   const labelWidth = 26, rowGap = 2;
   const cellWidth = Math.max(6, (width - labelWidth - 2) / 24);
   const cellHeight = Math.max(12, Math.min(22, cellWidth));
   const height = 7 * (cellHeight + rowGap) + 20;
   const max = Math.max(1, ...cells.flat());
-  // שורש ריכוך: בלעדיו כמעט כל התאים נופלים למדרגה הבהירה ביותר כשיש שיא בודד.
-  const stepOf = (value: number) => (value <= 0 ? -1 : Math.min(HEAT_STEPS.length - 1, Math.max(0, Math.ceil(((value / max) ** 0.65) * HEAT_STEPS.length) - 1)));
+  // סולם ליניארי: כל מדרגה מכסה חלק שווה מהטווח, כך שתא בינוני נראה בינוני.
+  const stepOf = (value: number) => (value <= 0 ? -1 : Math.min(HEAT_STEPS.length - 1, Math.max(0, Math.ceil((value / max) * HEAT_STEPS.length) - 1)));
   const busiest = useMemo(() => {
     let best = { weekday: 0, hour: 0, value: 0 };
     cells.forEach((row, weekday) => row.forEach((value, hour) => { if (value > best.value) best = { weekday, hour, value }; }));
@@ -209,7 +214,7 @@ export function ActivityHeatmap({ cells, formatValue = fmt }: { cells: number[][
   }, [cells]);
 
   return <div className="chart heatmap" ref={ref} style={{ height }}>
-    <svg width={width} height={height} role="img" aria-label={`מפת פעילות לפי יום ושעה. השיא ביום ${WEEKDAYS[busiest.weekday]} בשעה ${busiest.hour}:00 עם ${formatValue(busiest.value)} הצבעות.`} onPointerLeave={hide}>
+    {!ready ? <div className="chart-skeleton" aria-hidden="true" /> : <svg width={width} height={height} role="img" aria-label={`מפת פעילות לפי יום ושעה. השיא ביום ${WEEKDAYS[busiest.weekday]} בשעה ${busiest.hour}:00 עם ${formatValue(busiest.value)} הצבעות.`} onPointerLeave={hide}>
       {cells.map((row, weekday) => <g key={weekday}>
         <text x={width - 3} y={weekday * (cellHeight + rowGap) + cellHeight * 0.72} fill={AXIS_INK} fontSize={11} textAnchor="end">{WEEKDAY_SHORT[weekday]}</text>
         {row.map((value, hour) => {
@@ -224,7 +229,7 @@ export function ActivityHeatmap({ cells, formatValue = fmt }: { cells: number[][
         })}
       </g>)}
       {[0, 6, 12, 18, 23].map((hour) => <text key={hour} x={width - labelWidth - (hour + 0.5) * cellWidth} y={height - 5} fill={AXIS_INK} fontSize={10} textAnchor="middle">{hour}</text>)}
-    </svg>
+    </svg>}
     {hover && <Tooltip x={hover.x} y={hover.y} width={width}>
       <b>{WEEKDAYS[hover.item.weekday]} {String(hover.item.hour).padStart(2, "0")}:00</b>
       <span>{formatValue(hover.item.value)} הצבעות</span>
@@ -249,21 +254,6 @@ export function ChannelSplit({ site, phone, formatValue = fmt }: { site: number;
   </div>;
 }
 
-/** קו זעיר לשורת טבלה. ללא צירים וללא טולטיפ — הטבלה נושאת את המספרים. */
-export function Sparkline({ values, color = CHANNEL_COLOR.site, width = 86, height = 22, title }: { values: number[]; color?: string; width?: number; height?: number; title?: string }) {
-  if (values.length < 2) return <svg width={width} height={height} aria-hidden="true" />;
-  const max = Math.max(1, ...values), min = Math.min(...values);
-  const span = Math.max(1, max - min);
-  const points = values.map((value, index) => {
-    const x = width - (index / (values.length - 1)) * (width - 2) - 1;
-    const y = height - 2 - ((value - min) / span) * (height - 4);
-    return `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  return <svg width={width} height={height} role="img" aria-label={title || "מגמה"}>
-    <path d={points} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-  </svg>;
-}
-
 /** רשימת דירוג עם פסים. מציגה חלון ומרחיבה לפי בקשה, כדי ש-600 שירים לא יקרסו. */
 export function RankBars({ items, initial = 12, formatValue = fmt, emphasise }: { items: Array<{ id: string; title: string; subtitle?: string; value: number; display?: string }>; initial?: number; formatValue?(value: number): string; emphasise?: string }) {
   // אין איפוס באפקט: החלון נחתך לאורך הרשימה בזמן הרינדור, כך שהחלפת
@@ -280,7 +270,7 @@ export function RankBars({ items, initial = 12, formatValue = fmt, emphasise }: 
       <i className="rank-track"><i style={{ width: `${Math.max(1, (item.value / max) * 100)}%` }} /></i>
       <strong>{item.display ?? formatValue(item.value)}</strong>
     </div>)}
-    {window < items.length && <button type="button" className="analytics-button" onClick={() => setShown(window + 40)}>הצגת עוד {Math.min(40, items.length - window)} מתוך {formatValue(items.length - window)}</button>}
+    {window < items.length && <button type="button" className="analytics-button" onClick={() => setShown(window + 40)}>הצגת עוד {Math.min(40, items.length - window)} מתוך {rows(items.length - window)}</button>}
     {window > initial && <button type="button" className="analytics-button" onClick={() => setShown(initial)}>הצגה מצומצמת</button>}
   </div>;
 }
@@ -292,7 +282,7 @@ export type RaceLine = { id: string; title: string; points: Array<{ bucket: numb
 
 /** מרוץ הדירוג: קו מצטבר לכל פריט מוביל, עם תווית ישירה בקצה הקו. */
 export function RaceChart({ lines, height = 240, formatValue = fmt }: { lines: RaceLine[]; height?: number; formatValue?(value: number): string }) {
-  const { ref, width } = useMeasuredWidth();
+  const { ref, width, ready } = useMeasuredWidth();
   const { hover, show, hide } = useHover<{ bucket: number; values: Array<{ title: string; color: string; value: number }> }>();
   const pad = { top: 14, right: 52, bottom: 26, left: 92 };
   const plotWidth = Math.max(10, width - pad.left - pad.right);
@@ -312,28 +302,49 @@ export function RaceChart({ lines, height = 240, formatValue = fmt }: { lines: R
     show({ bucket: lines[0].points[index].bucket, values: lines.map((line, order) => ({ title: line.title, color: RACE_COLORS[order % RACE_COLORS.length], value: line.points[index].cumulative })) }, xAt(index), pad.top);
   };
 
+  // תוויות הקצה נדחפות זו מזו: בלי זה חמישה קווים שמסיימים קרוב זה לזה
+  // מדפיסים חמש תוויות זו על גבי זו ואי אפשר לקרוא אף אחת מהן.
+  const placed = useMemo(() => {
+    const entries = lines.map((line, order) => ({ line, order, endY: yAt(line.points[line.points.length - 1]?.cumulative ?? 0) }))
+      .sort((a, b) => a.endY - b.endY);
+    const gap = 15;
+    const forward: Array<{ line: RaceLine; order: number; endY: number; labelY: number }> = [];
+    for (const entry of entries) {
+      const previous = forward[forward.length - 1]?.labelY ?? -Infinity;
+      forward.push({ ...entry, labelY: Math.max(entry.endY, previous + gap) });
+    }
+    // דחיפה חוזרת מלמטה, כדי שהקבוצה לא תיגלוש מתחת לתחתית הגרף.
+    let floor = pad.top + plotHeight;
+    for (let index = forward.length - 1; index >= 0; index--) {
+      forward[index].labelY = Math.min(forward[index].labelY, floor);
+      floor = forward[index].labelY - gap;
+    }
+    return forward;
+  }, [lines, yAt, pad.top, plotHeight]);
+
   if (!lines.length || days < 2) return <p className="analytics-empty">צריך לפחות יומיים של הצבעות כדי להראות מרוץ.</p>;
   return <div className="chart" ref={ref} style={{ height }}>
-    <svg width={width} height={height} role="img" aria-label={`מרוץ הדירוג בין ${lines.map((line) => line.title).join(", ")}.`} onPointerMove={onMove} onPointerLeave={hide} onPointerDown={onMove}>
+    {!ready ? <div className="chart-skeleton" aria-hidden="true" /> : <svg width={width} height={height} role="img" aria-label={`מרוץ הדירוג בין ${lines.map((line) => line.title).join(", ")}.`} onPointerMove={onMove} onPointerLeave={hide} onPointerDown={onMove}>
       {ticks.map((tick) => <g key={tick}>
         <line x1={pad.left} x2={pad.left + plotWidth} y1={yAt(tick)} y2={yAt(tick)} stroke={GRID} strokeWidth={1} />
         <text x={pad.left + plotWidth + 6} y={yAt(tick) + 4} fill={AXIS_INK} fontSize={11} textAnchor="start">{formatValue(tick)}</text>
       </g>)}
       {hover && <line x1={hover.x} x2={hover.x} y1={pad.top} y2={pad.top + plotHeight} stroke={AXIS_INK} strokeWidth={1} strokeOpacity={0.45} />}
-      {lines.map((line, order) => {
+      {placed.map(({ line, order, endY, labelY }) => {
         const color = RACE_COLORS[order % RACE_COLORS.length];
         const path = line.points.map((point, index) => `${index ? "L" : "M"}${xAt(index).toFixed(1)},${yAt(point.cumulative).toFixed(1)}`).join(" ");
-        const endY = yAt(line.points[line.points.length - 1].cumulative);
         return <g key={line.id}>
           <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
           <circle cx={xAt(days - 1)} cy={endY} r={4.5} fill={color} stroke="#fff" strokeWidth={2} />
-          {/* תווית ישירה בקצה: הזיהוי אינו נשען על הצבע בלבד. */}
-          <text x={pad.left - 8} y={endY + 4} fill={AXIS_INK} fontSize={11} textAnchor="end">{line.title.length > 14 ? `${line.title.slice(0, 13)}…` : line.title}</text>
+          {/* תווית ישירה בקצה: הזיהוי אינו נשען על הצבע בלבד. הקו המוביל
+              אליה מצויר כשהתווית הוזזה כדי לא לדרוך על שכנתה. */}
+          {Math.abs(labelY - endY) > 1 && <path d={`M${pad.left - 6},${labelY} L${pad.left - 2},${endY}`} fill="none" stroke={color} strokeWidth={1} strokeOpacity={0.6} />}
+          <text x={pad.left - 9} y={labelY + 4} fill={AXIS_INK} fontSize={11} textAnchor="end">{line.title.length > 13 ? `${line.title.slice(0, 12)}…` : line.title}</text>
         </g>;
       })}
       <text x={xAt(0)} y={height - 8} fill={AXIS_INK} fontSize={11} textAnchor="end">{dayLabel(lines[0].points[0].bucket)}</text>
       <text x={xAt(days - 1)} y={height - 8} fill={AXIS_INK} fontSize={11} textAnchor="start">{dayLabel(lines[0].points[days - 1].bucket)}</text>
-    </svg>
+    </svg>}
     {hover && <Tooltip x={hover.x} y={hover.y} width={width}>
       <b>{dayLabel(hover.item.bucket)}</b>
       {hover.item.values.map((value) => <span key={value.title}><i style={{ background: value.color }} aria-hidden="true" />{value.title} {formatValue(value.value)}</span>)}

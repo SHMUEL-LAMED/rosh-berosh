@@ -1,6 +1,11 @@
 /* גרפים ללשונית הנתונים המתקדמים */
-.chart{position:relative;width:100%;touch-action:pan-y}
-.chart svg{display:block;overflow:visible}
+.chart{position:relative;width:100%;overflow:hidden;touch-action:pan-y}
+/* ה-SVG אינו יורש את כיוון המסמך: תחת RTL כל text-anchor היה מתהפך והתוויות
+   של ציר הערכים היו נכתבות לתוך הגרף במקום לשוליים שנשמרו להן. מיפוי הזמן
+   מימין לשמאל נעשה בחישוב הקואורדינטות ואינו תלוי בכך. */
+.chart svg{display:block;overflow:hidden;direction:ltr}
+.chart text{unicode-bidi:plaintext;font-variant-numeric:tabular-nums}
+.chart-skeleton{width:100%;height:100%;border-radius:12px;background:#f7f4ee}
 .chart-tip{position:absolute;z-index:5;transform:translate(-50%,-100%);display:grid;gap:3px;min-width:120px;padding:8px 10px;border:1px solid #e4d8c4;border-radius:10px;background:#fff;box-shadow:0 8px 24px rgba(75,60,28,.16);font-size:12px;line-height:1.5;pointer-events:none;white-space:nowrap}
 .chart-tip b{font-size:12px}
 .chart-tip span{display:flex;align-items:center;gap:6px;color:var(--muted)}
@@ -21,7 +26,7 @@
 .rank-bars{display:grid;gap:6px;margin-top:10px}
 .rank-bars>div{display:grid;grid-template-columns:30px minmax(0,1.3fr) minmax(70px,1fr) auto;gap:10px;align-items:center;padding:7px 8px;border-radius:10px;font-size:13px}
 .rank-bars>div.on{background:#fdf6e3}
-.rank-bars>div>b{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;color:#8a6b1a;background:#f2e8cc;font-size:11px}
+.rank-bars>div>b{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;color:#6d5210;background:#f2e8cc;font-size:11px}
 .rank-bars>div>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rank-bars>div>span small{display:block;margin-top:2px;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis}
 .rank-track{display:block;height:8px;border-radius:99px;background:#f0ebe0}
