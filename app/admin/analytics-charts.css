@@ -1,0 +1,37 @@
+/* גרפים ללשונית הנתונים המתקדמים */
+.chart{position:relative;width:100%;touch-action:pan-y}
+.chart svg{display:block;overflow:visible}
+.chart-tip{position:absolute;z-index:5;transform:translate(-50%,-100%);display:grid;gap:3px;min-width:120px;padding:8px 10px;border:1px solid #e4d8c4;border-radius:10px;background:#fff;box-shadow:0 8px 24px rgba(75,60,28,.16);font-size:12px;line-height:1.5;pointer-events:none;white-space:nowrap}
+.chart-tip b{font-size:12px}
+.chart-tip span{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.chart-tip i,.chart-legend i{width:10px;height:10px;flex:none;border-radius:3px}
+.chart-legend{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0 0;padding:0;list-style:none;color:var(--muted);font-size:12px}
+.chart-legend li{display:flex;align-items:center;gap:6px}
+.chart-legend small{color:var(--muted)}
+
+.heatmap svg{overflow:hidden}
+.heat-legend{display:flex;align-items:center;gap:4px;margin-top:8px;color:var(--muted);font-size:11px}
+.heat-legend i{width:18px;height:11px;border-radius:2px}
+
+.split-bar{display:grid;gap:7px;margin-top:6px}
+.split-track{display:flex;gap:2px;height:16px;border-radius:99px;overflow:hidden}
+.split-track span{display:block;min-width:2px}
+.split-labels{display:flex;justify-content:space-between;font-size:12px}
+
+.rank-bars{display:grid;gap:6px;margin-top:10px}
+.rank-bars>div{display:grid;grid-template-columns:30px minmax(0,1.3fr) minmax(70px,1fr) auto;gap:10px;align-items:center;padding:7px 8px;border-radius:10px;font-size:13px}
+.rank-bars>div.on{background:#fdf6e3}
+.rank-bars>div>b{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;color:#8a6b1a;background:#f2e8cc;font-size:11px}
+.rank-bars>div>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rank-bars>div>span small{display:block;margin-top:2px;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis}
+.rank-track{display:block;height:8px;border-radius:99px;background:#f0ebe0}
+.rank-track>i{display:block;height:100%;border-radius:99px;background:#1699a8}
+.rank-bars>div.on .rank-track>i{background:#b3831f}
+.rank-bars strong{color:#0f7a86;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rank-bars>button{justify-self:start;margin-top:4px;height:36px}
+
+@media(max-width:700px){
+  .rank-bars>div{grid-template-columns:26px minmax(0,1fr) auto}
+  .rank-bars .rank-track{grid-column:2/-1;order:3}
+  .chart-tip{min-width:96px;font-size:11px}
+}
