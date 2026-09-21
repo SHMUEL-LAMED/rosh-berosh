@@ -205,7 +205,10 @@ test("the advanced-data endpoint computes breakdowns, crosses, timing and conten
   assert.deepEqual(albumRank.map((item) => [item.place, item.title, item.votes, item.site, item.phone]), [[1, "אלבום א", 3, 2, 1], [2, "אלבום ב", 2, 2, 0], [3, "אלבום ג", 0, 0, 0]]);
   assert.equal(albumRank[1].gapAbove, 1, "votes separating second place from first");
   assert.equal(albumRank[0].phonePlace, 1);
-  assert.equal(albumRank[1].phonePlace, 2, "ties share the same phone place");
+  // לאלבום ב אין אף קול מהטלפון, ולכן אין לו מקום בטלפון — אחרת ערוץ ריק
+  // היה מחלק מקומות לכולם והטבלה הייתה מסמנת פער בין הערוצים משום מקום.
+  assert.equal(albumRank[1].phonePlace, 0, "an item with no votes in a channel has no place in that channel");
+  assert.equal(albumRank[2].sitePlace, 0, "and the same on the site side");
 
   const rivo = body.artistAlbums.find((artist) => artist.id === "r1");
   assert.equal(rivo.top[0].title, "אלבום א");
