@@ -1089,15 +1089,21 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
     songsDoneAt: !timing?.songsDoneAt && rules.songsEnabled && selectedAlbums.length > 0 && songsDone(),
     artistsDoneAt: !timing?.artistsDoneAt && rules.artistsEnabled && artistsDone(),
   };
+  // שלב נחתם כשיוצאים ממנו, לא ברגע שהמינימום הושג. בקו מותר לבחור טווח
+  // (ברירת המחדל לזמרים היא 1 עד 3), ו-chooseMany שומר התקדמות אחרי כל
+  // הקשה — חתימה בתוך השמירה הייתה מסמנת את השלב כגמור בבחירה הראשונה
+  // ומקצרת אותו על חשבון השלב הבא.
+  const finishStage = (key, done) => {
+    if (!timing || !done || finishedOnEntry[key]) return;
+    timing = markStageDone(timing, key);
+  };
   const stampStages = () => {
-    if (!timing) return;
-    if (rules.albumsEnabled && albumsDone() && !finishedOnEntry.albumsDoneAt) timing = markStageDone(timing, "albumsDoneAt");
-    if (rules.songsEnabled && albumsDone() && selectedAlbums.length && songsDone() && !finishedOnEntry.songsDoneAt) timing = markStageDone(timing, "songsDoneAt");
-    if (rules.artistsEnabled && artistsDone() && !finishedOnEntry.artistsDoneAt) timing = markStageDone(timing, "artistsDoneAt");
+    finishStage("albumsDoneAt", rules.albumsEnabled && albumsDone());
+    finishStage("songsDoneAt", rules.songsEnabled && albumsDone() && selectedAlbums.length > 0 && songsDone());
+    finishStage("artistsDoneAt", rules.artistsEnabled && artistsDone());
   };
   const persistProgress = () => {
     if (preview) return Promise.resolve();
-    stampStages();
     return saveProgress(voterPhone, {
       albumIds: selectedAlbums.map((album) => album.id),
       songIdsByAlbum,
@@ -1124,6 +1130,7 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
         });
         keepSongsForSelectedAlbums();
         menuLead = [];
+        finishStage("albumsDoneAt", rules.albumsEnabled && albumsDone());
         await persistProgress();
         menuLead = prompt(prompts, "system:section_saved", "בחירת האלבומים נשמרה");
       } else if (allowed[0] === 2) {
@@ -1140,6 +1147,8 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
           songIdsByAlbum[album.id] = selectedSongs.map((song) => song.id);
           await persistProgress();
         }
+        finishStage("songsDoneAt", rules.songsEnabled && albumsDone() && selectedAlbums.length > 0 && songsDone());
+        await persistProgress();
         menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה");
       } else {
         selectedArtists = await chooseMany(call, [...menuLead, ...stageIntro("artists", prompt(prompts, "system:artists_intro", `בחרו בין ${artistMinQuota} ל ${artistMaxQuota} זמרים`))], catalog.artists || [], artistMinimum, artistMaximum, "לזמר", "artist", prompts, artistMenuKey, selectedArtists, async (next) => {
@@ -1147,6 +1156,7 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
           await persistProgress();
         });
         menuLead = [];
+        finishStage("artistsDoneAt", rules.artistsEnabled && artistsDone());
         await persistProgress();
         menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה");
       }
@@ -1166,6 +1176,7 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
         await persistProgress();
       });
       keepSongsForSelectedAlbums();
+      finishStage("albumsDoneAt", rules.albumsEnabled && albumsDone());
       await persistProgress();
       menuLead = prompt(prompts, "system:section_saved", "בחירת האלבומים נשמרה חוזרים לתפריט הראשי");
     } else if (answer === "2" && allowed.includes(2)) {
@@ -1182,12 +1193,15 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
         songIdsByAlbum[album.id] = selectedSongs.map((song) => song.id);
         await persistProgress();
       }
+      finishStage("songsDoneAt", rules.songsEnabled && albumsDone() && selectedAlbums.length > 0 && songsDone());
+      await persistProgress();
       menuLead = prompt(prompts, "system:section_saved", "בחירת השירים נשמרה חוזרים לתפריט הראשי");
     } else if (answer === "3" && allowed.includes(3)) {
       selectedArtists = await chooseMany(call, stageIntro("artists", prompt(prompts, "system:artists_intro", `בחרו בין ${artistMinQuota} ל ${artistMaxQuota} זמרים`)), catalog.artists || [], artistMinimum, artistMaximum, "לזמר", "artist", prompts, artistMenuKey, selectedArtists, async (next) => {
         selectedArtists = next;
         await persistProgress();
       });
+      finishStage("artistsDoneAt", rules.artistsEnabled && artistsDone());
       await persistProgress();
       menuLead = prompt(prompts, "system:section_saved", "בחירת הזמרים נשמרה חוזרים לתפריט הראשי");
     }

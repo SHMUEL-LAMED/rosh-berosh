@@ -18,7 +18,7 @@ import type {
 type Env = { DB: D1Database; MEDIA: R2Bucket };
 type Channel = "site" | "phone";
 type ItemRow = { id: string; title: string; albumId?: string; albumTitle?: string; artistName?: string; coverUrl?: string | null; imageUrl?: string | null; position: number; active: number; votes: number; site: number; phone: number };
-type SongRow = ItemRow & { audioUrl?: string | null; previewStart: number; previewEnd: number };
+type SongRow = ItemRow & { audioUrl?: string | null; previewStart: number; previewEnd: number; albumActive: number };
 type PairRow = { a: string; b: string; votes: number };
 type TimingRow = { channel: Channel; createdAt: number; startedAt: number; albumsDoneAt: number | null; songsDoneAt: number | null; artistsDoneAt: number | null; sessions: number | null };
 type StageFlags = { albums: boolean; songs: boolean; artists: boolean };
@@ -59,7 +59,10 @@ function rankList(rows: ItemRow[], totalBallots: number, subtitle?: (row: ItemRo
     const below = index < sorted.length - 1 ? num(sorted[index + 1].votes) : null;
     return {
       id: row.id, title: row.title, subtitle: subtitle?.(row), votes, site: num(row.site), phone: num(row.phone), share: share(votes, totalBallots), place: votePlaces.get(row.id) || index + 1,
-      sitePlace: sitePlaces.get(row.id) || 0, phonePlace: phonePlaces.get(row.id) || 0,
+      // בלי קולות בערוץ אין מקום בערוץ: אחרת ערוץ ריק לגמרי היה נותן לכולם
+      // מקום ראשון, והטבלה הייתה מסמנת "פער בין הערוצים" משום מקום.
+      sitePlace: num(row.site) > 0 ? sitePlaces.get(row.id) || 0 : 0,
+      phonePlace: num(row.phone) > 0 ? phonePlaces.get(row.id) || 0 : 0,
       gapAbove: above === null ? null : above - votes, gapBelow: below === null ? null : votes - below,
     };
   });
@@ -225,7 +228,7 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
 
   const [albums, songs, artists, ballots, artistAlbum, albumPairs, artistPairs, combos, timingRows, stageFlagRows, hourly, blocked] = await env.DB.batch([
     env.DB.prepare(`SELECT a.id, a.title, a.artist_name AS artistName, a.cover_url AS coverUrl, a.position, a.active, COUNT(v.album_id) AS votes, ${channelSums} FROM albums a LEFT JOIN album_votes v ON v.album_id=a.id LEFT JOIN ballots b ON b.id=v.ballot_id AND b.survey_id=?1 WHERE a.survey_id=?1 GROUP BY a.id ORDER BY votes DESC, a.position, a.title`).bind(surveyId),
-    env.DB.prepare(`SELECT s.id, s.title, s.album_id AS albumId, a.title AS albumTitle, s.position, s.active, s.audio_url AS audioUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd, COUNT(DISTINCT v.ballot_id) AS votes, ${songChannelSums} FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id AND v.album_id=s.album_id LEFT JOIN ballots b ON b.id=v.ballot_id AND b.survey_id=?1 WHERE a.survey_id=?1 GROUP BY s.id ORDER BY votes DESC, s.album_id, s.position, s.title`).bind(surveyId),
+    env.DB.prepare(`SELECT s.id, s.title, s.album_id AS albumId, a.title AS albumTitle, s.position, s.active, s.audio_url AS audioUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd, a.active AS albumActive, COUNT(DISTINCT v.ballot_id) AS votes, ${songChannelSums} FROM songs s JOIN albums a ON a.id=s.album_id LEFT JOIN song_votes v ON v.song_id=s.id AND v.album_id=s.album_id LEFT JOIN ballots b ON b.id=v.ballot_id AND b.survey_id=?1 WHERE a.survey_id=?1 GROUP BY s.id ORDER BY votes DESC, s.album_id, s.position, s.title`).bind(surveyId),
     env.DB.prepare(`SELECT a.id, a.name AS title, a.image_url AS imageUrl, a.position, a.active, COUNT(v.artist_id) AS votes, ${channelSums} FROM artists a LEFT JOIN artist_votes v ON v.artist_id=a.id LEFT JOIN ballots b ON b.id=v.ballot_id AND b.survey_id=?1 WHERE a.survey_id=?1 GROUP BY a.id ORDER BY votes DESC, a.position, a.name`).bind(surveyId),
     env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN channel='site' THEN 1 ELSE 0 END) AS site, SUM(CASE WHEN channel='phone' THEN 1 ELSE 0 END) AS phone, MIN(created_at) AS firstAt, MAX(created_at) AS lastAt FROM ballots WHERE survey_id=?1").bind(surveyId),
     env.DB.prepare("SELECT av.artist_id AS a, alv.album_id AS b, COUNT(*) AS votes FROM artist_votes av JOIN ballots bl ON bl.id=av.ballot_id JOIN album_votes alv ON alv.ballot_id=av.ballot_id WHERE bl.survey_id=?1 GROUP BY av.artist_id, alv.album_id").bind(surveyId),
@@ -270,7 +273,9 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
   const optional = await env.DB.batch([
     env.DB.prepare("SELECT id, phone, action, target, status, created_at AS createdAt FROM ivr_admin_audit ORDER BY created_at DESC LIMIT 60"),
     env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS failed FROM ivr_admin_audit WHERE created_at >= unixepoch() - 30*86400"),
-    env.DB.prepare("SELECT key FROM ivr_prompts"),
+    // אותו תנאי שקטלוג הקו משתמש בו: הקלטה שלא הסתנכרנה לימות המשיח אינה
+    // מושמעת, ולכן היא חסרה גם כאן ולא "קיימת".
+    env.DB.prepare("SELECT key FROM ivr_prompts WHERE yemot_path IS NOT NULL AND yemot_path != ''"),
   ]).catch((error) => { console.error("optional analytics tables unavailable", error); return null; });
   const audit = optional?.[0] ?? { results: [] };
   const auditTotalsRows = optional?.[1] ?? { results: [] };
@@ -340,7 +345,9 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
     const key = ids.join(",");
     comboCounts.set(key, (comboCounts.get(key) || 0) + 1);
   }
-  const comboList = [...comboCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10)
+  // רק שילוב שיש לו לפחות תאום אחד: הכותרת מבטיחה "חוזרים על עצמם", ובסקר
+  // שבו כל פתק ייחודי הרשימה צריכה להיות ריקה ולא מלאה בשילובים בודדים.
+  const comboList = [...comboCounts.entries()].filter(([, votes]) => votes > 1).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10)
     .map(([key, votes]) => ({ albums: key.split(",").map((id) => albumTitle.get(id) || "אלבום שנמחק"), votes, share: share(votes, totalBallots) }));
   const repeatedBallots = [...comboCounts.values()].filter((count) => count > 1).reduce((sum, count) => sum + count, 0);
 
@@ -425,15 +432,21 @@ async function computeAnalytics(env: Env, surveyId: string, now: number): Promis
 
   // מצב התוכן: מה חסר כדי שהאתר והקו יהיו שלמים.
   const promptKeys = new Set((promptKeyRows.results as Array<{ key: string }>).map((row) => row.key));
+  // פריט מוסתר אינו מוצג באתר ואינו מושמע בקו, ולכן אינו יכול להפוך את
+  // התוכן ללא שלם. בלי הסינון הזה פריט ישן שהוסתר היה משאיר את המסך אדום
+  // לנצח. המספר הכולל של המוסתרים נשאר מוצג בנפרד.
+  const liveAlbums = albumRows.filter((row) => num(row.active));
+  const liveArtists = artistRows.filter((row) => num(row.active));
+  const liveSongs = songRows.filter((row) => num(row.active) && num(row.albumActive));
   const content = {
-    songsWithoutAudio: songRows.filter((row) => !row.audioUrl).map((row) => ({ id: row.id, title: row.title, subtitle: row.albumTitle })),
-    songsWithoutPreview: songRows.filter((row) => row.audioUrl && num(row.previewEnd) <= num(row.previewStart)).map((row) => ({ id: row.id, title: row.title, subtitle: row.albumTitle })),
-    albumsWithoutCover: albumRows.filter((row) => !row.coverUrl).map((row) => ({ id: row.id, title: row.title, subtitle: row.artistName })),
-    artistsWithoutImage: artistRows.filter((row) => !row.imageUrl).map((row) => ({ id: row.id, title: row.title })),
+    songsWithoutAudio: liveSongs.filter((row) => !row.audioUrl).map((row) => ({ id: row.id, title: row.title, subtitle: row.albumTitle })),
+    songsWithoutPreview: liveSongs.filter((row) => row.audioUrl && num(row.previewEnd) <= num(row.previewStart)).map((row) => ({ id: row.id, title: row.title, subtitle: row.albumTitle })),
+    albumsWithoutCover: liveAlbums.filter((row) => !row.coverUrl).map((row) => ({ id: row.id, title: row.title, subtitle: row.artistName })),
+    artistsWithoutImage: liveArtists.filter((row) => !row.imageUrl).map((row) => ({ id: row.id, title: row.title })),
     missingPrompts: [
-      ...albumRows.filter((row) => !promptKeys.has(`album:${row.id}`)).map((row) => ({ id: row.id, title: row.title, subtitle: "אלבום" })),
-      ...artistRows.filter((row) => !promptKeys.has(`artist:${row.id}`)).map((row) => ({ id: row.id, title: row.title, subtitle: "זמר" })),
-      ...songRows.filter((row) => !promptKeys.has(`song:${row.id}`)).map((row) => ({ id: row.id, title: row.title, subtitle: `שיר · ${row.albumTitle || ""}` })),
+      ...liveAlbums.filter((row) => !promptKeys.has(`album:${row.id}`)).map((row) => ({ id: row.id, title: row.title, subtitle: "אלבום" })),
+      ...liveArtists.filter((row) => !promptKeys.has(`artist:${row.id}`)).map((row) => ({ id: row.id, title: row.title, subtitle: "זמר" })),
+      ...liveSongs.filter((row) => !promptKeys.has(`song:${row.id}`)).map((row) => ({ id: row.id, title: row.title, subtitle: `שיר · ${row.albumTitle || ""}` })),
     ],
     inactive: { albums: albumRows.filter((row) => !num(row.active)).length, songs: songRows.filter((row) => !num(row.active)).length, artists: artistRows.filter((row) => !num(row.active)).length },
   };

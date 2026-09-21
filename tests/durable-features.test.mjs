@@ -332,3 +332,27 @@ test("what changed since the last visit reads the previous snapshot before overw
   assert.match(strip, /baselineWritten\.current === surveyKey/, "the baseline is fixed once per visit, so a refresh keeps comparing to the same point");
   assert.match(panel, /catch \{ \/\* אחסון חסום/, "blocked storage hides the strip instead of throwing");
 });
+
+test("the panel only reports what a voter can actually reach", () => {
+  const analytics = source("worker/analytics.ts");
+  const catalog = source("worker/ivr-catalog.js");
+  // אותו תנאי שקטלוג הקו משתמש בו: הקלטה שלא הסתנכרנה אינה מושמעת.
+  assert.match(catalog, /WHERE yemot_path IS NOT NULL AND yemot_path != ''/);
+  assert.match(analytics, /SELECT key FROM ivr_prompts WHERE yemot_path IS NOT NULL AND yemot_path != ''/);
+  // פריט מוסתר אינו מוצג ואינו מושמע, ולכן אינו נספר כתוכן חסר.
+  assert.match(analytics, /const liveSongs = songRows\.filter\(\(row\) => num\(row\.active\) && num\(row\.albumActive\)\)/);
+  for (const group of ["songsWithoutAudio", "songsWithoutPreview", "albumsWithoutCover", "artistsWithoutImage"]) {
+    assert.match(analytics, new RegExp(`${group}: live`), `${group} is built from the live catalogue`);
+  }
+  assert.match(analytics, /filter\(\(\[, votes\]\) => votes > 1\)/, "a combination with no twin is not a recurring combination");
+});
+
+test("a phone stage is stamped when the caller leaves it, not when its minimum is reached", () => {
+  const phone = source("ivr-service/src/server.js");
+  assert.match(phone, /const finishStage = \(key, done\) =>/);
+  // השמירה עצמה כבר אינה חותמת: chooseMany שומר אחרי כל הקשה.
+  const persist = phone.slice(phone.indexOf("const persistProgress = () =>"), phone.indexOf("const keepSongsForSelectedAlbums"));
+  assert.doesNotMatch(persist, /stampStages\(\)/, "saving progress must not stamp a stage the caller is still inside");
+  // שישה מקומות: שלושה שלבים בשני מסלולי התפריט.
+  assert.ok((phone.match(/finishStage\("/g) || []).length >= 8, "every stage exit stamps, on both menu paths");
+});
