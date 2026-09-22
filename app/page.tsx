@@ -75,6 +75,19 @@ async function browserFingerprint(): Promise<string> {
   return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+type SharedBannerData = { text: string; link: string; linkLabel: string };
+/** ההודעה המשותפת: מנהל כותב אותה באתר התוכניות ומסמן "גם באתר הסקר". */
+function SharedBanner() {
+  const [banner, setBanner] = useState<SharedBannerData | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/program/banner", { cache: "no-store" }).then(async (response) => response.ok ? (await response.json()).banner as SharedBannerData | null : null).then((value) => { if (active) setBanner(value); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+  if (!banner?.text) return null;
+  return <div className="shared-banner" role="status"><span aria-hidden="true">✦</span><p>{banner.text}</p>{banner.link && <a href={banner.link} target={/^https?:/.test(banner.link) ? "_blank" : undefined} rel="noopener">{banner.linkLabel || "לפרטים"} ←</a>}</div>;
+}
+
 export default function Home() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [stageIndex, setStageIndex] = useState(0);
@@ -298,6 +311,7 @@ export default function Home() {
   if (done && catalog) return <main className="voting-shell"><section className="success-card receipt-success"><span>✓</span><p className="kicker">{preview ? "התצוגה המקדימה הסתיימה" : "ההצבעה נקלטה"}</p><h1>{preview ? "הגעתם עד השלב האחרון" : "תודה שהשתתפתם!"}</h1><p>{preview ? "זו הייתה הדגמה בלבד. שום הצבעה או התקדמות לא נשמרו." : "הבחירות שלכם נשמרו בהצלחה."}</p><VoteReceipt albums={selectedAlbums.map((album) => ({ id: album.id, title: album.title, artistName: album.artistName, coverUrl: album.coverUrl, songs: selectedSongNames(album.id) === "לא נבחר" ? [] : selectedSongNames(album.id).split(" · ") }))} artists={selectedArtists.map((artist) => ({ id: artist.id, name: artist.name, imageUrl: artist.imageUrl }))} />{preview ? <div className="preview-finish-actions"><button className="continue" onClick={() => { setDone(false); setStageIndex(0); setSongAlbumIndex(0); setAlbums([]); setSongs({}); setArtists([]); }}>התחלת תצוגה מחדש</button><a className="back" href="/admin">חזרה לניהול</a></div> : <SubscribeCard />}</section></main>;
 
   return <main className={`voting-shell ${player ? "with-player" : ""} ${preview ? `preview-mode preview-${stage}` : ""}`} dir="rtl">
+    <SharedBanner />
     {!preview && <SubscribeAfterLogin />}
     {preview && <div className={`preview-banner${ivrPreview ? " ivr" : ""}`}><b>{ivrPreview ? "תצוגה מקדימה של קו ההצבעה" : "תצוגה מקדימה של האתר"}</b><span>{ivrPreview ? "השלבים והכמויות זהים לקו; במקום מקשי הטלפון בוחרים כאן בלחיצה." : "אפשר לעבור עד הסוף. שום בחירה לא תישמר כהצבעה."}</span><a href="/admin">יציאה לניהול</a></div>}
     <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>החלפת חשבון</button></nav></header>

@@ -132,7 +132,8 @@ export async function destroySession(request: Request, env: AuthEnv): Promise<vo
   const cookie = request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith("rosh_session="));
   const token = cookie?.slice("rosh_session=".length);
   if (!token || token.includes(".")) return;
-  await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash=?").bind(await hashToken(token)).run();
+  // התנתקות מנתקת מכל המקומות — גם מאתר התוכניות: כל הסשנים של אותו חשבון נמחקים.
+  await env.DB.prepare("DELETE FROM auth_sessions WHERE user_sub IN (SELECT user_sub FROM auth_sessions WHERE token_hash=?)").bind(await hashToken(token)).run();
 }
 
 export const sessionCookie = (token: string) => `rosh_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_SECONDS}`;
