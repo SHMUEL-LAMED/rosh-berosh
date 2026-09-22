@@ -210,13 +210,13 @@ test("one sign-in covers both sites: the program site bounces through here and c
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("cookie-voter"));
   db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,picture,expires_at) VALUES (?,?,?,?,?,?)")
     .run([...new Uint8Array(digest)].map((v) => v.toString(16).padStart(2, "0")).join(""), "sub-cookie", "fan@example.com", "מאזין", null, Math.floor(Date.now() / 1000) + 3600);
-  const back = "https://shmuel-lamed.github.io/Ringtones/me.html?x=1";
+  const back = "https://shmuel-lamed.github.io/rosh-berosh-2/me.html?x=1";
   const go = (cookie, target = back) => worker.fetch(new Request(`http://localhost/api/program/sso?return=${encodeURIComponent(target)}`, { headers: cookie ? { cookie } : {} }), env, ctx);
 
   const signedIn = await go("rosh_session=cookie-voter");
   assert.equal(signedIn.status, 302);
   const landing = new URL(signedIn.headers.get("location"));
-  assert.equal(landing.origin + landing.pathname, "https://shmuel-lamed.github.io/Ringtones/me.html");
+  assert.equal(landing.origin + landing.pathname, "https://shmuel-lamed.github.io/rosh-berosh-2/me.html");
   assert.equal(landing.searchParams.get("x"), "1");
   const code = landing.searchParams.get("sso");
   assert.match(code, /^[a-f0-9]{32}$/);
@@ -233,7 +233,7 @@ test("one sign-in covers both sites: the program site bounces through here and c
 test("signing in on the program site signs in the voting site too", async () => {
   const { worker, env, call, voter } = await setup();
   const { code } = await (await call("/api/program/handoff", { method: "POST", token: voter, body: {} })).json();
-  const back = "https://shmuel-lamed.github.io/Ringtones/index.html";
+  const back = "https://shmuel-lamed.github.io/rosh-berosh-2/index.html";
   const response = await worker.fetch(new Request(`http://localhost/api/program/handoff/${code}?return=${encodeURIComponent(back)}`), env, ctx);
   assert.equal(response.status, 302);
   assert.equal(response.headers.get("location"), back);

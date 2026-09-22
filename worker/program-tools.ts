@@ -1,4 +1,4 @@
-/* כלי הניהול של אתר התוכניות (Ringtones), מעבר לקטלוג עצמו:
+/* כלי הניהול של אתר התוכניות (rosh-berosh-2), מעבר לקטלוג עצמו:
    הגדרות האתר (הודעה בדף הבית, דף עדכונים), טיוטה משותפת בין מכשירים,
    קישור תצוגה מקדימה, גרסאות שנשמרות אוטומטית בכל פרסום, אירועי האזנה
    לסטטיסטיקה, הודעות מהמאזינים, רשימת המנהלים (אותה רשימה של אתר הסקר)
@@ -16,7 +16,7 @@ type Helpers = {
 
 export const PUBLIC_SETTING_KEYS = ["banner", "updates"] as const;
 /** כתובת אתר התוכניות (GitHub Pages) — יעד המעבר מניהול הסקר. */
-export const PROGRAM_SITE = "https://shmuel-lamed.github.io/Ringtones/";
+export const PROGRAM_SITE = "https://shmuel-lamed.github.io/rosh-berosh-2/";
 const HANDOFF_TTL = 180;
 export const VERSIONS_KEPT = 40;
 const MAX_TEXT = 4000;
