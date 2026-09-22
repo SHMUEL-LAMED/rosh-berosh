@@ -16,8 +16,8 @@ const SESSION_SECONDS = 60 * 60 * 24 * 30;
 /** מנהלים קבועים: תמיד מנהלים, ואי אפשר להסיר אותם מדף ההרשאות.
     הדומיין העברי מופיע בשתי הצורות שבהן Google עשוי למסור אותו. */
 export const DEFAULT_ADMIN_EMAILS = [
-  "0534169095@xn--4dbjbascrao3i.com",
-  "0534169095@שמואלליווי.com",
+  "o0534169095@xn--4dbjbascrao3i.com",
+  "o0534169095@שמואלליווי.com",
   "o0534169095@gmail.com",
   "smwlyqswkwt232@gmail.com",
 ];
