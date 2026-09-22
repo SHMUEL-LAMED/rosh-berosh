@@ -5,8 +5,8 @@ import { DatabaseSync } from "node:sqlite";
 /**
  * אתר התוכניות (Ringtones) אינו מחזיק רשימת מנהלים משלו: מי שמנהל את אתר
  * הסקר מנהל גם אותו. הבדיקות כאן רצות על הוורקר הבנוי מול SQLite אמיתי
- * ומוודאות שסשן מנהל של אתר הסקר מספיק כדי לקבל סשן לאתר התוכניות, ושמי
- * שאינו מנהל שם נדחה.
+ * ומוודאות שכל מי שמחובר לאתר הסקר מקבל סשן לאתר התוכניות (אזור אישי), ושרק
+ * מי שברשימת המנהלים מקבל `isAdmin` וגישה לכתיבה.
  */
 
 function d1(db) {
@@ -106,12 +106,26 @@ test("a manager added in the voting site's permissions tab manages the program s
   assert.equal((await response.json()).user.isAdmin, true);
 });
 
-test("a signed-in voter who is not a manager is refused", async () => {
+test("a signed-in voter who is not a manager gets a personal session without management", async () => {
   const { worker, db, env } = await setup();
   const cookie = await sessionCookie(db, "voter@example.com");
   const response = await exchange(worker, env, cookie);
-  assert.equal(response.status, 403);
-  assert.match((await response.json()).error, /הרשאת ניהול/);
+  assert.equal(response.status, 200, await response.clone().text());
+  const { token, user } = await response.json();
+  assert.ok(token && !token.includes("."));
+  assert.equal(user.email, "voter@example.com");
+  assert.equal(user.isAdmin, false, "everyone signs in; only the admin list grants management");
+
+  const check = await me(worker, env, token);
+  assert.equal(check.status, 200);
+  assert.equal((await check.json()).user.isAdmin, false);
+
+  const write = await worker.fetch(new Request("http://localhost/api/program/catalog", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, origin: PROGRAM_ORIGIN },
+    body: JSON.stringify({ seasons: [], episodes: [] }),
+  }), env, ctx);
+  assert.equal(write.status, 403, "a listener's session cannot publish");
 });
 
 test("without a voting-site session there is nothing to exchange", async () => {
@@ -128,7 +142,9 @@ test("removing a manager on the voting site locks the program site at once", asy
   assert.equal((await me(worker, env, token)).status, 200);
 
   savedManagers.length = 0;
-  assert.equal((await me(worker, env, token)).status, 401);
+  const demoted = await me(worker, env, token);
+  assert.equal(demoted.status, 200, "the session itself survives");
+  assert.equal((await demoted.json()).user.isAdmin, false, "but management is gone at once");
   const write = await worker.fetch(new Request("http://localhost/api/program/catalog", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}`, origin: PROGRAM_ORIGIN },
@@ -156,5 +172,82 @@ test("the login window hands a signed-in administrator straight through and keep
 
   const voterCookie = await sessionCookie(db, "voter@example.com");
   const asVoter = await worker.fetch(new Request("http://localhost/api/program/login", { headers: { cookie: voterCookie } }), env, ctx);
-  assert.match(await asVoter.text(), /const known=\{"email":"voter@example\.com","isAdmin":false\}/);
+  const voterHtml = await asVoter.text();
+  assert.match(voterHtml, /const known=\{"email":"voter@example\.com","isAdmin":false\}/);
+  assert.match(voterHtml, /if\(known\)\{/, "a signed-in voter is handed a personal session, not turned away");
+  assert.doesNotMatch(voterHtml, /אינו מוגדר שם כמנהל/);
+});
+
+/**
+ * ההקלטות שמורות בקובצי דרייב משותפים. גוגל מגיש אותם כאודיו עם Range לשרתים,
+ * אבל עונה 403 לכל בקשת דפדפן חוצת־אתרים (Sec-Fetch-Site: cross-site), ולכן
+ * הנגן של אתר התוכניות מזרים אותם דרך הוורקר: /api/program/stream/<מזהה>.
+ */
+function withDrive(handler) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (!url.startsWith("https://drive.usercontent.google.com/download?")) return original(input, init);
+    const headers = new Headers(init.headers || (typeof input === "string" ? {} : input.headers));
+    return handler(new URL(url), headers, init.method || "GET");
+  };
+  return () => { globalThis.fetch = original; };
+}
+const AUDIO_BYTES = new Uint8Array(85_228_622 % 1000 + 1000).fill(73);
+const driveOk = (url, headers, method) => {
+  assert.equal(url.searchParams.get("export"), "download");
+  assert.equal(url.searchParams.get("confirm"), "t");
+  assert.equal(headers.get("sec-fetch-site"), null, "a server fetch carries no browser fetch metadata");
+  const range = headers.get("range");
+  const match = range?.match(/^bytes=(\d+)-(\d*)$/);
+  if (match) {
+    const start = Number(match[1]), end = match[2] ? Number(match[2]) : AUDIO_BYTES.length - 1;
+    return new Response(method === "HEAD" ? null : AUDIO_BYTES.slice(start, end + 1), { status: 206, headers: { "content-type": "audio/mpeg", "content-range": `bytes ${start}-${end}/${AUDIO_BYTES.length}`, "content-length": String(end - start + 1), "accept-ranges": "bytes", "content-disposition": "attachment; filename=\"x.mp3\"" } });
+  }
+  return new Response(method === "HEAD" ? null : AUDIO_BYTES, { status: 200, headers: { "content-type": "audio/mpeg", "content-length": String(AUDIO_BYTES.length), "accept-ranges": "bytes", "content-disposition": "attachment; filename=\"x.mp3\"" } });
+};
+const stream = (worker, env, id, init = {}) => worker.fetch(new Request(`http://localhost/api/program/stream/${id}`, { headers: { origin: PROGRAM_ORIGIN, ...init.headers }, method: init.method || "GET" }), env, ctx);
+
+test("a Drive recording streams through the worker with ranges and without Google's own pages", async () => {
+  const { worker, env } = await setup();
+  const restore = withDrive(driveOk);
+  try {
+    const whole = await stream(worker, env, "1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4");
+    assert.equal(whole.status, 200);
+    assert.equal(whole.headers.get("content-type"), "audio/mpeg");
+    assert.equal(whole.headers.get("accept-ranges"), "bytes");
+    assert.equal(whole.headers.get("content-disposition"), "inline", "played in the site's player, not downloaded");
+    assert.equal(whole.headers.get("access-control-allow-origin"), PROGRAM_ORIGIN);
+    assert.match(whole.headers.get("access-control-expose-headers"), /content-range/);
+    assert.deepEqual(new Uint8Array(await whole.arrayBuffer()), AUDIO_BYTES);
+
+    const part = await stream(worker, env, "1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4", { headers: { range: "bytes=100-199" } });
+    assert.equal(part.status, 206, "seeking passes the Range header straight through");
+    assert.equal(part.headers.get("content-range"), `bytes 100-199/${AUDIO_BYTES.length}`);
+    assert.equal(part.headers.get("content-length"), "100");
+    assert.equal((await part.arrayBuffer()).byteLength, 100);
+
+    const head = await stream(worker, env, "1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4", { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get("content-type"), "audio/mpeg");
+    assert.equal(await head.text(), "");
+  } finally { restore(); }
+});
+
+test("the stream endpoint refuses bad ids and never relays Google's HTML", async () => {
+  const { worker, env } = await setup();
+  assert.equal((await stream(worker, env, "1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4.mp3")).status, 400, "only a bare file id, nothing that could reach another path");
+  assert.equal((await stream(worker, env, "short")).status, 400);
+  const restore = withDrive(() => new Response("<html>Error 403</html>", { status: 403, headers: { "content-type": "text/html; charset=utf-8" } }));
+  try {
+    const blocked = await stream(worker, env, "1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4");
+    assert.equal(blocked.status, 502);
+    assert.match(blocked.headers.get("content-type"), /application\/json/);
+    assert.match((await blocked.json()).error, /אינה זמינה/);
+  } finally { restore(); }
+  const restoreHtml = withDrive(() => new Response("<html>virus scan warning</html>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }));
+  try {
+    const page = await stream(worker, env, "1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4");
+    assert.equal(page.status, 502, "an HTML interstitial is not audio");
+  } finally { restoreHtml(); }
 });
