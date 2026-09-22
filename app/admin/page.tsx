@@ -158,7 +158,7 @@ export default function AdminPage() {
       {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{artistOrder.map((item, index) => <div key={item.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("artist", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === artistOrder.length - 1} onClick={() => moveItem("artist", index, 1)} aria-label="הזז למטה">▼</button></div><ArtistRow item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} /></div>)}</div></AdminSection>}
       {tab === "access" && data && <><ManagersPanel managers={data.managers} currentEmail={user.email} onSaved={load} onMessage={notify} /><AdminSection title="הרשאות לקו ההקלטות"><RecorderAccessPanel recorders={data.ivrRecorders || []} onSaved={load} onMessage={notify} /></AdminSection></>}
       {tab === "results" && data && <Results data={data.results} />}
-      {tab === "voters" && <VotersPanel onMessage={notify} />}
+      {tab === "voters" && <VotersPanel />}
       {tab === "analytics" && <AnalyticsPanel onMessage={notify} />}
       {tab === "subscribers" && <SubscribersPanel onMessage={notify} />}
     </section>
@@ -542,9 +542,8 @@ function SurveysPanel({ data, onChanged, onMessage }: { data: Overview; onChange
     </article>)}</div>
   </AdminSection>;
 }
-function VotersPanel({ onMessage }: { onMessage(message: string): void }) {
+function VotersPanel() {
   const [voters, setVoters] = useState<Voter[]>([]);
-  const [resetting, setResetting] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -562,44 +561,14 @@ function VotersPanel({ onMessage }: { onMessage(message: string): void }) {
     return () => window.clearTimeout(request);
   }, [fetchPage]);
   const channelLabel = (ch: string) => ch === "phone" ? "טלפון" : ch === "site" ? "אתר" : ch;
-  // איפוס מוחק את הפתק ומסיר את חסימת המחשב של המצביע, כך שיוכל להצביע מחדש.
-  // הרשימה נטענת שוב מהשרת ולא מסוננת מקומית, כדי שהעמוד ישקף את המסד.
-  const resetVoter = async (payload: { email?: string; phone?: string; ballotId?: string }, label: string) => {
-    if (!confirm(`לאפס את ההצבעה של ${label}? הפתק יימחק, חסימת המחשב שממנו הצביע תוסר, והמצביע יוכל להצביע מחדש.`)) return false;
-    setResetting(true);
-    try {
-      const response = await fetch("/api/admin/voters/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "איפוס ההצבעה נכשל.");
-      onMessage(result.unblocked ? "ההצבעה נמחקה וחסימת המחשב הוסרה. המצביע יכול להצביע מחדש." : "ההצבעה נמחקה. המצביע יכול להצביע מחדש.");
-      await fetchPage(page);
-      return true;
-    } catch (error) { onMessage(error instanceof Error ? error.message : "איפוס ההצבעה נכשל."); return false; }
-    finally { setResetting(false); }
-  };
-  // שני טפסים נפרדים: מייל למצביע מהאתר, מספר טלפון למצביע מהקו. שדה המייל
-  // נשאר טקסט חופשי כי כתובות עם דומיין בעברית אינן עוברות את בדיקת הדפדפן.
-  const resetFromForm = async (event: FormEvent<HTMLFormElement>, field: "email" | "phone") => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const value = String(new FormData(form).get(field) || "").trim();
-    if (!value) return;
-    if (await resetVoter({ [field]: value }, value)) form.reset();
-  };
   return <AdminSection title="מצביעים">
     <p className="panel-help">כל ההצבעות שנקלטו בסקר הנוכחי, מהחדשה לישנה.</p>
-    <div className="voter-reset-forms">
-      <form className="voter-reset-form" onSubmit={(event) => void resetFromForm(event, "email")}><input name="email" type="text" placeholder="כתובת מייל של מצביע מהאתר" dir="ltr" required /><button type="submit" className="danger" disabled={resetting}>איפוס לפי מייל</button></form>
-      <form className="voter-reset-form" onSubmit={(event) => void resetFromForm(event, "phone")}><input name="phone" type="tel" placeholder="מספר טלפון של מצביע מהקו" dir="ltr" required /><button type="submit" className="danger" disabled={resetting}>איפוס לפי טלפון</button></form>
-    </div>
-    <p className="panel-help">איפוס מוחק את הפתק של המצביע בסקר הנוכחי ומסיר את חסימת המחשב שממנו הצביע, כך שיוכל להצביע מחדש. אפשר גם ללחוץ „איפוס” על כרטיס הצבעה ברשימה.</p>
     {loading ? <p className="loading">טוען…</p> : !voters.length ? <p className="panel-help">אין הצבעות עדיין.</p> : <>
       <div className="voters-list">{voters.map((v) => <article key={v.id} className="voter-card">
         <div className="voter-header">
           <span className="voter-key">{v.channel === "site" ? (v.voterEmail || "כתובת המייל לא נשמרה בהצבעה ישנה") : v.voterKey}</span>
           <span className={`voter-channel ${v.channel}`}>{channelLabel(v.channel)}</span>
           <time>{new Date(v.createdAt < 1_000_000_000_000 ? v.createdAt * 1000 : v.createdAt).toLocaleString("he-IL")}</time>
-          <button type="button" className="danger" disabled={resetting} onClick={() => void resetVoter({ ballotId: v.id }, v.channel === "site" ? v.voterEmail || v.voterKey : v.voterKey)}>איפוס</button>
         </div>
         {v.albums.length > 0 && <div className="voter-section"><strong>אלבומים:</strong> {v.albums.join(", ")}</div>}
         {v.songs.length > 0 && <div className="voter-section"><strong>שירים:</strong> {v.songs.map((s) => `${s.title} (${s.albumTitle})`).join(", ")}</div>}
