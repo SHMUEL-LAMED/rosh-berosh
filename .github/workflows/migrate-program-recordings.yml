@@ -1,0 +1,153 @@
+name: One-time program recordings migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/migrate-program-recordings.yml
+  workflow_dispatch:
+
+concurrency:
+  group: migrate-program-recordings
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Wrangler config
+        run: npm run build
+
+      - name: Prepare migration list
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const seed = JSON.parse(fs.readFileSync('worker/program-seed.json', 'utf8'));
+          const rows = [];
+          for (const e of seed.episodes || []) {
+            const values = [e.audio, ...(e.links || []).map(l => l && l.url)].filter(Boolean);
+            let driveId = '';
+            for (const value of values) {
+              const m = String(value).match(/drive\.google\.com\/file\/d\/([\w-]+)/);
+              if (m) { driveId = m[1]; break; }
+              try {
+                const u = new URL(value);
+                if (u.hostname === 'drive.google.com') {
+                  driveId = u.searchParams.get('id') || '';
+                  if (driveId) break;
+                }
+              } catch {}
+            }
+            if (!driveId) continue;
+            rows.push([
+              e.id,
+              driveId,
+              Number(e.sourceFileBytes) || 0,
+              String(e.title || '').replace(/[\t\r\n]+/g, ' ')
+            ]);
+          }
+          if (rows.length !== 86) throw new Error(`Expected 86 Drive recordings, found ${rows.length}`);
+          fs.writeFileSync('migration.tsv', rows.map(r => r.join('\t')).join('\n') + '\n');
+          console.log(`Prepared ${rows.length} recordings`);
+          NODE
+
+      - name: Migrate Drive recordings to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -u
+          mkdir -p /tmp/program-migration
+          total=$(wc -l < migration.tsv | tr -d ' ')
+          done_count=0
+          uploaded=0
+          failed=0
+          : > migration-failures.txt
+
+          while IFS=$'\t' read -r episodeId driveId expectedBytes title; do
+            done_count=$((done_count + 1))
+            key="program-recordings/${driveId}.mp3"
+            tmp="/tmp/program-migration/${driveId}.mp3"
+            echo "::group::[${done_count}/${total}] ${title}"
+
+            # If D1 already marks this exact object as migrated at the expected
+            # size, skip it. This makes reruns resumable without downloading it.
+            query="SELECT CASE WHEN json_extract(data_json,'$.audioSource')='r2' AND CAST(json_extract(data_json,'$.audioSize') AS INTEGER)=${expectedBytes} THEN 1 ELSE 0 END AS migrated FROM program_episodes WHERE id='${episodeId}' LIMIT 1;"
+            already=$(npx wrangler d1 execute site-creator-d1 --remote --config dist/server/wrangler.json --command "$query" --json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const a=Array.isArray(j)?j[0]:j;const rows=a?.results||a?.result?.results||[];process.stdout.write(String(rows[0]?.migrated||0))}catch{process.stdout.write('0')}})")
+            if [ "$already" = "1" ]; then
+              echo "Already migrated; skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            rm -f "$tmp"
+            url="https://drive.usercontent.google.com/download?id=${driveId}&export=download&confirm=t"
+            if ! curl --fail --location --silent --show-error --retry 5 --retry-delay 3 --retry-all-errors --output "$tmp" "$url"; then
+              echo "DOWNLOAD FAILED: ${episodeId}" | tee -a migration-failures.txt
+              failed=$((failed + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            actual=$(stat -c%s "$tmp")
+            if [ "$expectedBytes" -gt 0 ] && [ "$actual" -ne "$expectedBytes" ]; then
+              echo "SIZE MISMATCH: ${episodeId}: got ${actual}, expected ${expectedBytes}" | tee -a migration-failures.txt
+              failed=$((failed + 1))
+              rm -f "$tmp"
+              echo "::endgroup::"
+              continue
+            fi
+
+            if ! npx wrangler r2 object put "rosh-berosh-media/${key}" --file "$tmp" --content-type "audio/mpeg" --cache-control "public, max-age=31536000, immutable" --remote --config dist/server/wrangler.json --force; then
+              echo "R2 UPLOAD FAILED: ${episodeId}" | tee -a migration-failures.txt
+              failed=$((failed + 1))
+              rm -f "$tmp"
+              echo "::endgroup::"
+              continue
+            fi
+
+            migratedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            sql="UPDATE program_episodes SET data_json=json_set(data_json,'$.r2Key','${key}','$.audioSource','r2','$.audioSize',${actual},'$.audioMigratedAt','${migratedAt}'), updated_at=unixepoch() WHERE id='${episodeId}';"
+            if ! npx wrangler d1 execute site-creator-d1 --remote --config dist/server/wrangler.json --command "$sql"; then
+              echo "D1 UPDATE FAILED (audio is already safe in R2): ${episodeId}" | tee -a migration-failures.txt
+              failed=$((failed + 1))
+            else
+              uploaded=$((uploaded + 1))
+            fi
+
+            rm -f "$tmp"
+            echo "Uploaded ${actual} bytes to ${key}"
+            echo "::endgroup::"
+          done < migration.tsv
+
+          echo "Uploaded this run: ${uploaded}"
+          echo "Failures: ${failed}"
+          if [ "$failed" -ne 0 ]; then
+            echo "Failures:"
+            cat migration-failures.txt
+            exit 1
+          fi
+
+      - name: Verify D1 migration count
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npx wrangler d1 execute site-creator-d1 --remote --config dist/server/wrangler.json --command "SELECT COUNT(*) AS migrated FROM program_episodes WHERE json_extract(data_json,'$.audioSource')='r2';"
+
+      - name: Upload failure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: program-migration-report
+          path: migration-failures.txt
+          if-no-files-found: ignore
