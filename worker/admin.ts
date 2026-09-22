@@ -10,6 +10,8 @@ export type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const ARCHIVE_PREFIX = "poll-archives/";
 
+type BallotRef = { id: string; voterKey: string; fingerprint: string | null };
+
 type PollSnapshot = {
   version: 1 | 2;
   id: string;
@@ -1054,6 +1056,46 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     for (const row of artistVotes.results as Array<{ ballotId: string; name: string }>) { const list = arMap.get(row.ballotId) || []; list.push(row.name); arMap.set(row.ballotId, list); }
     const voters = ballots.results.map((b) => ({ ...b, albums: aMap.get(b.id) || [], songs: sMap.get(b.id) || [], artists: arMap.get(b.id) || [] }));
     return json({ voters, page, hasMore: ballots.results.length === pageSize });
+  }
+
+  // איפוס מצביע: מוחק את הפתק שלו בסקר הפעיל ומסיר את חסימת המחשב שממנו
+  // הצביע, כדי שיוכל להצביע מחדש. מצביע מהאתר מזוהה לפי כתובת המייל שנשמרה
+  // בפתק, או לפי כתובת החיבור ל-Google בפתקים ישנים שלא שמרו כתובת; מצביע
+  // מהקו מזוהה לפי מספר הטלפון, באותה נרמול שבו הקו שומר אותו; ואפשר גם
+  // לאפס פתק מסוים לפי המזהה שלו מרשימת המצביעים.
+  if (request.method === "POST" && url.pathname === "/api/admin/voters/reset") {
+    type ResetBody = { email?: string; phone?: string; ballotId?: string };
+    const body = await request.json<ResetBody>().catch(() => ({}) as ResetBody);
+    const email = text(body.email).toLowerCase();
+    const rawPhone = text(body.phone);
+    const phone = normalizePhone(rawPhone);
+    const ballotId = text(body.ballotId);
+    if (rawPhone && !phone) return json({ error: "מספר הטלפון אינו תקין." }, 400);
+    if (!email && !phone && !ballotId) return json({ error: "יש להזין כתובת מייל או מספר טלפון של המצביע." }, 400);
+    const found = ballotId
+      ? await env.DB.prepare("SELECT id, voter_key AS voterKey, fingerprint FROM ballots WHERE survey_id=? AND id=?").bind(surveyId, ballotId).all<BallotRef>()
+      : phone
+        ? await env.DB.prepare("SELECT id, voter_key AS voterKey, fingerprint FROM ballots WHERE survey_id=? AND channel='phone' AND voter_key=?").bind(surveyId, phone).all<BallotRef>()
+        : await env.DB.prepare("SELECT id, voter_key AS voterKey, fingerprint FROM ballots WHERE survey_id=? AND (voter_email=? OR voter_key IN (SELECT user_sub FROM auth_sessions WHERE email=?))").bind(surveyId, email, email).all<BallotRef>();
+    if (!found.results.length) return json({ error: phone ? "לא נמצאה הצבעה מהמספר הזה בסקר הפעיל." : "לא נמצאה הצבעה של המצביע הזה בסקר הפעיל." }, 404);
+    const ids = found.results.map((row) => row.id);
+    const voterKeys = [...new Set(found.results.map((row) => row.voterKey))];
+    const fingerprints = [...new Set(found.results.map((row) => row.fingerprint).filter((value): value is string => Boolean(value)))];
+    const blocked = fingerprints.length
+      ? await env.DB.prepare(`SELECT COUNT(*) AS total FROM blocked_fingerprints WHERE survey_id=? AND fingerprint IN (${placeholders(fingerprints.length)})`).bind(surveyId, ...fingerprints).first<{ total: number }>()
+      : null;
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM song_votes WHERE ballot_id IN (${placeholders(ids.length)})`).bind(...ids),
+      env.DB.prepare(`DELETE FROM album_votes WHERE ballot_id IN (${placeholders(ids.length)})`).bind(...ids),
+      env.DB.prepare(`DELETE FROM artist_votes WHERE ballot_id IN (${placeholders(ids.length)})`).bind(...ids),
+      env.DB.prepare(`DELETE FROM ballots WHERE id IN (${placeholders(ids.length)})`).bind(...ids),
+      env.DB.prepare(`DELETE FROM site_ballot_progress WHERE survey_id=? AND user_sub IN (${placeholders(voterKeys.length)})`).bind(surveyId, ...voterKeys),
+      ...(fingerprints.length ? [env.DB.prepare(`DELETE FROM blocked_fingerprints WHERE survey_id=? AND fingerprint IN (${placeholders(fingerprints.length)})`).bind(surveyId, ...fingerprints)] : []),
+    ]);
+    // טיוטה של שיחה קודמת מהקו נשמרת ב-R2 לפי מספר הטלפון; בלעדיה חיוג חוזר
+    // מתחיל הצבעה נקייה.
+    await Promise.all(voterKeys.map((key) => env.MEDIA.delete(`ivr-progress/${surveyId}/${key}.json`).catch((error) => console.error("ivr progress cleanup error", error))));
+    return json({ ok: true, deleted: ids.length, unblocked: Number(blocked?.total) || 0 });
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/extract-covers") {
