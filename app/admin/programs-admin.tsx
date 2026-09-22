@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./programs-admin.css";
 
 export type ProgramSection = "programs" | "site" | "listeners" | "publish";
-const PROGRAM_SITE = "https://shmuel-lamed.github.io/Ringtones/";
+const PROGRAM_SITE = "https://shmuel-lamed.github.io/rosh-berosh-2/";
 
 type Link = { label: string; url: string };
 type Episode = {
