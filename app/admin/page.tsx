@@ -25,9 +25,15 @@ type Survey = { id: string; name: string; active: number; createdAt: number; vot
 type SuspiciousVote = { fingerprint: string; count: number; voters: string[]; blocked: boolean };
 type TimelinePoint = { bucket: number; channel: "site" | "phone"; votes: number };
 type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; voteTimeline: { hourly: TimelinePoint[]; daily: TimelinePoint[] }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
-type Tab = "dashboard" | "preview" | "surveys" | "programs" | "albums" | "artists" | "ivr" | "settings" | "access" | "results" | "analytics" | "archives" | "voters" | "subscribers";
+type ProgramTab = "prog-programs" | "prog-site" | "prog-listeners" | "prog-publish";
+type Tab = "dashboard" | "preview" | "surveys" | ProgramTab | "albums" | "artists" | "ivr" | "settings" | "access" | "results" | "analytics" | "archives" | "voters" | "subscribers";
 // אתר התוכניות (GitHub Pages): הניהול שלו מוטמע כאן כלשונית, עם כניסה משותפת.
 const PROGRAM_SITE = "https://shmuel-lamed.github.io/Ringtones/";
+const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-site": "הודעה ועדכונים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
+const TABS: Tab[] = ["dashboard", "preview", "surveys", "prog-programs", "prog-site", "prog-listeners", "prog-publish", "albums", "artists", "ivr", "settings", "access", "results", "analytics", "archives", "voters", "subscribers"];
+const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");
+// הלשונית הפתוחה נשמרת בכתובת (#prog-programs), כדי שקישור מאתר התוכניות ייפתח ישר בחלק הנכון
+const tabFromHash = (): Tab => { if (typeof window === "undefined") return "dashboard"; const value = window.location.hash.slice(1) as Tab; return TABS.includes(value) ? value : "dashboard"; };
 type Voter = { id: string; voterKey: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
 const SYSTEM_PROMPTS = systemPrompts;
@@ -35,7 +41,10 @@ const SYSTEM_PROMPTS = systemPrompts;
 export default function AdminPage() {
   const [user] = useCurrentUser();
   const [data, setData] = useState<Overview | null>(null);
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const [tab, setTab] = useState<Tab>(tabFromHash);
+  const [programsOpened, setProgramsOpened] = useState(() => isProgramTab(tabFromHash()));
+  useEffect(() => { if (typeof window !== "undefined" && window.location.hash !== `#${tab}`) window.history.replaceState(null, "", `#${tab}`); }, [tab]);
+  const go = useCallback((next: Tab) => { if (isProgramTab(next)) setProgramsOpened(true); setTab(next); }, []);
   const { notify } = useNotice();
   const [uploading, setUploading] = useState(false);
   const [albumOrderOverride, setAlbumOrder] = useState<Album[] | null>(null);
@@ -146,17 +155,17 @@ export default function AdminPage() {
 
   return <main className="admin-shell" dir="rtl">
     <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
-      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "preview"} onClick={() => setTab("preview")}>תצוגה מקדימה</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "programs"} onClick={() => setTab("programs")}>אתר התוכניות</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Nav active={tab === "voters"} onClick={() => setTab("voters")}>מצביעים</Nav><Nav active={tab === "analytics"} onClick={() => setTab("analytics")}>נתונים מתקדמים</Nav><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
+      <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "preview"} onClick={() => setTab("preview")}>תצוגה מקדימה</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Nav active={tab === "voters"} onClick={() => setTab("voters")}>מצביעים</Nav><Nav active={tab === "analytics"} onClick={() => setTab("analytics")}>נתונים מתקדמים</Nav><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><p className="nav-group">אתר התוכניות</p>{(Object.keys(PROGRAM_TABS) as ProgramTab[]).map((key) => <Nav key={key} active={tab === key} onClick={() => go(key)}>{PROGRAM_TABS[key]}</Nav>)}<p className="nav-group">כללי</p><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
-    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ preview: "תצוגה מקדימה", surveys: "סקרים", programs: "אתר התוכניות", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", access: "הרשאות", results: "תוצאות", voters: "מצביעים", analytics: "נתונים מתקדמים", subscribers: "רשימת תפוצה" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
-      <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>
-      {tab === "dashboard" && <Dashboard data={data} onNavigate={setTab} onChanged={load} onMessage={notify} />}
+    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ ...PROGRAM_TABS, preview: "תצוגה מקדימה", surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", access: "הרשאות", results: "תוצאות", voters: "מצביעים", analytics: "נתונים מתקדמים", subscribers: "רשימת תפוצה" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
+      {!isProgramTab(tab) && <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>}
+      {tab === "dashboard" && <Dashboard data={data} onNavigate={go} onChanged={load} onMessage={notify} />}
       {tab === "preview" && data && <PreviewPanel data={data} />}
       {tab === "surveys" && data && <SurveysPanel data={data} onChanged={load} onMessage={notify} />}
       {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={notify} />}
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
       {tab === "archives" && <ArchivesPanel onChanged={load} onMessage={notify} />}
-      {tab === "programs" && <ProgramsPanel />}
+      {programsOpened && <ProgramsPanel tab={isProgramTab(tab) ? tab : null} onTab={go} />}
       {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP עם קובצי שמע. אפשר להעלות תמונת אלבום ידנית או לתת לה להישלף אוטומטית מה־metadata של השירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מכין…" : "יצירת האלבום"}</button></form></AdminSection>{uploadQueue.panel}<AdminSection title="שליפת תמונות מקבצי שמע"><p className="panel-help">שליפת עטיפות אלבום מה־metadata של שירים שכבר עלו אך אין להם תמונה.</p><button className="continue" style={{width:"100%"}} disabled={uploading} onClick={async()=>{setUploading(true);notify("");try{const r=await fetch("/api/admin/extract-covers",{method:"POST"});const d=await r.json();if(r.ok)notify(`נשלפו ${d.extracted} תמונות מתוך ${d.total} שירים ללא תמונה.`);else notify(d.error||"השליפה נכשלה.");}catch{notify("השליפה נכשלה.");}finally{setUploading(false);await load();}}}>שליפת תמונות חסרות</button></AdminSection><div className="album-admin-grid">{albumOrder.map((album, index) => <div key={album.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("album", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === albumOrder.length - 1} onClick={() => moveItem("album", index, 1)} aria-label="הזז למטה">▼</button></div><AlbumEditor album={album} songs={data?.songs.filter((song) => song.albumId === album.id) ?? []} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onFiles={(files) => addFiles(album.id, files)} onUploadCover={uploadAlbumCover} onRemoveCover={removeAlbumCover} onReordered={load} onMessage={notify} /></div>)}</div></>}
       {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{artistOrder.map((item, index) => <div key={item.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("artist", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === artistOrder.length - 1} onClick={() => moveItem("artist", index, 1)} aria-label="הזז למטה">▼</button></div><ArtistRow item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} /></div>)}</div></AdminSection>}
       {tab === "access" && data && <><ManagersPanel managers={data.managers} currentEmail={user.email} onSaved={load} onMessage={notify} /><AdminSection title="הרשאות לקו ההקלטות"><RecorderAccessPanel recorders={data.ivrRecorders || []} onSaved={load} onMessage={notify} /></AdminSection></>}
@@ -186,7 +195,7 @@ function Dashboard({ data, onNavigate, onChanged, onMessage }: { data: Overview 
     const result = await response.json(); if (!response.ok) return onMessage(result.error || "עדכון החסימה נכשל.");
     onMessage(item.blocked ? "החסימה הוסרה." : "המחשב נחסם מהצבעות נוספות בסקר הזה."); await onChanged();
   };
-  return <><div className="dashboard-grid"><button onClick={() => onNavigate("surveys")}><b>{data?.surveys.length ?? 0}</b><span>סקרים</span><small>{data?.activeSurvey ? `פעיל: ${data.activeSurvey.name}` : "בחירה והפעלה"}</small></button><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button></div>{data?.suspicious && data.suspicious.length > 0 && <AdminSection title="הצבעות חשודות"><p className="panel-help">הצבעות שבוצעו מאותו דפדפן/מחשב עם חשבונות שונים. זה לא בהכרח הונאה — יכול להיות מחשב משותף.</p><div className="suspicious-list">{data.suspicious.map((item) => <div key={item.fingerprint} className={`suspicious-row${item.blocked ? " blocked" : ""}`}><span className="suspicious-count">{item.count} הצבעות</span><span className="suspicious-fp">{item.fingerprint.slice(0, 12)}…</span><div className="suspicious-voters">{item.voters.map((v) => <small key={v}>{v}</small>)}</div><button type="button" className={item.blocked ? "" : "danger"} onClick={() => void toggleBlock(item)}>{item.blocked ? "הסרת חסימה" : "חסימת המחשב"}</button></div>)}</div></AdminSection>}</>;
+  return <><div className="dashboard-grid"><button onClick={() => onNavigate("surveys")}><b>{data?.surveys.length ?? 0}</b><span>סקרים</span><small>{data?.activeSurvey ? `פעיל: ${data.activeSurvey.name}` : "בחירה והפעלה"}</small></button><button onClick={() => onNavigate("albums")}><b>{data?.albums.length ?? 0}</b><span>אלבומים</span><small>{data?.songs.length ?? 0} שירים</small></button><button onClick={() => onNavigate("artists")}><b>{data?.artists.length ?? 0}</b><span>זמרים</span><small>לניהול הרשימה</small></button><button onClick={() => onNavigate("settings")}><b>⚙</b><span>הגדרות הסקר</span><small>כמויות, שלבים ופתיחה</small></button><button onClick={() => onNavigate("results")}><b>↗</b><span>תוצאות</span><small>אתר וטלפון יחד</small></button><button onClick={() => onNavigate("prog-programs")}><b>♫</b><span>אתר התוכניות</span><small>תוכניות, הודעות ומאזינים</small></button></div>{data?.suspicious && data.suspicious.length > 0 && <AdminSection title="הצבעות חשודות"><p className="panel-help">הצבעות שבוצעו מאותו דפדפן/מחשב עם חשבונות שונים. זה לא בהכרח הונאה — יכול להיות מחשב משותף.</p><div className="suspicious-list">{data.suspicious.map((item) => <div key={item.fingerprint} className={`suspicious-row${item.blocked ? " blocked" : ""}`}><span className="suspicious-count">{item.count} הצבעות</span><span className="suspicious-fp">{item.fingerprint.slice(0, 12)}…</span><div className="suspicious-voters">{item.voters.map((v) => <small key={v}>{v}</small>)}</div><button type="button" className={item.blocked ? "" : "danger"} onClick={() => void toggleBlock(item)}>{item.blocked ? "הסרת חסימה" : "חסימת המחשב"}</button></div>)}</div></AdminSection>}</>;
 }
 
 function RecorderAccessPanel({ recorders, onSaved, onMessage }: { recorders: string[]; onSaved(): Promise<void> | void; onMessage(message: string): void }) {
@@ -502,25 +511,34 @@ function Results({ data }: { data: Overview["results"] }) {
   return <AdminSection title="תוצאות בזמן אמת"><div className="result-tabs"><button onClick={() => setKind("albums")}>אלבומים</button><button onClick={() => setKind("songs")}>שירים</button><button onClick={() => setKind("artists")}>זמרים</button><div className="export-wrapper" ref={menuRef}><button className="export-results" onClick={() => setMenuOpen(!menuOpen)} disabled={exporting}>{exporting ? "מייצא…" : "הורדת Excel"}</button>{menuOpen && <div className="export-menu"><button onClick={downloadAll}>הורדת כל הנתונים</button><button onClick={downloadCurrent}>הורדת {kindLabel} בלבד</button></div>}</div></div><p className="panel-help">קובץ ‎.xlsx מסודר עם הדירוג והקולות.</p><div className="results-table">{list.map((item, index) => <div key={item.id}><b>{index + 1}</b><span>{item.title || item.name}<small>{item.albumTitle}</small></span><strong>{item.votes} קולות</strong></div>)}</div></AdminSection>;
 }
 
-/** ניהול אתר התוכניות בתוך ניהול הסקר: אותו חשבון, בלי כניסה נוספת. הקוד
-    החד־פעמי מ־/api/program/handoff פותח שם סשן לאותו משתמש. */
-function ProgramsPanel() {
+/** אתר התוכניות, כחלק מאותו דף ניהול: ארבעת החלקים שלו נבחרים מתפריט הצד
+    הזה, והמסגרת נשארת טעונה במעבר בין לשוניות. הכניסה היא באותו חשבון —
+    קוד חד־פעמי מ־/api/program/handoff פותח שם סשן, בלי כניסה נוספת. */
+function ProgramsPanel({ tab, onTab }: { tab: ProgramTab | null; onTab(tab: Tab): void }) {
+  const frame = useRef<HTMLIFrameElement>(null);
   const [src, setSrc] = useState(""), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
-  const [tall, setTall] = useState(false);
-  const open = () => { setError(""); setSrc(""); setAttempt((value) => value + 1); };
+  const first = useRef(tab);
   useEffect(() => {
     let active = true;
     fetch("/api/program/handoff", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
-      .then(async (response) => { const result = await response.json(); if (!response.ok) throw new Error(result.error || "המעבר נכשל."); return result.code as string; })
-      .then((code) => { if (active) setSrc(`${PROGRAM_SITE}admin.html?handoff=${code}&embed=1`); })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "המעבר נכשל."); });
+      .then(async (response) => { const result = await response.json(); if (!response.ok) throw new Error(result.error || "טעינת אתר התוכניות נכשלה."); return result.code as string; })
+      .then((code) => { if (active) setSrc(`${PROGRAM_SITE}admin.html?handoff=${code}&embed=1#${(first.current || "prog-programs").slice(5)}`); })
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "טעינת אתר התוכניות נכשלה."); });
     return () => { active = false; };
   }, [attempt]);
-  return <AdminSection title="ניהול אתר התוכניות">
-    <p className="panel-help">אתר התוכניות מנוהל כאן, באותו חשבון. אפשר גם <a href="/api/program/handoff/to-programs" target="_blank" rel="noopener">לפתוח אותו בחלון מלא</a> — בלי כניסה נוספת.</p>
-    {error && <p className="panel-help" style={{ color: "#ff9a8a" }}>{error} <button type="button" className="toggle" onClick={open}>ניסיון חוזר</button></p>}
-    {src && <div className="programs-frame"><iframe src={src} title="ניהול אתר התוכניות" allow="clipboard-write; microphone" style={{ height: tall ? "calc(100vh - 40px)" : "calc(100vh - 220px)" }} /><button type="button" className="toggle" onClick={() => setTall((value) => !value)}>{tall ? "הקטנה" : "הגדלה"}</button></div>}
-  </AdminSection>;
+  const send = useCallback(() => { if (tab) frame.current?.contentWindow?.postMessage({ type: "rosh-admin-tab", tab: tab.slice(5) }, new URL(PROGRAM_SITE).origin); }, [tab]);
+  useEffect(send, [send]);
+  // מעבר פנימי בתוך אתר התוכניות (למשל "פתיחה" מבדיקת התקינות) מסמן גם את תפריט הצד
+  useEffect(() => {
+    const origin = new URL(PROGRAM_SITE).origin;
+    const receive = (event: MessageEvent) => { if (event.origin === origin && event.data?.type === "rosh-admin-tab-changed" && typeof event.data.tab === "string") { const next = `prog-${event.data.tab}` as Tab; if (TABS.includes(next)) onTab(next); } };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [onTab]);
+  return <div className="programs-frame" hidden={!tab}>
+    {error && <p className="panel-help" style={{ color: "#ff9a8a" }}>{error} <button type="button" className="toggle" onClick={() => { setError(""); setAttempt((value) => value + 1); }}>ניסיון חוזר</button></p>}
+    {src && <iframe ref={frame} src={src} onLoad={send} title="ניהול אתר התוכניות" allow="clipboard-write; microphone" />}
+  </div>;
 }
 
 function ArchivesPanel({ onChanged, onMessage }: { onChanged(): Promise<void> | void; onMessage(message: string): void }) {
