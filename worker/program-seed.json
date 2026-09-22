@@ -1,0 +1,2268 @@
+{
+  "version": 1,
+  "updated": "2026-09-22",
+  "seasons": [
+    {
+      "id": "slater",
+      "title": "קובי בלום וירמי סלייטר"
+    },
+    {
+      "id": "levi",
+      "title": "מיכאל לוי וקובי בלום"
+    },
+    {
+      "id": "trio",
+      "title": "גרסת השלישייה"
+    },
+    {
+      "id": "legacy",
+      "title": "ארכיון קו המכלול"
+    },
+    {
+      "id": "sets",
+      "title": "סטים מיוחדים"
+    }
+  ],
+  "episodes": [
+    {
+      "id": "drive-1pLDdIAnps1hnxOBHaTSccVVuVvjGCtEg",
+      "slug": "episode-06",
+      "number": 6,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 6",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1pLDdIAnps1hnxOBHaTSccVVuVvjGCtEg/view"
+        }
+      ],
+      "sourceFileBytes": 88568631
+    },
+    {
+      "id": "drive-1-VSyXaUiuQzRmnO8Gqxs4BOCQLUhp9Eu",
+      "slug": "episode-03",
+      "number": 3,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 3",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1-VSyXaUiuQzRmnO8Gqxs4BOCQLUhp9Eu/view"
+        }
+      ],
+      "sourceFileBytes": 72300307
+    },
+    {
+      "id": "drive-1oXjnKTWU_qsEMc7VRYPYPfpmLZQkexuV",
+      "slug": "episode-49",
+      "number": 49,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 49",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1oXjnKTWU_qsEMc7VRYPYPfpmLZQkexuV/view"
+        }
+      ],
+      "sourceFileBytes": 35535260
+    },
+    {
+      "id": "drive-1KAJt8aH9hFhKogDJ_Gr8QHSOLZJp0p4r",
+      "slug": "episode-52",
+      "number": 52,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 52",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1KAJt8aH9hFhKogDJ_Gr8QHSOLZJp0p4r/view"
+        }
+      ],
+      "sourceFileBytes": 82684248
+    },
+    {
+      "id": "drive-1NIhxFFZ9rwndR8VHRPlyzW3RC131vqOm",
+      "slug": "episode-51",
+      "number": 51,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 51",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1NIhxFFZ9rwndR8VHRPlyzW3RC131vqOm/view"
+        }
+      ],
+      "sourceFileBytes": 44270782
+    },
+    {
+      "id": "drive-1pWwC1PurKheA-hOtK7KRsFyVlk2aNz2c",
+      "slug": "episode-46",
+      "number": 46,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 46",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1pWwC1PurKheA-hOtK7KRsFyVlk2aNz2c/view"
+        }
+      ],
+      "sourceFileBytes": 52384570
+    },
+    {
+      "id": "drive-1-qg2kmMBnuqavXk0gMcVcPEreK95xOaL",
+      "slug": "episode-37",
+      "number": 37,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 37",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1-qg2kmMBnuqavXk0gMcVcPEreK95xOaL/view"
+        }
+      ],
+      "sourceFileBytes": 78184749
+    },
+    {
+      "id": "drive-1QU2CdkJxRdJ1dZ9RvidKOFSkVexd7JBR",
+      "slug": "episode-19",
+      "number": 19,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 19",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1QU2CdkJxRdJ1dZ9RvidKOFSkVexd7JBR/view"
+        }
+      ],
+      "sourceFileBytes": 72794786
+    },
+    {
+      "id": "drive-1KzaYp_Ul9IX0B9zHlDA-x5zyx4_9_bp-",
+      "slug": "episode-15",
+      "number": 15,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 15",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1KzaYp_Ul9IX0B9zHlDA-x5zyx4_9_bp-/view"
+        }
+      ],
+      "sourceFileBytes": 147864203
+    },
+    {
+      "id": "drive-1U_QjkT4UaUDsbCfs7kb-lAsmPecE5Jcl",
+      "slug": "episode-10",
+      "number": 10,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 10",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1U_QjkT4UaUDsbCfs7kb-lAsmPecE5Jcl/view"
+        }
+      ],
+      "sourceFileBytes": 103236281
+    },
+    {
+      "id": "drive-1_3IwDr7JFnViGFXZoj99OP291U4fjXdW",
+      "slug": "episode-09",
+      "number": 9,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 9",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1_3IwDr7JFnViGFXZoj99OP291U4fjXdW/view"
+        }
+      ],
+      "sourceFileBytes": 161158576
+    },
+    {
+      "id": "drive-1N0o6N5CAf7b897pOqa3ynpOIuMvzjS1E",
+      "slug": "episode-53",
+      "number": 53,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 53",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1N0o6N5CAf7b897pOqa3ynpOIuMvzjS1E/view"
+        }
+      ],
+      "sourceFileBytes": 44986141
+    },
+    {
+      "id": "drive-1PahFsGyQdEDc3XaDnCXU3Q-2LMZxteTC",
+      "slug": "episode-50",
+      "number": 50,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 50",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1PahFsGyQdEDc3XaDnCXU3Q-2LMZxteTC/view"
+        }
+      ],
+      "sourceFileBytes": 55204422
+    },
+    {
+      "id": "drive-1xfuWRjM3tnsjs27nUIjq0RkjvUe7Mje6",
+      "slug": "episode-48",
+      "number": 48,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 48",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1xfuWRjM3tnsjs27nUIjq0RkjvUe7Mje6/view"
+        }
+      ],
+      "sourceFileBytes": 71627204
+    },
+    {
+      "id": "drive-13v3MG0TcX44tIEXee_Ft7_bOXEk9UuFL",
+      "slug": "episode-47",
+      "number": 47,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 47",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/13v3MG0TcX44tIEXee_Ft7_bOXEk9UuFL/view"
+        }
+      ],
+      "sourceFileBytes": 54783903
+    },
+    {
+      "id": "drive-1HG5x6X3n2H96Qwcx6NhO6w_fb_NMMxce",
+      "slug": "episode-45",
+      "number": 45,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 45",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1HG5x6X3n2H96Qwcx6NhO6w_fb_NMMxce/view"
+        }
+      ],
+      "sourceFileBytes": 214279840
+    },
+    {
+      "id": "drive-168LT-m_0YqRPRgzkNaSPLlFBVEKTA9v6",
+      "slug": "episode-44",
+      "number": 44,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 44",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/168LT-m_0YqRPRgzkNaSPLlFBVEKTA9v6/view"
+        }
+      ],
+      "sourceFileBytes": 41795876
+    },
+    {
+      "id": "drive-1GKnyMs2D1RQTCyNY2B8SZMlp3m4zBX69",
+      "slug": "episode-43",
+      "number": 43,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 43",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1GKnyMs2D1RQTCyNY2B8SZMlp3m4zBX69/view"
+        }
+      ],
+      "sourceFileBytes": 20434340
+    },
+    {
+      "id": "drive-1V7sER2-Mqkwm1ojlha5Juv3TNapO6FcJ",
+      "slug": "episode-42",
+      "number": 42,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 42",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1V7sER2-Mqkwm1ojlha5Juv3TNapO6FcJ/view"
+        }
+      ],
+      "sourceFileBytes": 10929147
+    },
+    {
+      "id": "drive-1Y7QlQIYtoksmgEPJLubJsJljcVHVPav-",
+      "slug": "episode-41",
+      "number": 41,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 41",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1Y7QlQIYtoksmgEPJLubJsJljcVHVPav-/view"
+        }
+      ],
+      "sourceFileBytes": 68106498
+    },
+    {
+      "id": "drive-1CtYIPsjQM9-EFIuFAc5WSUljIQmca01X",
+      "slug": "episode-40",
+      "number": 40,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 40",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1CtYIPsjQM9-EFIuFAc5WSUljIQmca01X/view"
+        }
+      ],
+      "sourceFileBytes": 5991675
+    },
+    {
+      "id": "drive-1zplLV3iNOc35Zaz8RmmTMGYGw40RQFuq",
+      "slug": "episode-39",
+      "number": 39,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 39",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1zplLV3iNOc35Zaz8RmmTMGYGw40RQFuq/view"
+        }
+      ],
+      "sourceFileBytes": 18445124
+    },
+    {
+      "id": "drive-1IVNXcfZ5tp6TDvBBsju2Ia0GbigXmaJ7",
+      "slug": "episode-38",
+      "number": 38,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 38",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1IVNXcfZ5tp6TDvBBsju2Ia0GbigXmaJ7/view"
+        }
+      ],
+      "sourceFileBytes": 8284443
+    },
+    {
+      "id": "drive-1LUr7ZIGJXf2HtISDfy74iV69NY1sb2rl",
+      "slug": "episode-35",
+      "number": 35,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 35",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1LUr7ZIGJXf2HtISDfy74iV69NY1sb2rl/view"
+        }
+      ],
+      "sourceFileBytes": 3652539
+    },
+    {
+      "id": "drive-14B8RKhNqVgcODO_p5wv5hIGY-WDtdHxF",
+      "slug": "episode-34",
+      "number": 34,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 34",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/14B8RKhNqVgcODO_p5wv5hIGY-WDtdHxF/view"
+        }
+      ],
+      "sourceFileBytes": 10931883
+    },
+    {
+      "id": "drive-1UHHsiKDktefknZXbkcLbQND-zIZqAbS_",
+      "slug": "episode-33",
+      "number": 33,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 33",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1UHHsiKDktefknZXbkcLbQND-zIZqAbS_/view"
+        }
+      ],
+      "sourceFileBytes": 9420171
+    },
+    {
+      "id": "drive-1PXy_7Vxly9FfqxPX3gEjbojGiAWovliD",
+      "slug": "episode-31",
+      "number": 31,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 31",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1PXy_7Vxly9FfqxPX3gEjbojGiAWovliD/view"
+        }
+      ],
+      "sourceFileBytes": 55826463
+    },
+    {
+      "id": "drive-1Tiu_BQUsmol6NYvmyAdiVqMS6z7dMsAM",
+      "slug": "episode-30",
+      "number": 30,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 30",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1Tiu_BQUsmol6NYvmyAdiVqMS6z7dMsAM/view"
+        }
+      ],
+      "sourceFileBytes": 10948155
+    },
+    {
+      "id": "drive-10YpUhWFDOzIdBT0cOorHvhd2CNVUeeV7",
+      "slug": "episode-28",
+      "number": 28,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 28",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/10YpUhWFDOzIdBT0cOorHvhd2CNVUeeV7/view"
+        }
+      ],
+      "sourceFileBytes": 6761355
+    },
+    {
+      "id": "drive-1Yq_NelTblMbgNLUNGddmM7HP7kZwodHF",
+      "slug": "episode-26",
+      "number": 26,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 26",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1Yq_NelTblMbgNLUNGddmM7HP7kZwodHF/view"
+        }
+      ],
+      "sourceFileBytes": 205389743
+    },
+    {
+      "id": "drive-1l-cU6Kj8rMejOTPsi3ir9osDG60zTcVK",
+      "slug": "episode-24",
+      "number": 24,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 24",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1l-cU6Kj8rMejOTPsi3ir9osDG60zTcVK/view"
+        }
+      ],
+      "sourceFileBytes": 10903515
+    },
+    {
+      "id": "drive-1oXMXtNDT6Cj87cD3hPsX_5JKt3m7OBuN",
+      "slug": "episode-23",
+      "number": 23,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 23",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1oXMXtNDT6Cj87cD3hPsX_5JKt3m7OBuN/view"
+        }
+      ],
+      "sourceFileBytes": 12356763
+    },
+    {
+      "id": "drive-1wkSXo9zToB1iKYvsXLcDQ4NyxAtiEEEJ",
+      "slug": "episode-22",
+      "number": 22,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 22",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1wkSXo9zToB1iKYvsXLcDQ4NyxAtiEEEJ/view"
+        }
+      ],
+      "sourceFileBytes": 40535391
+    },
+    {
+      "id": "drive-1J0F5rW8nCPooYrUSELmjp9bv_eF6jF31",
+      "slug": "episode-20",
+      "number": 20,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 20",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1J0F5rW8nCPooYrUSELmjp9bv_eF6jF31/view"
+        }
+      ],
+      "sourceFileBytes": 52586948
+    },
+    {
+      "id": "drive-1adoM_jtFClrw0dNCKaKe6wbQfS9hwNp4",
+      "slug": "episode-01",
+      "number": 1,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 1",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1adoM_jtFClrw0dNCKaKe6wbQfS9hwNp4/view"
+        }
+      ],
+      "sourceFileBytes": 29024069
+    },
+    {
+      "id": "drive-1UP2JCC7vBqwLsDnrYWU0R_WcSHwCLdgj",
+      "slug": "episode-02",
+      "number": 2,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 2",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1UP2JCC7vBqwLsDnrYWU0R_WcSHwCLdgj/view"
+        }
+      ],
+      "sourceFileBytes": 23575951
+    },
+    {
+      "id": "drive-1Esujj8EfrWRqm-ZMbISeDvsHqe0NbrdU",
+      "slug": "episode-04",
+      "number": 4,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 4",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1Esujj8EfrWRqm-ZMbISeDvsHqe0NbrdU/view"
+        }
+      ],
+      "sourceFileBytes": 126507289
+    },
+    {
+      "id": "drive-1LNjp5MENmFUW4pxwSgcNJuqIFrKN-3Q-",
+      "slug": "episode-05",
+      "number": 5,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 5",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1LNjp5MENmFUW4pxwSgcNJuqIFrKN-3Q-/view"
+        }
+      ],
+      "sourceFileBytes": 80182927
+    },
+    {
+      "id": "drive-15hIc-OFRCnVPLUEkjX0iURU3TG1zirsZ",
+      "slug": "episode-07",
+      "number": 7,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 7",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/15hIc-OFRCnVPLUEkjX0iURU3TG1zirsZ/view"
+        }
+      ],
+      "sourceFileBytes": 69757039
+    },
+    {
+      "id": "drive-1qVu3iTBU5rqfSD0U4TOJLALGGAD4a1kb",
+      "slug": "episode-08",
+      "number": 8,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 8",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1qVu3iTBU5rqfSD0U4TOJLALGGAD4a1kb/view"
+        }
+      ],
+      "sourceFileBytes": 22818223
+    },
+    {
+      "id": "drive-17MMRtcZto4op0nmKsJcI3qXzm_Xiv1wK",
+      "slug": "episode-12",
+      "number": 12,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 12",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/17MMRtcZto4op0nmKsJcI3qXzm_Xiv1wK/view"
+        }
+      ],
+      "sourceFileBytes": 18433999
+    },
+    {
+      "id": "drive-1MvhKCnHOy0FOwNlbWmi7LZOQbPlXb5RQ",
+      "slug": "episode-13",
+      "number": 13,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 13",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1MvhKCnHOy0FOwNlbWmi7LZOQbPlXb5RQ/view"
+        }
+      ],
+      "sourceFileBytes": 199993908
+    },
+    {
+      "id": "drive-13BnI5mD4XIfcjMH0yZMH__lGWLpHwnhI",
+      "slug": "episode-14",
+      "number": 14,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 14",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/13BnI5mD4XIfcjMH0yZMH__lGWLpHwnhI/view"
+        }
+      ],
+      "sourceFileBytes": 132788788
+    },
+    {
+      "id": "drive-1xmuGULlfIo-38GU5pRlnFAM9xZ9OOYja",
+      "slug": "episode-16",
+      "number": 16,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 16",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1xmuGULlfIo-38GU5pRlnFAM9xZ9OOYja/view"
+        }
+      ],
+      "sourceFileBytes": 5923850
+    },
+    {
+      "id": "drive-11EHU6hCJKlIH79ESaiSma2bXETFgDMwp",
+      "slug": "episode-17",
+      "number": 17,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 17",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/11EHU6hCJKlIH79ESaiSma2bXETFgDMwp/view"
+        }
+      ],
+      "sourceFileBytes": 9711916
+    },
+    {
+      "id": "drive-17ueBH_c82N8QYRItKE-Dw_rD_ou33pfh",
+      "slug": "episode-18",
+      "number": 18,
+      "season": "legacy",
+      "title": "ארכיון קו המכלול — פרק 18",
+      "date": "",
+      "description": "הקלטה משוחזרת מתקופת קו המכלול. איכות ההקלטות משתנה; תאריך השידור ושם הפרק לא נמסרו בארכיון.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "ארכיון קו המכלול"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/17ueBH_c82N8QYRItKE-Dw_rD_ou33pfh/view"
+        }
+      ],
+      "sourceFileBytes": 116504471
+    },
+    {
+      "id": "drive-1R22dAeDoihX2BoJEnGagkXTZmpIcymGm",
+      "slug": "episode-55",
+      "number": 55,
+      "season": "levi",
+      "title": "דואט ומדינה",
+      "date": "",
+      "description": "מתוך ארכיון תוכנית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1R22dAeDoihX2BoJEnGagkXTZmpIcymGm/view"
+        }
+      ],
+      "sourceFileBytes": 236410145
+    },
+    {
+      "id": "drive-1DW9IYi5U2g0jIKBYQajwMR15MX4vxpA0",
+      "slug": "episode-56",
+      "number": 56,
+      "season": "levi",
+      "title": "דור הפלייליסט",
+      "date": "",
+      "description": "מתוך ארכיון תוכנית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1DW9IYi5U2g0jIKBYQajwMR15MX4vxpA0/view"
+        }
+      ],
+      "sourceFileBytes": 125001935
+    },
+    {
+      "id": "drive-1fKJ0jPlTNJ-8-rK6gRhr0GmjrAwizzMY",
+      "slug": "episode-57",
+      "number": 57,
+      "season": "levi",
+      "title": "אני ולא אחר",
+      "date": "",
+      "description": "מתוך ארכיון תוכנית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1fKJ0jPlTNJ-8-rK6gRhr0GmjrAwizzMY/view"
+        }
+      ],
+      "sourceFileBytes": 96411127
+    },
+    {
+      "id": "drive-182Wyof8-CqrcMVl1HPfzPuquxm8bze9K",
+      "slug": "episode-62",
+      "number": 62,
+      "season": "levi",
+      "title": "בסימן הידברות החלק השלישי",
+      "date": "2025-08-18",
+      "description": "תוכנית ראש בראש פרק 62 בסימן הידברות החלק השלישי.mp3 <https://drive.google.com/file/d/1OUYvEfv6zmjQ2nhq3D27TedHoYR6GrqD/view?usp=drive_web> תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, ספיישל בין הזמנים חודש אב, פרק מס' 62: בסימן הידברות החלק השלישי, זמין עכשיו להאזנה! ספיישל מיוחד לקראת גמר עונת 'הקול החדש', הפייבוריטים של התחרות אלחנן ענבל ויהודה בורן מתארחים לראיונות בלעדיים לקראת הגמר הגדול שיתקיים במוצ''ש הקרוב. מה דעתם על השופטים? על המתמודדים שמולם? האם באמת יש גזענות בעונה? ומה התוכניות ליום שאחרי הגמר, אל תפספסו!סיכום האלבומים והלהיטים הרבים שיצאו בשבוע החולף, ממוטי שטיינמץ ועד אליה והב, מאברהם מרדכי שווארץ ועד שי וינר!! וגם, מיהו שדר הרדיו שהצליח להוציא את מיכאל לוי מהכלים? מה עונים לאלה שטוענים שהמוזיקה של היום איכותית לא פחות מפעם?? נושא פוליטי: אחת ולתמיד! פותחים את כל הקלפים על יו''ר שס אריה דרעי מה טוב בו יותר ומה קצת פחות, פאנל סוער ואמוציונאלי במיוחד עם נציגים מכל הצדדים, חובת האזנה!! חלק שלישי ואחרון במבחן המוזיקאלי והאקטואלי, מי ינצח הפעם, ובכמה? ועוד אייטמים רבים!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/182Wyof8-CqrcMVl1HPfzPuquxm8bze9K/view"
+        }
+      ],
+      "sourceFileBytes": 80883553
+    },
+    {
+      "id": "drive-1i7sD0TJPpGZeyODR5_TM8UdiKSIrfPow",
+      "slug": "episode-77",
+      "number": 77,
+      "season": "levi",
+      "title": "בואו לדבר איתי, ספיישל פורים",
+      "date": "2026-02-28",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 77: בואו לדבר איתי, ספיישל פורים, עולה לאוויר כעת! פרק מיוחד ושונה לרגל שבוע חג הפורים, תמיד רציתם להכיר את מגישי התוכנית באמת? עכשיו הגיע הזמן! שדר הרדיו דודי זינגר משתלט על ההגשה בתוכנית ללא ידיעת והסכמת המגישים ומכריח אותם לענות על כל שאלה שישאל! אין עריכות ואין השמטות, אל תפספסו! ראיון מרתק ונדיר עם מגישי התוכנית, קובי בלום ומיכאל לוי כפי שלא שמעתם מעולם!כל זאת ועוד אייטמים רבים בפרק מספר 77: בואו לדבר איתי, ספיישל פורים שעולה לאוויר כעת! הודעה חשובה! הפרק הוקלט לפני פרוץ מלחמת 'שאגת הארי', ולכן האווירה בפרק היא קלילה וזורמת, קחו זאת לצומת ליבכם.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1i7sD0TJPpGZeyODR5_TM8UdiKSIrfPow/view"
+        }
+      ],
+      "sourceFileBytes": 221470851
+    },
+    {
+      "id": "drive-1Ls1b4JNoGKZOeF2qmfylx_d9U-s1hlvg",
+      "slug": "episode-78",
+      "number": 78,
+      "season": "levi",
+      "title": "דור הולך ודור בא",
+      "date": "2026-03-07",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 78: דור הולך ודור בא, עולה לאוויר במוצ''ש הקרוב!לאחר יותר משלוש שנות הגשה, מקים ומייסד התוכנית המגיש מיכאל לוי מסיים את דרכו כמגיש בתוכנית.ספיישל אייטמים וכתבות לסיכום שנות ההגשה שלו, מהפרק הראשון ועד היום:השירים שתמיד יזכירו לכם את התוכנית, סיכום חצי שנה מוזיקאלית, המאבק באלו שניסו לסגור את התוכנית, טורי דעה ממאזיננו, מהי דעת הבינה מלאכותית על סיום ההגשה? ועוד.מי שחשב שעקר - בעצם נטע!קובי בלום ואבישי לביא נפרדים ממיכאל לוי כמגיש ומסכמים הכל בשידור חי.וכמובן: מה יהיה עתיד התוכנית? מי יגישו אותה החל מהיום? מגיש חדש או מגישים חדשים? תוכנית זוגית או פאנל קבוע?טקס העברת שרביט ההגשה ממיכאל לוי לשלושת המגישים החדשים!כל זאת ועוד אייטמים רבים בפרק מספר 78: דור הולך ודור בא, שעולה לאוויר במוצ''ש הקרוב!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1Ls1b4JNoGKZOeF2qmfylx_d9U-s1hlvg/view"
+        }
+      ],
+      "sourceFileBytes": 180451130
+    },
+    {
+      "id": "drive-1W1PJnzhJ7IiEd7ESYnSv4R8gyxInEjNz",
+      "slug": "episode-76",
+      "number": 76,
+      "season": "levi",
+      "title": "נוטע VS שלום",
+      "date": "2026-02-14",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 76: נוטע VS שלום, עולה לאוויר! נושא מוזיקאלי: בעקבות פרסום כתבת ''מלחמת המפיקים'' בעיתון 'המקום', עורך הכתבה העיתונאי יוסי שטארק בראיון פתוח לתוכנית על מסע הרדיפה והאיומים נגדו על שהעז לשטוח את הכביסה המלוכלכת ברבים! החרמת זמרים, שוחד כספי, ביטול המופעים בחנוכה, פרשיית נותי ליברמן, הכוורת של נוטע לוין, גל העזיבות ממשרדו של שלום וגשל ועוד! ''אני לא יכול לשרוף את כל חיי בשביל כתבה אחת'', עדות נדירה ומטלטלת! הבהרה! אין בחלק זה כל הוצאת שם רע ורכילות, דיברנו בעדינות רבה ולא נגענו במלא נושאים ושמות בשביל לשמור על גבולות אלו קלה כבחמורה.נושא אקטואלי: יעקב שוואקי משנה את פני המוסיקה עם פרויקט עוצמתי וגרנדיוזי! ארי סאמט מנסה את מזלו באלבום טראקים קיצוניים, ואיצ'ה מאיר הלפגוט באלבום לייב חדש. הסינגלים החדשים של אבי אילסון, אלחנן אלחדד, יאיר אלייצור, איציק ויינגרטן, ארהלה סאמט, בני פרידמן, זאנוויל ויינברגר, חיים שלמה מעייאס, יוסי פריד, ליפא שמעלצר, מוישי רוט, מרדכי שפירא, עמירן דביר, פיני איינהורן, שמילי אונגר, שמוליק סוכות ועוד!נושא פוליטי: האם באמת ישנם גורמים זרים שעומדים מאחורי המחאות הקיצוניות כנגד הגיוס? ומי אשם בשיסוי הציבור בגדולי הדור ובנבחרי הציבור?? וגם, האם ערוץ 14 הוא ערוץ אובייקטיבי או שהוא בגדר ''ערוץ המשטר''??? דיון מרתק.כל זאת ועוד אייטמים רבים בפרק מספר 76: נוטע VS שלום שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1W1PJnzhJ7IiEd7ESYnSv4R8gyxInEjNz/view"
+        }
+      ],
+      "sourceFileBytes": 224850978
+    },
+    {
+      "id": "drive-1Ar7uG1H0Ki1rxEbGuNNEW85gO20TeCa1",
+      "slug": "episode-75",
+      "number": 75,
+      "season": "levi",
+      "title": "השני והשלישי",
+      "date": "2026-01-31",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 75: השני והשלישי, עולה כעת לאוויר! נושא מוזיקאלי: דיון מעמיק עם פאנל אורחים בעקבות אלבומו החדש של חנן בן ארי ''לא המשוגע היחידי'', מהם גבולות המוזיקה החרדית? מה נחשב לחציית קו? מה מותר ומה אסור? וכמובן מה לגבי חנן בן ארי עצמו ושיריו הרבים? וגם, העימות שהתפתח בין מגיש התוכנית מיכאל לוי לפאנל האורחים בדיון, מי המשוגע היחידי שעל הקו?נושא אקטואלי: יידל ורדיגר ונמואל הרוש בשילוב מנצח! אבי אילסון וקובי ברומר, גרשי אורי, יודי ביאלסטוצקי, קאבר שנוי במחלוקת של מידד טסה ועוד. וגם, מה קורה כשמגיש התוכנית קובי בלום מתחיל לדבר על דברים שפשוט לא עוברים שידור??נושא פוליטי: האם הגיע הזמן למפלגה חרדית חדשה? מה היא תצטרך לעשות כדי לעבור את אחוז החסימה? ומה יצביעו מגישי התוכנית בבחירות הקרובות??כל זאת ועוד אייטמים רבים בפרק מספר 75: השני והשלישי, שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1Ar7uG1H0Ki1rxEbGuNNEW85gO20TeCa1/view"
+        }
+      ],
+      "sourceFileBytes": 287162995
+    },
+    {
+      "id": "drive-1wNb6ixsK70i9wwxZvQVaZkTQRvuqV1ik",
+      "slug": "episode-74",
+      "number": 74,
+      "season": "levi",
+      "title": "כשקובי נוטש את השידור",
+      "date": "2026-01-17",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 74: כשקובי נוטש את השידור, עולה כעת לאוויר! נושא מוזיקאלי: שדר הרדיו דודי זינגר מתארח לדיון מוזיקאלי על תעשיית הרגש במוזיקה החרדית, סיפורי חיים אישיים, שירי כאב ורגש ועוד, היכן עובר הגבול בין רגש לדרמה? עד כמה משברים אישיים משפיעים על היצירה המוזיקאלית והמסתעף. וגם, האם תם זמנה של המוסיקה החסידית? והאם הגיע עת המוסיקה האלטרנטיבית? הצביעו לסקר בקו התוכן בשלוחה 8.נושא אקטואלי: מהאלבום החדש של ביני לנדאו ועד לסדרת המחרוזות של יעקב שוואקי, מהם החומרים הטובים של התקופה האחרונה ומהם הפחות? וגם, מיהו המפיק המוזיקאלי שהחליט להקים משרד לבריאות הנפש במגזר החרדי?? נושא פוליטי: דיון סוער על כלל הנושאים הבוערים שעל סדר היום, אירוע דריסת בחור הישיבה בהפגנת הקיצוניים בירושלים, סערת אריה דרעי, חוק הגיוס המתגבש ועוד.במהלך הדיון התלהט ויכוח סוער בין מגישי התוכנית מיכאל לוי וקובי בלום, שהגיע בשיאו לנטישת השידור בחמת זעם על ידי המגיש קובי בלום. קובי בלום, כפי שלא שמעתם מעולם!כל זאת ועוד אייטמים רבים בפרק מספר 74: כשקובי נוטש את השידור, שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1wNb6ixsK70i9wwxZvQVaZkTQRvuqV1ik/view"
+        }
+      ],
+      "sourceFileBytes": 265030654
+    },
+    {
+      "id": "drive-1_USXJngQnB7oz8UhRPboea-TM8hxndy_",
+      "slug": "episode-73",
+      "number": 73,
+      "season": "levi",
+      "title": "רפורמה ואבולוציה",
+      "date": "2026-01-03",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 73: רפורמה ואבולוציה, עולה כעת לאוויר! נושא מוזיקאלי: אבולוציית המוזיקה החרדית, מה גורם לשינויים במוזיקה? ירידת הדורות או דווקא עליית הדורות? איך אפשר לעצור אם בכלל את השינויים?? והיכן נהיה בעוד כמה שנים??? פאנל מוזיקאים מרתק. נושא אקטואלי: מהאלבום החדש של שמוליק קליין ועד סדרת המחרוזות של יעקב שוואקי, מהם החומרים הטובים של התקופה האחרונה ומהם הפחות? וגם, מה גרם לפרויקט 'ממתק לשבת' להפוך ל'חמוצים לשבת'? נושא פוליטי: יו''ר ועדת חוקה חוק ומשפט מתארח לראיון סוער ומרתק, מדבר על הכל ומספק שלל כותרות! מסרב להכיר בנשיא העליון יצחק עמית, מודיע כי לא יציית לפסיקות בג''ץ, יוצא נגד חוק ביסמוט, מסרב להתייחס למצב הבעייתי בו נמצא המגזר שלו, ומדבר גם על עולם המוזיקה החרדית והזמרים האהובים עליו. כל זאת ועוד אייטמים רבים בפרק מספר 73: רפורמה ואבולוציה, שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1_USXJngQnB7oz8UhRPboea-TM8hxndy_/view"
+        }
+      ],
+      "sourceFileBytes": 213174210
+    },
+    {
+      "id": "drive-1QMsVWKkYcgOi1izBUEO4RZ3IC0uzSUqJ",
+      "slug": "episode-72",
+      "number": 72,
+      "season": "levi",
+      "title": "שירו לנסיך",
+      "date": "2025-12-17",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 72: שירו לנסיך, תוצאות מצעד הנסיך של המוזיקה עולה כעת לאוויר! לאחר שבועות הצבעה מותחים עם שיאי הצבעה גבוהים במיוחד ב''ה, תוכנית ראש בראש גאה להציג: משדר תוצאות 'הנסיך של המוזיקה', שירי להיטי ואלבומי נסיך המוזיקה היהודית יידל ורדיגר מתחרים על המקומות הראשונים במצעד הבלתי נשכח!מהו שירו הטוב ביותר של יידל לדעת מאזיני תוכנית ראש בראש, שירו למלך? שמעו ותחי נפשכם? או שיר המעלות? מהו אלבומו הטוב ביותר של יידל לדעת מאזיני תוכנית ראש בראש, א ורדיגר ייד? שירו למלך? או יידל 4? משדר חנוכה מותח ומרתק לכבוד הנסיך של המוזיקה יידל ורדיגר! פאנל הגשה מורחב. וגם, חוגגים שנה בהגשת התוכנית למגיש קובי בלום, כתבת סיקור מרתקת, ''קובי בלום, מאז ועד היום'' כל הדרך של קובי בהגשה מתחרות מגיש חדש לפני שנה ועד היום!כל זאת ועוד אייטמים רבים בפרק מספר 72: שירו לנסיך, תוצאות מצעד הנסיך של המוזיקה שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1QMsVWKkYcgOi1izBUEO4RZ3IC0uzSUqJ/view"
+        }
+      ],
+      "sourceFileBytes": 297993321
+    },
+    {
+      "id": "drive-1yD8tpcPJ9NR4-fkweCjstxnSoNBQaGWS",
+      "slug": "episode-71",
+      "number": 71,
+      "season": "levi",
+      "title": "קדם מצעד הנסיך של המוזיקה",
+      "date": "2025-12-06",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 71: קדם מצעד הנסיך של המוזיקה עולה כעת לאוויר! תוכנית ראש בראש גאה להציג: מצעד ''הנסיך של המוזיקה''! כל הלהיטים והאלבומים הגדולים של נסיך המוזיקה היהודית יידל ורדיגר צועדים כל הדרך אל משדר התוצאות שיישלח אליכם אי''ה במוצ''ש חנוכה! מהאלבום שירו למלך ועד האלבום לב אחד, מהאלבום יידל 4 ועד האלבום הוא ולא אחר. כל החומרים הטובים ביותר במוזיקה במצעד אחד! מה הם השירים המתמודדים? כיצד תתנהל ההצבעה? ומה מיוחד ביידל ורדיגר יותר מבכל אחד אחר?? על כך ועוד בתוכנית שלפניכם.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות",
+        "מצעד"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1yD8tpcPJ9NR4-fkweCjstxnSoNBQaGWS/view"
+        }
+      ],
+      "sourceFileBytes": 18484967
+    },
+    {
+      "id": "drive-1nNBYcQ0rLmpSsVB6zc-6ggihQjsCd8Nk",
+      "slug": "episode-70",
+      "number": 70,
+      "season": "levi",
+      "title": "ספיישל שיחות עם מאזינים",
+      "date": "2025-11-29",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 70: ספיישל שיחות עם מאזינים עולה כעת לאוויר! נושא מוזיקאלי: מתמודד עונת הראליטי ''הקול החדש'' ירמי סלייטר מתארח לשיחה חשופה ומרתקת על ההתמודדות שלו בעונה ומספר על הכל בלי פילטרים! כיצד צוות ההפקה גרמו לו פעם אחר פעם להפסיד ולא לעלות לשלב הבא, הזלזול המחפיר בתוכנית ובציבור הצופים, והאם בכלל שייך להשוות את התחרות הזו לתחרויות ראליטי מקבילות? שיחה שאסור לכם לפספס! ספיישל שיחות עם מאזינים! לראשונה מאזיני תוכנית ראש בראש עולים לשידור בזה אחר זה ושואלים את המגישים את כל השאלות שתמיד רציתם לשאול! אחת ולתמיד, מה יש למיכאל לוי נגד שמוליק סוכות? ומה יש לו בעד שולי רנד?? מה המתכון ללהיט מנצח? איום הבינה המלאכותית על תעשיית המוזיקה, סערת הפצ''רית, האלימות שמתפשטת בשולי החברה החרדית ועוד, את זה אסור לכם להחמיץ! כל זאת ועוד אייטמים רבים בפרק מספר 70: ספיישל שיחות עם מאזינים שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1nNBYcQ0rLmpSsVB6zc-6ggihQjsCd8Nk/view"
+        }
+      ],
+      "sourceFileBytes": 74102718
+    },
+    {
+      "id": "drive-1zvkOgEfMXRxr1KCoWqFphEcWBRpUxAbr",
+      "slug": "episode-69",
+      "number": 69,
+      "season": "levi",
+      "title": "יש תפנית, אבל",
+      "date": "2025-11-15",
+      "description": "בדיקה חשובה! קיבלתם את התוכנית? מתכוונים להאזין לה בשבועיים הקרובים? הגיבו להודעה זו או שלחו הודעה בחזרה עם לייק (👍), תודה על שיתוף הפעולה והאזנה ערבה! תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 69: ''יש תפנית, אבל'' עולה כעת לאוויר! נושא מוזיקאלי: מה מותר לזמרים חסידיים שלחבריהם הליטאיים אסור? איזה כתיבה בשירים בחיים לא תעבור שידור בעברית אבל בשפת האידיש דווקא כן?? והאם יש סטנדרטים שונים בתעשיית המוזיקה החרדית??? דיון מעמיק.מוזיקה חייה או מוזיקת די ג'יי? האם ישנה שאלה בכלל?? ולהיכן פנינו מועדות בדילמה הזו? סקירה מקיפה של האלבומים והסינגלים החדשים, מנפתלי קמפה ועד אהרון רזאל, משרולי גרין ועד שמוליק סוכות. האם ישנו שיר באלבום החדש של סוכות שעובר את המדד המוזיקאלי, או שבכלל מדובר באלבום נהדר? האם מישהו יצליח הפעם להשתיק את המגישים מלומר את דעתם על הזמר ופועליו?? ולמה דווקא ארגון זק''א הוא זה שמממן את המופע בארנה??? מה מותר לנוטע לוין שאסור לשלום וגשל?? נושא פוליטי: כל הנושאים החמים על השולחן! סערת הפצ''רית, מלחמת הפרגוד - משפחה, קמפיין ההשחרה והשנאה כנגר יו''ר תנועת שס הרב אריה דרעי ועוד, דיון סוער ורווי אמוציות שלא היה כמותו מזה תקופה ארוכה.כל זאת ועוד אייטמים רבים בפרק מספר 69: ''יש תפנית, אבל'' שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1zvkOgEfMXRxr1KCoWqFphEcWBRpUxAbr/view"
+        }
+      ],
+      "sourceFileBytes": 63585379
+    },
+    {
+      "id": "drive-183xrfGQNn_hZc9wdbMBac1R_acR1w_PK",
+      "slug": "episode-68",
+      "number": 68,
+      "season": "levi",
+      "title": "חורף או קיץ",
+      "date": "2025-11-01",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 68: חורף או קיץ, עולה כעת לאוויר! והפעם, אחת ולתמיד, מה עדיף? חורף או קיץ??באיזו עונה יוצאת המוסיקה הטובה? מוסיקה שקטה או מוסיקה קצבית?? סינגלים או אלבומים?? איכות או להיטים?? סיכום האלבומים שיצאו במהלך השבועיים החולפים. מיהו הזמר המצליח שיתכן וידרדר את מוזיקה אל עבר התהום??? וגם מהו מקומה של הפגנה בדמוקרטיה, ועד כמה היא אפקטיבית אם בכלל? דיון מעמיק. כל זאת ועוד אייטמים רבים בפרק מספר 68: חורף או קיץ, שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/183xrfGQNn_hZc9wdbMBac1R_acR1w_PK/view"
+        }
+      ],
+      "sourceFileBytes": 49116394
+    },
+    {
+      "id": "drive-1d802qX8yjvQrEv0bS9xhrCdyapOxoL8V",
+      "slug": "episode-66",
+      "number": 66,
+      "season": "levi",
+      "title": "המצעד השנתי לסיכום שנת תשפ''ה",
+      "date": "2025-10-06",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 66: המצעד השנתי לסיכום שנת תשפ''ה, עולה כעת לאוויר! פרק התוצאות של המצעד השנתי לסיכום שנת תשפ''ה!פאנל פרשנים נרחב (שלמה גולדברג, דודי זינגר ועוד)! שלושים שירים שהתמודדו ורק להיט אחד שמוכתר בתואר שיר השנה!! גדולי הזמר משה קליין משה פלד אלחנן ענבל ועוד בראיונות חג ייחודיים ובלעדיים!! מי זכה בתואר מלחין השנה? מי זכה בתואר פריצת השנה?? ומהו אלבום השנה??? מהו השיר שהגיע למקום החמישי והצליח להרגיז את כל חברי הפנאל למעט אחד, ויצר סערה אדירה??? אל תפספסו! לאחר אלפי הצבעות ודירוגים, פרק סוער דרמטי והיסטורי לסיכום שנת תשפ''ה מבית תוכנית המוזיקה ראש בראש! וגם, פרק בונוס מיוחד לסיכום שנת תשפ''ה מהזווית של מגישי התוכנית. כל זאת ועוד אייטמים רבים בפרק מספר 66 המצעד השנתי לסיכום שנת תשפ''ה שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות",
+        "מצעד"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1d802qX8yjvQrEv0bS9xhrCdyapOxoL8V/view"
+        }
+      ],
+      "sourceFileBytes": 147215845
+    },
+    {
+      "id": "drive-14t4nszjURquA9jWwAScsaFBJ0pPXX2IB",
+      "slug": "episode-67",
+      "number": 67,
+      "season": "levi",
+      "title": "היום שאחרי",
+      "date": "2025-10-21",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 67: היום שאחרי, עולה כעת לאוויר! היום שאחרי המצעדים: סיכום המצעדים השנתיים בערוצי הרדיו, באיזה ערוץ כתבו תוצאות מראש? מי הערוץ שאיכזב, ומיהו הערוץ שדווקא הפתיע? דיון סוער ורווי אמוציות על כל מה שקרה במצעדים השנתיים בחג סוכות האחרון. היום שאחרי החגים: סיכום האלבומים השירים והמופעים של השבועות החולפים. היום שאחרי המלחמה: סיכום מלחמת התקומה, ההישגים וההפסדים, ותפקודו של ראש ממשלת ישראל בשנתיים הללו. וגם, ראש מטה משפחות החטופים ח''כ לשעבר רונן צור בראיון מרתק על שנתיים של מאבקים עד לחזרת כל החטופים החיים לביתם ברוך ה'. כל זאת ועוד אייטמים רבים בפרק מספר 67 היום שאחרי שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/14t4nszjURquA9jWwAScsaFBJ0pPXX2IB/view"
+        }
+      ],
+      "sourceFileBytes": 94691307
+    },
+    {
+      "id": "drive-1s67iix8WKJFR859LPoAAnQNC3KQFqEDm",
+      "slug": "episode-66.02",
+      "number": null,
+      "season": "levi",
+      "title": "סיכום שנה מזווית כפולה",
+      "date": "2025-10-06",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 66: המצעד השנתי לסיכום שנת תשפ''ה, עולה כעת לאוויר! פרק התוצאות של המצעד השנתי לסיכום שנת תשפ''ה!פאנל פרשנים נרחב (שלמה גולדברג, דודי זינגר ועוד)! שלושים שירים שהתמודדו ורק להיט אחד שמוכתר בתואר שיר השנה!! גדולי הזמר משה קליין משה פלד אלחנן ענבל ועוד בראיונות חג ייחודיים ובלעדיים!! מי זכה בתואר מלחין השנה? מי זכה בתואר פריצת השנה?? ומהו אלבום השנה??? מהו השיר שהגיע למקום החמישי והצליח להרגיז את כל חברי הפנאל למעט אחד, ויצר סערה אדירה??? אל תפספסו! לאחר אלפי הצבעות ודירוגים, פרק סוער דרמטי והיסטורי לסיכום שנת תשפ''ה מבית תוכנית המוזיקה ראש בראש! וגם, פרק בונוס מיוחד לסיכום שנת תשפ''ה מהזווית של מגישי התוכנית. כל זאת ועוד אייטמים רבים בפרק מספר 66 המצעד השנתי לסיכום שנת תשפ''ה שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1s67iix8WKJFR859LPoAAnQNC3KQFqEDm/view"
+        }
+      ],
+      "sourceFileBytes": 54313593
+    },
+    {
+      "id": "drive-1NxoIJzrOhcHSBXAK9Bxs70JV5pPZZhUu",
+      "slug": "episode-58",
+      "number": 58,
+      "season": "levi",
+      "title": "להחזיר עטרה ליושנה",
+      "date": "",
+      "description": "מתוך ארכיון תוכנית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1NxoIJzrOhcHSBXAK9Bxs70JV5pPZZhUu/view"
+        }
+      ],
+      "sourceFileBytes": 102019624
+    },
+    {
+      "id": "drive-1f-mc6a56Hw5MsBvWvKck1CDhbp8iAjdA",
+      "slug": "episode-65",
+      "number": 65,
+      "season": "levi",
+      "title": "קדם המצעד",
+      "date": "2025-09-25",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 65: קדם המצעד, עולה כעת לאוויר! מסכמים שנה מוזיקאלית לקראת תוצאות המצעד שיעלו בחול המועד סוכות.מה האלבום הטוב ביותר של יידל? ומה סוד ההצלחה הגדולה של האלבום האחרון? איפה טעה ארהלה סאמט באלבומו האחרון? ומה מונע מהאלבום להצליח? האלבומים האלטרנטיביים של השנה, רחמים של דוד בן ארזה, אירוע מתגלגל של שולי רנד והנה זה בא של מוטי וייס, מה מעכב אותם מלהצליח כמו פעם? לאיפה נעלמה המוזיקה המזרחית בשנה האחרונה? מה מותר לאברהם מרדכי שווארץ שאסור בשום אופן לדוד בן ארזה או לשולי רנד? וגם, מי מעז להשוות את שמוליק סוכות ליעקב שוואקי וליפא שמעלצר?? עימות סוער! כל זאת ועוד אייטמים רבים בפרק מספר 65 קדם המצעד שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות",
+        "מצעד"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1f-mc6a56Hw5MsBvWvKck1CDhbp8iAjdA/view"
+        }
+      ],
+      "sourceFileBytes": 72204584
+    },
+    {
+      "id": "drive-19Trk3ZVWkWPdGkNmtyCpPRCTVrjBPcRl",
+      "slug": "episode-64",
+      "number": 64,
+      "season": "levi",
+      "title": "מתחילים לצעוד",
+      "date": "",
+      "description": "מתוך ארכיון תוכנית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/19Trk3ZVWkWPdGkNmtyCpPRCTVrjBPcRl/view"
+        }
+      ],
+      "sourceFileBytes": 54477747
+    },
+    {
+      "id": "drive-1iViyBsEn7b9tcDlSPF54ZFsXwYGduqqi",
+      "slug": "episode-63",
+      "number": 63,
+      "season": "levi",
+      "title": "מסכמים",
+      "date": "2025-08-29",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 63: מסכמים, זמין עכשיו להאזנה! מסכמים את תחרות הריאליטי של קול חי ''הקול החדש'', מי הם המפסידים האמיתיים ומי הם המנצחים האמיתיים? וגם, האם כסף ושיקולים זרים התערבו בעונה הזו ובשלב הגמר??מסכמים שנה מוזיקאלית! מה הסיבה שישנם כל כך הרבה אלבומים ואפס להיטים? וגם, מה יהיה שיר השנה?? חוזרים לרגעי השיא של ספיישל ''בין הזמנים בסימן הידברות'' של התוכנית! נושא פוליטי: האם הגבלת כהונת ראש הממשלה תועיל למדינה או להיפך? וגם, האם אריכות הכהונה של נתניהו גורמת לשחיתות ולנזק למדינה? כל זאת ועוד אייטמים רבים בפרק מספר 63 מסכמים שעולה לאוויר כעת! הודעה חשובה! בתוכנית הבאה שתשלח אי''ה בעוד שבועיים נקיים פרק ''שיחות עם מאזינים'', בו יוכלו מאזיני התוכנית לעלות לשידור ולשוחח עם המגישים על כל נושא שירצו, ממוזיקה ועד פוליטיקה! שריינו לכם מקום לתוכנית הקרובה, שלחו לנו תגובה קולית בקו התוכן (0796077075) בשלוחה 9, ציינו נושא שתרצו לשוחח עליו ומספר פלאפון, ובפרק הקרוב תהיו חלק פעיל מהתוכנית! מהרו להירשם, מספר המקומות מוגבל בהחלט!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1iViyBsEn7b9tcDlSPF54ZFsXwYGduqqi/view"
+        }
+      ],
+      "sourceFileBytes": 70796119
+    },
+    {
+      "id": "drive-1Hdqhh33vBDisE6dAE17Lqc1fXzlxR61c",
+      "slug": "episode-61",
+      "number": 61,
+      "season": "levi",
+      "title": "בסימן הידברות החלק השני",
+      "date": "2025-08-11",
+      "description": "תוכנית ראש בראש פרק מספר 61 בסימן הידברות החלק השני.mp3 <https://drive.google.com/file/d/1Hdqhh33vBDisE6dAE17Lqc1fXzlxR61c/view?usp=drive_web> תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, ספיישל בין הזמנים חודש אב, פרק מס' 61: בסימן הידברות החלק השני, זמין עכשיו להאזנה! גדול הזמר משה קליין מתארח לראיון בלעדי לרגל השקת אלבומו החדש ולסיכום מופע הענק בבנייני האומה. נושא מוזיקאלי: ראש בראש, תדבר איתו של שמוליק סוכות או עננו של מוטי וייס? האם שניהם שווים את ההצלחה לה הם זכו? ולמי מהם מגיעה בכלל ההצלחה? וכל הנושאים המסתעפים מזה. סיכום האלבומים והלהיטים הרבים שיצאו בשבוע החולף. וגם, מה גורם לענקי הזמר יידל ורדיגר ובערי וובער להופיע עם לא אחר משמוליק סוכות? נושא פוליטי: פאנל סוער במיוחד! החוק לגיוס בחורי הישיבות, מדינה חרדית, ציות לרבנים וכל מה שביניהם. חלק שני במבחן המוזיקאלי והאקטואלי, מי ינצח הפעם, ובכמה? ועוד אייטמים רבים!בימי בין הזמנים הנוכחי, תשלח אם ירצה ה' תוכנית בכל אמצע שבוע, התוכנית הבאה תשלח אי''ה ביום שני כ''ד אב. הצביעו לסקר השבועי שלנו! חייגו לקו התוכן של התוכנית: 0796077075 הקישו 8 והצביעו לסקר השבועי של תוכנית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1Hdqhh33vBDisE6dAE17Lqc1fXzlxR61c/view"
+        }
+      ],
+      "sourceFileBytes": 76638746
+    },
+    {
+      "id": "drive-1I0bPHofL14B6IWAM8_Xpwx9D4ENNbABb",
+      "slug": "episode-60",
+      "number": 60,
+      "season": "levi",
+      "title": "בסימן הידברות החלק הראשון",
+      "date": "",
+      "description": "מתוך ארכיון תוכנית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1I0bPHofL14B6IWAM8_Xpwx9D4ENNbABb/view"
+        }
+      ],
+      "sourceFileBytes": 84997384
+    },
+    {
+      "id": "drive-1j6CAgVVO058flwSaP4rSkBV6GkfKikYR",
+      "slug": "episode-59",
+      "number": 59,
+      "season": "levi",
+      "title": "שנה טובה",
+      "date": "2025-07-22",
+      "description": "תוכנית ראש בראש בהגשת מיכאל לוי וקובי בלום, פרק מס' 59: שנה טובה, זמין עכשיו להאזנה! פאנל נרחב לסיכום עונת הקיץ המוזיקאלית, דירוג השירים ועוד. וגם, מה בין פינקי וובר ודובי מייזלס להפקרת החטופים שעדיין בעזה? תוכנית ספיישל שלושת השבועות ותשעת הימים באווירת התקופה. בעקבות בקשות המאזינים, הוחלט להקדים את מועד שליחת התוכנית ממוצאי שבת הקרובה להיום, בעקבות תקופת היובש המוזיקאלית, האזנה ערבה ומועילה! המופע שיפתח לכם את בין הזמנים! גדול הזמר משה קליין פותח קופות למופע השקת אלבומו החדש ''הפלייליסט'' עם אומנים אורחים, בנייני האומה יום שני י' באב בשעה 20:30, אל תפספסו! קוד קופון מיוחד למאזיני התוכנית ראש בראש: 17011, יש להקיש את הקוד בשדה קוד הקופון, במידה ועדיין ישנה אופצייה של ''רכישה מוקדמת'' יש ללחוץ על המילים ''רכישה מוקדמת'' ואז ללחוץ על סמל הפח, ולהקיש בשדה קוד הקופון: 17011. למעבר לדף המכירות של המופע כאשר קוד הקופון שלנו מעודכן שם כבר לחצו על הקישור: https://tic.li/c/82114/N0yNMnYmWo&ref=r <https://tic.li/c/82114/N0yNMnYmWo&ref=ro> <https://tic.li/c/82114/N0yNMnYmWo&ref=ro>[image: משה קליין.jpg] הודעה חשובה! מאחר וישנם ברוך ה' מצטרפים רבים שנחשפים לראשונה לתוכנית הזו, חשוב לנו לתת קצת רקע, בשנתיים האחרונות התוכנית פעלה בקו המכלול, קו תוכן מוזיקאלי לציבור החרדי, לפני מספר חודשים בעקבות סירוב ההנהלה בקו המכלול לתת למגישים לומר את דעותיהם ולהשמיע אך ורק אמת התוכנית סיימה את דרכה באותו קו ועברה לתפוצת מייל קו תוכן חדש ואתר, מאחר וכך איכות השמע של התוכנית הינה של תוכנית טלפונית ולא איכות אולפן וכיוצ''ב, אך אנו משתדלים לעשות את המירב שביכולתנו. התוכנית מוגשת על ידי שני בחורי ישיבות ו",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1j6CAgVVO058flwSaP4rSkBV6GkfKikYR/view"
+        }
+      ],
+      "sourceFileBytes": 71778982
+    },
+    {
+      "id": "drive-1QEIjHfXr-eoy946hHT1SwGvvwjSExio3",
+      "slug": "episode-79",
+      "number": 79,
+      "season": "trio",
+      "title": "צעדים חדשים",
+      "date": "2026-03-21",
+      "description": "תוכנית ראש בראש גרסת השלישייה בהגשת קובי בלום ארי וייזר וחיים וינר, פרק מס' 79: צעדים חדשים, עולה לאוויר כעת!נושא מוזיקאלי: מהפכת הבינה מלאכותית בעיצומה וזה הזמן לבדוק מה יהיו השפעותיה על עולם המוסיקה ומה הן עלולות לגרום לו לטוב ולמוטב, דיון מרתק! וגם, מה הבינה מלאכותית עצמה חושבת על השינויים אותם היא מביאה אל עולם המוסיקה.נושא פוליטי: נכנסים לשנת בחירות וזה זמן טוב לבדוק האם יש עתיד למפלגות החרדיות בצד השמאלי של המפה, האם נכון לחרדים לשבת בלי נתניהו? מי ייטיב לנו יותר? נתניהו או בנט? והאם דרעי וגפני מסוגלים בכלל לבצע צעד דרמטי שכזה?כל זאת ועוד אייטמים רבים בפרק מספר 79: צעדים חדשים, שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1QEIjHfXr-eoy946hHT1SwGvvwjSExio3/view"
+        }
+      ],
+      "sourceFileBytes": 151886329
+    },
+    {
+      "id": "drive-1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4",
+      "slug": "episode-89",
+      "number": 89,
+      "season": "slater",
+      "title": "קדם מצעד האלבומים - 25 שנות מוזיקה",
+      "date": "2026-09-13",
+      "description": "תוכנית ראש בראש בהגשת קובי בלום וירמי סלייטר, פרק מס' 89: קדם מצעד האלבומים - 25 שנות מוזיקה עולה כעת לאוויר! תוכנית ראש בראש גאה להציג: \"מצעד האלבומים 25 שנות מוזיקה''! כל האלבומים הגדולים של חצי יובל השנים האחרונות צועדים כל הדרך אל משדר התוצאות שיישלח אליכם אי''ה במהלך חג סוכות! מהאלבום שמעתי של יעקב שוואקי ועד האלבום הוא ולא אחר של יידל ורדיגר. כל החומרים הטובים ביותר במוזיקה במצעד אחד! מה הם האלבומים המתמודדים? כיצד תתנהל ההצבעה? ועוד קטגוריות נוספות! על כך ועוד בתוכנית שלפניכם.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות",
+        "מצעד"
+      ],
+      "guests": [],
+      "featured": true,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4/view"
+        }
+      ],
+      "sourceFileBytes": 85228622
+    },
+    {
+      "id": "drive-1-d-Y4TFP0PJ7_yQzt5iisOAC8MsOy5ll",
+      "slug": "episode-88",
+      "number": 88,
+      "season": "slater",
+      "title": "מופעים כמו חול",
+      "date": "2026-08-08",
+      "description": "תוכנית ראש בראש בהגשת קובי בלום וירמי סלייטר, פרק מס' 88: \"מופעים כמו חול\". נושא מוזיקאלי: חבר המערכת יאיר שטיין מתארח לסקירה מעמיקה על שתי הופעות הענק שפתחו את בין הזמנים: פיני 2026 בבנייני האומה, וה\"מופע של פעם בדור\" עם מרדכי בן דוד, יעקב שוואקי, פרחי מיאמי וגם שמוליק סוכות בבריכת הסולטן. מה עוד הסתתר בבנייני האומה מעבר לפירוטכניקה המרשימה והגימיקים הזולים? האם אפשר להתייחס להופעה בבריכת הסולטן ברצינות?? ויכוח סוער בין חברי הפאנל. נושא אקטואלי: כאב הראש של שס בבחירות הקרובות, עם הקמתה של מפלגת אח''י של הרב מנתיבות. המגיש המיתולוגי מיכאל לוי וחבר הפאנל ארי וייזר בשיחה מרתקת על ההתפתחויות המפתיעות בגזרה הזו, האם שס צריכה לחשוש מאיבוד קולות? מה מצבה של שס בקרב ציבור בני התורה?? והאם יש דרך להחזיר הביתה את כל הממורמרים מבית??? שיחה מרתקת, אל תפספסו.פרספקטיבה עם אבישי לביא: הטעות של הטייס בדימוס מידן בר שסיפקה לציבור הצצה קטנה לתרבות והאידאולוגיה של השמאל של היום, מצחיק ומבכיא כאחד.כל זאת ועוד בפרק מס' 88: \"מופעים כמו חול\". שעולה עכשיו בכל הפלטפורמות! 💥",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1-d-Y4TFP0PJ7_yQzt5iisOAC8MsOy5ll/view"
+        }
+      ],
+      "sourceFileBytes": 49278801
+    },
+    {
+      "id": "drive-1IDhfNccSk5WBt59EMgUFZNSsNk1mL_kM",
+      "slug": "episode-87",
+      "number": 87,
+      "season": "slater",
+      "title": "עולמות של פטריוטים",
+      "date": "2026-07-18",
+      "description": "לאחר הפסקה - תוכנית ראש בראש בהגשת קובי בלום וירמי סלייטר חוזרת עם תוכנית ראיונות, פרק מס' 87: \"עולמות של פטריוטים\". נושא מוזיקאלי: ראיון מרתק עם הזמר פיני איינהורן, לרגל צאת אלבומו השלישי \"עולמות\" ולקראת מופע \"פיני 2026\" בבנייני האומה. על השינוי המוזיקלי שעבר והתגובות ברחוב, החיבור וההשפעות משלמה קרליבך, כיצד הוא מצליח לשלב בין רגש ודמעות למוזיקה אלקטרונית מקפיצה. מה מצפה לנו בהופעה: סקופים רבים בפרסום ראשון על המופע הקרוב ומאחורי הקלעיםגם: קוד קופון מיוחד למאזיני ראש בראש (בהקשת: ראש55). נושא אקטואלי: ראיון עומק עם איש-התקשורת הצבעוני גיא מרוז. האם שיער כמה זעם יעורר בעקבות המעבר לפטריוטים, מדוע איים כי יעזוב את הארץ אם בן-גביר יתמנה לשר ומדוע בסוף לא מימש את האיום, מה השתנה בדעותיו הפוליטיות מאז ההשתתפות בפטריוטים, לאיזו מפלגה הוא מצביע, כיצד נתניהו שיקם את תדמיתו הציבורית לאחר טבח שמחת תורה, וגם: הערכה כיצד יסתיימו הבחירות הנוכחיות. פרספקטיבה עם אבישי לביא: והפעם על הפגנות הקיצוניים!כל זאת ועוד בפרק מס' 87: \"עולמות של פטריוטים\". שעולה לאוויר כעת💥",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1IDhfNccSk5WBt59EMgUFZNSsNk1mL_kM/view"
+        }
+      ],
+      "sourceFileBytes": 196132845
+    },
+    {
+      "id": "drive-1PjNbMbGrvvJSYUlEvmClQ50yeUfJILc0",
+      "slug": "episode-86",
+      "number": 86,
+      "season": "slater",
+      "title": "העימות החזיתי",
+      "date": "2026-06-27",
+      "description": "תוכנית ראש בראש בהגשת קובי בלום וירמי סלייטר, פרק מס' 86: \"העימות החזיתי\". עולה לאוויר כעת! נושא מוזיקאלי: באווירת עונת הקיץ, ראש בראש צעיר ורענן: קובי ברומר VS משה קליין. דיון מרתק על ההיסטוריה של שני זמרי החתונות שעלו לליגה של הגדולים. תחילת הקריירה; הלהיטים הגדולים; הסגנונות השמרניים, מי יותר ומי פחות; ומדוע מוזיקאים רבים חשים חובה לערוך שינוי בקריירה? נושא אקטואלי: ויכוח סוער בין שני המגישים על גבולות הגזרה של מחאה לגיטימית: האם מותר לחסום כבישים? באלו אמצעים צריך לנקוט על מנת לפזר הפגנות? לאיזה צד במפה הפוליטית מותר ולאיזה צד אסור? ואיך כל זה קשור לספרי יונה ספיר...? פרספקטיבה עם אבישי לביא: האנטישמי החדש בתקשורת ה''יהודונים'' רוני קובן, מי אמור להכות במי ומי משתמט וממה? כל זאת ועוד אייטמים רבים בפרק מס' 86: \"העימות החזיתי\". שעולה לאוויר כעת!💥",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1PjNbMbGrvvJSYUlEvmClQ50yeUfJILc0/view"
+        }
+      ],
+      "sourceFileBytes": 189728422
+    },
+    {
+      "id": "drive-13_7LgBbqXjIrv89WIzxF04dTRHYAFnzS",
+      "slug": "episode-80",
+      "number": 80,
+      "season": "slater",
+      "title": "הדור החדש",
+      "date": "2026-04-04",
+      "description": "תוכנית ראש בראש בהגשת ירמי סלייטר וקובי בלום, פרק מס' 80: \"הדור החדש\". שעולה לאוויר כעת! פיינליסט עונת ''הקול החדש'' ירמי סלייטר מצטרף אל קובי בלום להגשה ופותח את הדף החדש והנוצץ של התוכנית! נושא מוזיקאלי: מה עובר על המוזיקה החסידית? איפה נכסי צאן הברזל של פעם? לאן נעלמו המלחינים הגדולים? ולמה השירים ה\"מובילים\" הם כאלו שהציבור בשטח לא באמת אוהב?? דיון יסודי ומרתק. נושא פוליטי: האם נכון לפנות לנשיא ארה''ב בבקשה שיטיל סנקציות על שופט העליון יצחק עמית ועו''ד גלי בהרב מיארה? כיצד ניתן לפתור את המשבר הפוליטי לאחר כישלון המהלכים בכנסת? וקצת היסטוריה על תוכנית \"הפטריוטים\". דיון סוער סביב העצומה עליה פרופסור משה כהן אליה בדרך להחתים 100,000 אזרחים ולפנות איתה לנשיא ארה\"ב. וגם: פרספקטיבה - עם אבישי לביא, פינה פוליטית חדשה ונוצצת! כל זאת ועוד אייטמים רבים בפרק מספר 80: \"הדור החדש\", שעולה לאוויר כעת!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/13_7LgBbqXjIrv89WIzxF04dTRHYAFnzS/view"
+        }
+      ],
+      "sourceFileBytes": 192214664
+    },
+    {
+      "id": "drive-1mOa64Q_eFX9o6ihZvAxb8AT0wNr2yZa-",
+      "slug": "episode-85",
+      "number": 85,
+      "season": "slater",
+      "title": "מופע אימים",
+      "date": "2026-06-13",
+      "description": "תוכנית ראש בראש בהגשת קובי בלום וירמי סלייטר, פרק מס' 85: \"מופע האימים\". עולה לאוויר כעת! נושא מוזיקאלי: על שולחן הניתוחים הנושא הלוהט של הקיץ - ההופעות! שלמה גליק מתארח לשיחה מרתקת על מגוון ההיבטים של אירועי הזֶמֶר השונים: מה ה'פואנטה' בהופעה - החוויה הבידורית או המוזיקה הטהורה? כיצד מצליחים אומנים מהשורה הרביעית והלאה במוזיקה למלא אולמות ענק? וגם, הוויכוח המעניין: איזו מקהלה טובה יותר - פרחי מיאמי או פרחי בני הישיבות? נושא אקטואלי: ריאיון פוליטי שהפך לעימות מתוקשר! השר לשעבר וחבר הכנסת הרב מיכאל מלכיאלי בריאיון סוער! מי באמת מקבל את ההחלטות בסיעת ש''ס? האם עתיד המלחמה חשוב יותר מגורל עולם הישיבות?? ולמה רק עכשיו התחילו בש''ס להילחם גם בפומבי על עתיד עולם התורה??? ריאיון סוער ואמוציונלי, אל תפספסו! פרספקטיבה עם אבישי לביא: האם הפכנו למדינת חסות? ומה בנט היה עושה במקומו של נתניהו?? וגם, תגובתו המלאה של המגיש המיתולוגי מיכאל לוי למגיש ירמי סלייטר על הריאיון הסוער על ח''כ מלכיאלי. כל זאת ועוד אייטמים רבים בפרק מס' 85: \"מופע האימים\". שעולה לאוויר כעת!💥",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1mOa64Q_eFX9o6ihZvAxb8AT0wNr2yZa-/view"
+        }
+      ],
+      "sourceFileBytes": 151873827
+    },
+    {
+      "id": "drive-16PLdPxDNRyfOeLwjs2AOs3-1Ly2gm_f0",
+      "slug": "episode-84",
+      "number": 84,
+      "season": "slater",
+      "title": "קווי מתאר",
+      "date": "2026-05-30",
+      "description": "🎙️ תוכנית ראש בראש בהגשת קובי בלום וירמי סלייטר, פרק מס' 84: \"קווי מתאר\". עולה לאוויר כעת! 🔥המגיש המיתולוגי מיכאל לוי חוזר להגשה ומחליף באופן חד פעמי את המגיש קובי בלום. נושא מוסיקלי: מוסיקה חסידית או מוסיקה אלטרנטיבית? ההבדלים בין הסגנונות, והיתרונות והחסרונות לכאן ולכאן 🎶 מה בין מוסיקה אלטרנטיבית למוסיקת פלייליסט? מה בין שולי רנד לשמוליק סוכות?? ומה בעצם הבעיה של כל בני ה18+ עם שמוליק סוכות??? 🔞נושא אקטואלי: מסכמים קדנציה מהזווית של ש''ס ויהדות התורה, תסכול או הרע במיעוטו? לוזריות או ציות לגדולי התורה?? 🗳️ סקירה מעמיקה ומרתקת לאורך כל ארבע שנות הקדנציה, והאם בסיכומה של הקדנציה הדבר המתבקש הוא לבא בתלונות על הנציגים החרדיים או שמדובר בהסתכלות מעוותת וקטנונית?? עימות סוער בין המגישים 💥 וגם, מי מאנשי התקשורת החרדית כונו בתוכנית כ''פחי האשפה של המגזר החרדי'' ולמה??? 📻 פרספקטיבה עם אבישי לביא: האם הגיע הזמן לחילופי גברי במפלגות החרדיות? 🧓 חדשות המוסיקה עם חיים וינר: סקירה מעמיקה על השבועיים החולפים במוזיקה החרדית, מגרטנר ושוואקי ועד גרין ובן משיח. 🎼כל זאת ועוד אייטמים רבים בפרק מס' 84: \"קווי מתאר\", שעולה לאוויר כעת! 💥",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/16PLdPxDNRyfOeLwjs2AOs3-1Ly2gm_f0/view"
+        }
+      ],
+      "sourceFileBytes": 212481332
+    },
+    {
+      "id": "drive-1oVYAxh34nIhCWcnEoSbVbK5_XAdmvpqt",
+      "slug": "episode-81",
+      "number": 81,
+      "season": "slater",
+      "title": "בין קודש לחול",
+      "date": "2026-04-18",
+      "description": "תוכנית ראש בראש בהגשת ירמי סלייטר וקובי בלום, פרק מס' 81: \"בין קודש לחול\". עולה לאוויר כעת! 💥נושא מוזיקאלי: ענקי הזמר האמריקאים בני פרידמן ומרדכי שפירא - ראש בראש. דיון מעמיק ונוסטלגי על ההיסטוריה של שני הזמרים, המהפכות שהביאו, הלהיטים הגדולים כולל להיט הענק המשותף \"לחי העולמים\", ומעמדם הנוכחי המתערער בישראל.נושא אקטואלי: יחס החברה החרדית ל\"חגים הלאומיים\": האם הציבור החרדי צריך לחוש בצער שאופף את החברה הישראלית ביום הזיכרון או בהתרוממות הרוח ביום העצמאות? ומה ראוי לעשות כשהצפירה תופסת אותך באמצע הרחוב? דיון סוער ואמוציונלי על הנושא הטעון.פרספקטיבה עם אבישי לביא: כל זאת ועוד אייטמים רבים בפרק מספר 81: \"בין קודש לחול\", שעולה לאוויר כעת! 💥",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1oVYAxh34nIhCWcnEoSbVbK5_XAdmvpqt/view"
+        }
+      ],
+      "sourceFileBytes": 137628260
+    },
+    {
+      "id": "drive-1wqttlT9iiG5OACxhuyyiy96eYPiUKv1k",
+      "slug": "episode-83",
+      "number": 83,
+      "season": "slater",
+      "title": "דעתה של תורה",
+      "date": "2026-05-16",
+      "description": "תוכנית ראש בראש בהגשת קובי בלום וירמי סלייטר, פרק מס' 83: \"דעתה של תורה\". עולה לאוויר כעת!נושא מוזיקאלי: פרויקט ענק לקראת חג השבועות: \"שירי התורה הגדולים ביותר בכל הזמנים\". עשרות אנשי הצוות של התוכנית ראש בראש דירגו את שירי התורה האהובים עליהם, ובחרו את עשרת הגדולים. פאנל מרתק וסוער בהשתתפות ותיקי התוכנית דודי זינגר ושלמה גליק.נושא אקטואלי: ההוראה הדרמטית של מנהיג הדור מרן הגר\"ד לנדו לנציגים החרדים לפזר את הכנסת בהקדם, וההתבטאות ההיסטורית: \"איננו מחויבים יותר לגוש\". הכוונות הנסתרות, המשמעויות המיידיות וההשלכות מרחיקות הלכת של המהלך - סקירה מעמיקה בהשתתפות ארי וייזר.פרספקטיבה עם אבישי לביא: סימון המטרה של מחנה השמאל על יו''ר כחול לבן ח''כ בני גנץ, האם באמת כבר אין מקום לממלכתיות במחנה השמאל בישראל?חדשות המוזיקה עם חיים וינר: חמשת שירי התורה שאולי לא הכרתם, מרתק!כל זאת ועוד אייטמים רבים בפרק מס' 83: \"דעתה של תורה\", שעולה לאוויר כעת! 💥",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1wqttlT9iiG5OACxhuyyiy96eYPiUKv1k/view"
+        }
+      ],
+      "sourceFileBytes": 234642992
+    },
+    {
+      "id": "drive-1PS6NoycIkPXmG7Sd6NtW9WQpaFUitlvl",
+      "slug": "episode-82",
+      "number": 82,
+      "season": "slater",
+      "title": "המלחמה על הקריירה",
+      "date": "2026-05-02",
+      "description": "תוכנית ראש בראש בהגשת קובי בלום וירמי סלייטר, פרק מס' 82: \"המלחמה על הקריירה\". עולה לאוויר כעת 💥נושא מוזיקאלי: אפקט נפתלי קמפה - מוטי שטיינמיץ - ישי ריבו, מה גורם לענקי זמר לצנוח באחת ולהפסיק להצליח ולייצר להיטים? מהם הטעויות בדרך?? והקשר האירוני בין יידל ורדיגר לנפתלי בנט. דיון מרתק בהשתתפות המגיש המיתולוגי מיכאל לוי.נושא אקטואלי: הפרשן הפוליטי מנחם קולדצקי מתארח לדיון אקטואלי מעמיק על הצעדים הדרמטיים של בנט ולפיד בשבוע החולף, ועל המלחמה מול איראן ולבנון שאוטוטו תתחדש.וגם, חושף: ''נתניהו דן ביום שני האחרון על חיסול נעים קאסם, ההערכה היא כי הוא יחוסל עד ל''ג בעומר''.פרספקטיבה עם אבישי לביא: רגליו של נפתלי בנט הממהרות לרוץ להרע, איך הנוכל של הפוליטיקה הישראלית מצליח לשחק בנו פעם אחר פעם?כל זאת ועוד אייטמים רבים בפרק מספר 82: \"המלחמה על הקריירה\", שעולה לאוויר כעת! 💥",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "תוכניות"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1PS6NoycIkPXmG7Sd6NtW9WQpaFUitlvl/view"
+        }
+      ],
+      "sourceFileBytes": 145828631
+    },
+    {
+      "id": "drive-1pLy7zaRS3bphll2pa8CTcURcJ7Rf1Upm",
+      "slug": "set-1pLy7zaRS3bphll2pa8CTcURcJ7Rf1Upm",
+      "number": null,
+      "season": "sets",
+      "title": "סט שירי חורף תשפ''ו הטובים ביותר",
+      "date": "",
+      "description": "סט מוזיקלי מבית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "סטים"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1pLy7zaRS3bphll2pa8CTcURcJ7Rf1Upm/view"
+        }
+      ],
+      "sourceFileBytes": 59738805
+    },
+    {
+      "id": "drive-1jHUdsYLLr7-E6NKQHqssU8XLUBmGUqqf",
+      "slug": "set-1jHUdsYLLr7-E6NKQHqssU8XLUBmGUqqf",
+      "number": null,
+      "season": "sets",
+      "title": "סט בין חושך לקור - שירי החורף הטובים ביותר",
+      "date": "2025-11-18",
+      "description": "תוכנית ראש בראש גאה להציג: סט בין חושך לקור - שירי החורף הטובים ביותר! לאחר הסטים הקודמים (הטובים שבטובים, סיכום חורף תשפ''ה), אנו שמחים להציג סט נוסף מושקע ואיכותי הכולל בתוכו את מיטב שירי הרגש והנשמה משלל סגנונות המוזיקה היהודית, טעימה קטנה מכל שיר בשילוב מקורי ואיכותי. קרוב לחצי שעה של חוויה מקסימלית לחובבי המוזיקה היהודית.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "סטים"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1jHUdsYLLr7-E6NKQHqssU8XLUBmGUqqf/view"
+        }
+      ],
+      "sourceFileBytes": 55592597
+    },
+    {
+      "id": "drive-12pTHoXfI9N0FXXgabJCdYcs7tKwIfnVB",
+      "slug": "set-12pTHoXfI9N0FXXgabJCdYcs7tKwIfnVB",
+      "number": null,
+      "season": "sets",
+      "title": "סט הטובים שבטובים - תשפ''ה",
+      "date": "2025-10-24",
+      "description": "בלעדי למאזיני תוכנית ראש בראש לרגל תחילת זמן חורף! לאחר בקשות חוזרות ונשנות לסטים נוספים מבית תוכנית ראש בראש, אנו שמחים להגיש לפניכם את סט הטובים שבטובים לשנת תשפ''ה, מבחר השירים האיכותיים ביותר שיצאו במהלך שנת תשפ''ה, המהווה תקציר מוזיקאלי לשנת תשפ''ה, חצי שעה של חווית האזנה יוצאת דופן, אל תפספסו!",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "סטים"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/12pTHoXfI9N0FXXgabJCdYcs7tKwIfnVB/view"
+        }
+      ],
+      "sourceFileBytes": 64320827
+    },
+    {
+      "id": "drive-1DrXIfu9r3eZ9L6eQohMAtdJYPVIcPi2X",
+      "slug": "set-1DrXIfu9r3eZ9L6eQohMAtdJYPVIcPi2X",
+      "number": null,
+      "season": "sets",
+      "title": "סט שירי החורף הטובים תשפ''ה",
+      "date": "",
+      "description": "סט מוזיקלי מבית ראש בראש.",
+      "cover": "",
+      "audio": "",
+      "duration": 0,
+      "tags": [
+        "סטים"
+      ],
+      "guests": [],
+      "featured": false,
+      "visible": true,
+      "tracks": [],
+      "links": [
+        {
+          "label": "פתיחה והורדה ב־Google Drive",
+          "url": "https://drive.google.com/file/d/1DrXIfu9r3eZ9L6eQohMAtdJYPVIcPi2X/view"
+        }
+      ],
+      "sourceFileBytes": 74180205
+    }
+  ]
+}

@@ -150,6 +150,20 @@ const TABLES = [
     unsubscribed_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+  `CREATE TABLE IF NOT EXISTS program_episodes (
+    id TEXT PRIMARY KEY NOT NULL,
+    slug TEXT NOT NULL,
+    number INTEGER,
+    date TEXT,
+    visible INTEGER NOT NULL DEFAULT 1,
+    data_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  `CREATE TABLE IF NOT EXISTS program_settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
 ];
 
 const COLUMNS = [
@@ -201,6 +215,8 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS ballots_voter_key_idx ON ballots(voter_key)",
   "CREATE INDEX IF NOT EXISTS ballots_survey_fingerprint_idx ON ballots(survey_id, fingerprint)",
   "CREATE INDEX IF NOT EXISTS subscribers_user_sub_idx ON subscribers(user_sub)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS program_episodes_slug_unique ON program_episodes(slug)",
+  "CREATE INDEX IF NOT EXISTS program_episodes_visible_date_idx ON program_episodes(visible,date,number)",
 ];
 
 const SEEDS = [
