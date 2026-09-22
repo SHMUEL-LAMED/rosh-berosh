@@ -161,6 +161,83 @@ test("an administrator can block and unblock a suspicious computer", async () =>
   assert.equal(db.prepare("SELECT COUNT(*) AS total FROM blocked_fingerprints WHERE fingerprint=?").get(fingerprint).total, 0);
 });
 
+// חיבור של מצביע רגיל (לא מנהל), כדי לבדוק מה האתר יראה לו לפני ואחרי איפוס.
+async function voterCookie(db, sub, email) {
+  const token = `voter-token-${sub}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  const hash = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+  db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,picture,expires_at) VALUES (?,?,?,?,?,?)")
+    .run(hash, sub, email, "מצביע", null, Math.floor(Date.now() / 1000) + 3600);
+  return `rosh_session=${token}`;
+}
+
+const resetVoter = (worker, env, cookie, payload) =>
+  worker.fetch(new Request("http://localhost/api/admin/voters/reset", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify(payload) }), env, ctx);
+
+test("an administrator can reset a voter by email so they can vote again", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAlbum(db);
+  const fingerprint = "b".repeat(64);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,created_at) VALUES ('ballot-reset','main','google-sub-7','voter@example.com','site',?,1)").run(fingerprint);
+  db.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES ('ballot-reset','album-1')").run();
+  db.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES ('ballot-reset','album-1','song-a')").run();
+  db.prepare("INSERT INTO blocked_fingerprints (survey_id,fingerprint,blocked_by) VALUES ('main',?,'admin@example.com')").run(fingerprint);
+  db.prepare("INSERT INTO site_ballot_progress (survey_id,user_sub,data_json) VALUES ('main','google-sub-7','{}')").run();
+  const voter = await voterCookie(db, "google-sub-7", "voter@example.com");
+  const check = () => worker.fetch(new Request(`http://localhost/api/ballots/check?fingerprint=${fingerprint}`, { headers: { cookie: voter } }), env, ctx).then((r) => r.json());
+  assert.equal((await check()).voted, true);
+
+  // הכתובת מנורמלת: רווחים ואותיות גדולות אינם מונעים את הזיהוי.
+  const response = await resetVoter(worker, env, cookie, { email: " Voter@Example.com " });
+  assert.equal(response.status, 200, `איפוס המצביע החזיר ${response.status}: ${await response.clone().text()}`);
+  assert.deepEqual(await response.json(), { ok: true, deleted: 1, unblocked: 1 });
+  for (const table of ["ballots", "album_votes", "song_votes", "blocked_fingerprints", "site_ballot_progress"]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get().total, 0, `${table} עדיין מכילה שורות`);
+  }
+  // האתר שואל את השרת בכל כניסה, ולכן המצביע רואה מיד שהוא יכול להצביע.
+  assert.deepEqual(await check(), { voted: false });
+
+  const again = await resetVoter(worker, env, cookie, { email: "voter@example.com" });
+  assert.equal(again.status, 404);
+});
+
+test("resetting by email also finds an old ballot that kept only the Google subject", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAlbum(db);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES ('ballot-old','main','google-sub-9','site',1)").run();
+  await voterCookie(db, "google-sub-9", "old@example.com");
+
+  const response = await resetVoter(worker, env, cookie, { email: "old@example.com" });
+  assert.equal(response.status, 200, `איפוס לפי כתובת ישנה החזיר ${response.status}: ${await response.clone().text()}`);
+  assert.deepEqual(await response.json(), { ok: true, deleted: 1, unblocked: 0 });
+  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM ballots").get().total, 0);
+});
+
+test("resetting one voter by phone or ballot id leaves the other ballots in place", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAlbum(db);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES ('ballot-phone','main','0501234567','phone',1)").run();
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,created_at) VALUES ('ballot-other','main','google-sub-2','other@example.com','site',2)").run();
+
+  assert.equal((await resetVoter(worker, env, cookie, {})).status, 400);
+  const byPhone = await resetVoter(worker, env, cookie, { email: "050-123-4567" });
+  assert.equal(byPhone.status, 200);
+  assert.deepEqual(db.prepare("SELECT id FROM ballots ORDER BY id").all().map((row) => row.id), ["ballot-other"]);
+  const byId = await resetVoter(worker, env, cookie, { ballotId: "ballot-other" });
+  assert.equal(byId.status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM ballots").get().total, 0);
+});
+
+test("resetting a voter requires an administrator", async () => {
+  const { worker, db, env } = await setup();
+  seedAlbum(db);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,created_at) VALUES ('ballot-keep','main','google-sub-3','keep@example.com','site',1)").run();
+  const voter = await voterCookie(db, "google-sub-3", "keep@example.com");
+  const response = await resetVoter(worker, env, voter, { email: "keep@example.com" });
+  assert.equal(response.status, 403);
+  assert.equal(db.prepare("SELECT COUNT(*) AS total FROM ballots").get().total, 1);
+});
+
 // לשונית "נתונים מתקדמים": ה-SQL רץ מול SQLite אמיתי, כולל הפרמטרים
 // הממוספרים (?1), GROUP_CONCAT על תת-שאילתה ממוינת, וההצלבות העצמיות.
 function seedAnalytics(db) {
