@@ -14,6 +14,26 @@ const DRIVE_DOWNLOAD = (id: string) => `https://drive.usercontent.google.com/dow
 const STREAM_HEADERS = ["content-type", "content-length", "content-range", "etag", "last-modified"];
 const AUDIO = new Set(["audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg", "audio/flac", "audio/aac"]);
 const IMAGE = new Set(["image/jpeg", "image/png", "image/webp"]);
+const programAudioKey = (driveId: string) => `program-recordings/${driveId}.mp3`;
+
+async function r2AudioResponse(request: Request, env: Env, key: string): Promise<Response | null> {
+  const range = request.headers.get("range");
+  const object = range ? await env.MEDIA.get(key, { range: request.headers }) : await env.MEDIA.get(key);
+  if (!object) return null;
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("accept-ranges", "bytes");
+  headers.set("content-disposition", "inline");
+  headers.set("cache-control", "public, max-age=31536000, immutable");
+  headers.set("x-content-type-options", "nosniff");
+  if ("range" in object && object.range) {
+    const value = object.range as { offset: number; length: number };
+    headers.set("content-range", `bytes ${value.offset}-${value.offset + value.length - 1}/${object.size}`);
+    headers.set("content-length", String(value.length));
+  } else headers.set("content-length", String(object.size));
+  return new Response(request.method === "HEAD" ? null : object.body, { status: range && "range" in object ? 206 : 200, headers });
+}
 
 function cors(request: Request, response: Response): Response {
   const origin = request.headers.get("origin");
@@ -132,10 +152,12 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     return user ? reply(request, { user: publicUser(user) }) : reply(request, { user: null }, 401);
   }
   if (url.pathname.startsWith("/api/program/stream/") && (request.method === "GET" || request.method === "HEAD")) {
-    // Range-transparent proxy for a shared Drive recording. The response is
-    // the recording itself (audio/*, 200 or 206), never Google's HTML pages.
+    // R2 is the permanent source. Drive remains a read-only fallback while
+    // older recordings are being migrated, so playback never goes offline.
     const id = url.pathname.slice("/api/program/stream/".length);
     if (!DRIVE_ID.test(id)) return reply(request, { error: "מזהה הקלטה לא תקין." }, 400);
+    const stored = await r2AudioResponse(request, env, programAudioKey(id));
+    if (stored) return cors(request, stored);
     const upstreamHeaders = new Headers();
     const range = request.headers.get("range");
     if (range) upstreamHeaders.set("range", range);
@@ -158,6 +180,53 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     headers.set("cache-control", "public, max-age=3600");
     headers.set("x-content-type-options", "nosniff");
     return cors(request, new Response(request.method === "HEAD" ? null : upstream.body, { status: upstream.status, headers }));
+  }
+  if (url.pathname === "/api/program/import-drive" && request.method === "POST") {
+    if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
+    let body: { driveId?: string; episodeId?: string; expectedSize?: number };
+    try { body = await request.json(); } catch { return reply(request, { error: "בקשה לא תקינה." }, 400); }
+    const driveId = String(body.driveId || "").trim();
+    const episodeId = safeId(body.episodeId);
+    const expectedSize = Math.max(0, Math.floor(Number(body.expectedSize) || 0));
+    if (!DRIVE_ID.test(driveId) || !episodeId) return reply(request, { error: "פרטי ההקלטה אינם תקינים." }, 400);
+    const key = programAudioKey(driveId);
+    const existing = await env.MEDIA.head(key);
+    if (existing && (!expectedSize || existing.size === expectedSize)) {
+      return reply(request, { ok: true, status: "existing", key, size: existing.size });
+    }
+    let upstream: Response;
+    try { upstream = await fetch(DRIVE_DOWNLOAD(driveId), { redirect: "follow" }); }
+    catch (error) { console.error("program import fetch error", driveId, error); return reply(request, { error: "הורדת ההקלטה מדרייב נכשלה." }, 502); }
+    const type = (upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!upstream.ok || !type.startsWith("audio/") || !upstream.body) {
+      await upstream.body?.cancel().catch(() => {});
+      return reply(request, { error: "דרייב לא החזיר קובץ שמע תקין." }, 502);
+    }
+    try {
+      const saved = await env.MEDIA.put(key, upstream.body, {
+        httpMetadata: { contentType: type || "audio/mpeg", cacheControl: "public, max-age=31536000, immutable" },
+        customMetadata: { driveId, episodeId, migratedAt: new Date().toISOString(), expectedSize: String(expectedSize || "") },
+      });
+      if (expectedSize && saved.size !== expectedSize) {
+        await env.MEDIA.delete(key);
+        return reply(request, { error: `גודל הקובץ אינו תואם: ${saved.size} במקום ${expectedSize}.` }, 502);
+      }
+      const row = await env.DB.prepare("SELECT data_json FROM program_episodes WHERE id=?").bind(episodeId).first<{ data_json: string }>();
+      if (row?.data_json) {
+        try {
+          const data = JSON.parse(row.data_json);
+          data.r2Key = key;
+          data.audioSource = "r2";
+          data.audioSize = saved.size;
+          data.audioMigratedAt = new Date().toISOString();
+          await env.DB.prepare("UPDATE program_episodes SET data_json=?,updated_at=unixepoch() WHERE id=?").bind(JSON.stringify(data), episodeId).run();
+        } catch (error) { console.error("program import catalog marker error", episodeId, error); }
+      }
+      return reply(request, { ok: true, status: "uploaded", key, size: saved.size });
+    } catch (error) {
+      console.error("program import R2 error", driveId, error);
+      return reply(request, { error: "שמירת ההקלטה ב־R2 נכשלה." }, 500);
+    }
   }
   if (url.pathname === "/api/program/catalog" && request.method === "POST") {
     if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
