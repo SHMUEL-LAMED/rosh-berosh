@@ -12,6 +12,7 @@ import { AnalyticsPanel } from "./analytics-panel";
 import { downloadResultsXlsx, downloadAllResultsXlsx } from "./xlsx-export";
 import systemPrompts from "../../ivr-service/src/ivr-system-prompts.json";
 import { PhonePreview } from "./phone-preview";
+import { ProgramsAdmin, type ProgramSection } from "./programs-admin";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string; position: number; active: number };
 type Song = { id: string; albumId: string; title: string; audioUrl?: string; coverUrl?: string; previewStart: number; previewEnd: number; position: number; active: number };
@@ -28,7 +29,6 @@ type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: s
 type ProgramTab = "prog-programs" | "prog-site" | "prog-listeners" | "prog-publish";
 type Tab = "dashboard" | "preview" | "surveys" | ProgramTab | "albums" | "artists" | "ivr" | "settings" | "access" | "results" | "analytics" | "archives" | "voters" | "subscribers";
 // אתר התוכניות (GitHub Pages): הניהול שלו מוטמע כאן כלשונית, עם כניסה משותפת.
-const PROGRAM_SITE = "https://shmuel-lamed.github.io/Ringtones/";
 const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-site": "הודעה ועדכונים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
 const TABS: Tab[] = ["dashboard", "preview", "surveys", "prog-programs", "prog-site", "prog-listeners", "prog-publish", "albums", "artists", "ivr", "settings", "access", "results", "analytics", "archives", "voters", "subscribers"];
 const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");
@@ -45,6 +45,7 @@ export default function AdminPage() {
   const [programsOpened, setProgramsOpened] = useState(() => isProgramTab(tabFromHash()));
   useEffect(() => { if (typeof window !== "undefined" && window.location.hash !== `#${tab}`) window.history.replaceState(null, "", `#${tab}`); }, [tab]);
   const go = useCallback((next: Tab) => { if (isProgramTab(next)) setProgramsOpened(true); setTab(next); }, []);
+  useEffect(() => { const onHash = () => go(tabFromHash()); window.addEventListener("hashchange", onHash); return () => window.removeEventListener("hashchange", onHash); }, [go]);
   const { notify } = useNotice();
   const [uploading, setUploading] = useState(false);
   const [albumOrderOverride, setAlbumOrder] = useState<Album[] | null>(null);
@@ -165,7 +166,7 @@ export default function AdminPage() {
       {tab === "ivr" && data && <IvrPanel data={data} onSaved={load} onMessage={notify} />}
       {tab === "settings" && data && <SettingsPanel data={data} onSaved={async () => { await load(); }} />}
       {tab === "archives" && <ArchivesPanel onChanged={load} onMessage={notify} />}
-      {programsOpened && <ProgramsPanel tab={isProgramTab(tab) ? tab : null} onTab={go} />}
+      {programsOpened && <ProgramsAdmin section={isProgramTab(tab) ? tab.slice(5) as ProgramSection : null} onMessage={notify} />}
       {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP עם קובצי שמע. אפשר להעלות תמונת אלבום ידנית או לתת לה להישלף אוטומטית מה־metadata של השירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מכין…" : "יצירת האלבום"}</button></form></AdminSection>{uploadQueue.panel}<AdminSection title="שליפת תמונות מקבצי שמע"><p className="panel-help">שליפת עטיפות אלבום מה־metadata של שירים שכבר עלו אך אין להם תמונה.</p><button className="continue" style={{width:"100%"}} disabled={uploading} onClick={async()=>{setUploading(true);notify("");try{const r=await fetch("/api/admin/extract-covers",{method:"POST"});const d=await r.json();if(r.ok)notify(`נשלפו ${d.extracted} תמונות מתוך ${d.total} שירים ללא תמונה.`);else notify(d.error||"השליפה נכשלה.");}catch{notify("השליפה נכשלה.");}finally{setUploading(false);await load();}}}>שליפת תמונות חסרות</button></AdminSection><div className="album-admin-grid">{albumOrder.map((album, index) => <div key={album.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("album", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === albumOrder.length - 1} onClick={() => moveItem("album", index, 1)} aria-label="הזז למטה">▼</button></div><AlbumEditor album={album} songs={data?.songs.filter((song) => song.albumId === album.id) ?? []} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onFiles={(files) => addFiles(album.id, files)} onUploadCover={uploadAlbumCover} onRemoveCover={removeAlbumCover} onReordered={load} onMessage={notify} /></div>)}</div></>}
       {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{artistOrder.map((item, index) => <div key={item.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("artist", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === artistOrder.length - 1} onClick={() => moveItem("artist", index, 1)} aria-label="הזז למטה">▼</button></div><ArtistRow item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} /></div>)}</div></AdminSection>}
       {tab === "access" && data && <><ManagersPanel managers={data.managers} currentEmail={user.email} onSaved={load} onMessage={notify} /><AdminSection title="הרשאות לקו ההקלטות"><RecorderAccessPanel recorders={data.ivrRecorders || []} onSaved={load} onMessage={notify} /></AdminSection></>}
@@ -509,36 +510,6 @@ function Results({ data }: { data: Overview["results"] }) {
   };
   const kindLabel = kind === "albums" ? "אלבומים" : kind === "songs" ? "שירים" : "זמרים";
   return <AdminSection title="תוצאות בזמן אמת"><div className="result-tabs"><button onClick={() => setKind("albums")}>אלבומים</button><button onClick={() => setKind("songs")}>שירים</button><button onClick={() => setKind("artists")}>זמרים</button><div className="export-wrapper" ref={menuRef}><button className="export-results" onClick={() => setMenuOpen(!menuOpen)} disabled={exporting}>{exporting ? "מייצא…" : "הורדת Excel"}</button>{menuOpen && <div className="export-menu"><button onClick={downloadAll}>הורדת כל הנתונים</button><button onClick={downloadCurrent}>הורדת {kindLabel} בלבד</button></div>}</div></div><p className="panel-help">קובץ ‎.xlsx מסודר עם הדירוג והקולות.</p><div className="results-table">{list.map((item, index) => <div key={item.id}><b>{index + 1}</b><span>{item.title || item.name}<small>{item.albumTitle}</small></span><strong>{item.votes} קולות</strong></div>)}</div></AdminSection>;
-}
-
-/** אתר התוכניות, כחלק מאותו דף ניהול: ארבעת החלקים שלו נבחרים מתפריט הצד
-    הזה, והמסגרת נשארת טעונה במעבר בין לשוניות. הכניסה היא באותו חשבון —
-    קוד חד־פעמי מ־/api/program/handoff פותח שם סשן, בלי כניסה נוספת. */
-function ProgramsPanel({ tab, onTab }: { tab: ProgramTab | null; onTab(tab: Tab): void }) {
-  const frame = useRef<HTMLIFrameElement>(null);
-  const [src, setSrc] = useState(""), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
-  const first = useRef(tab);
-  useEffect(() => {
-    let active = true;
-    fetch("/api/program/handoff", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
-      .then(async (response) => { const result = await response.json(); if (!response.ok) throw new Error(result.error || "טעינת אתר התוכניות נכשלה."); return result.code as string; })
-      .then((code) => { if (active) setSrc(`${PROGRAM_SITE}admin.html?handoff=${code}&embed=1#${(first.current || "prog-programs").slice(5)}`); })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "טעינת אתר התוכניות נכשלה."); });
-    return () => { active = false; };
-  }, [attempt]);
-  const send = useCallback(() => { if (tab) frame.current?.contentWindow?.postMessage({ type: "rosh-admin-tab", tab: tab.slice(5) }, new URL(PROGRAM_SITE).origin); }, [tab]);
-  useEffect(send, [send]);
-  // מעבר פנימי בתוך אתר התוכניות (למשל "פתיחה" מבדיקת התקינות) מסמן גם את תפריט הצד
-  useEffect(() => {
-    const origin = new URL(PROGRAM_SITE).origin;
-    const receive = (event: MessageEvent) => { if (event.origin === origin && event.data?.type === "rosh-admin-tab-changed" && typeof event.data.tab === "string") { const next = `prog-${event.data.tab}` as Tab; if (TABS.includes(next)) onTab(next); } };
-    window.addEventListener("message", receive);
-    return () => window.removeEventListener("message", receive);
-  }, [onTab]);
-  return <div className="programs-frame" hidden={!tab}>
-    {error && <p className="panel-help" style={{ color: "#ff9a8a" }}>{error} <button type="button" className="toggle" onClick={() => { setError(""); setAttempt((value) => value + 1); }}>ניסיון חוזר</button></p>}
-    {src && <iframe ref={frame} src={src} onLoad={send} title="ניהול אתר התוכניות" allow="clipboard-write; microphone" />}
-  </div>;
 }
 
 function ArchivesPanel({ onChanged, onMessage }: { onChanged(): Promise<void> | void; onMessage(message: string): void }) {
