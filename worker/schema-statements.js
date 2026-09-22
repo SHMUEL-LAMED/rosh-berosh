@@ -164,6 +164,35 @@ const TABLES = [
     value_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+  // אתר התוכניות: אירועי האזנה לסטטיסטיקה, הודעות מהמאזינים, וגרסאות
+  // שנשמרות אוטומטית בכל פרסום של הקטלוג.
+  `CREATE TABLE IF NOT EXISTS program_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    seconds INTEGER NOT NULL DEFAULT 0,
+    device TEXT,
+    day TEXT NOT NULL,
+    client_hash TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  `CREATE TABLE IF NOT EXISTS program_messages (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT,
+    email TEXT,
+    text TEXT NOT NULL,
+    episode_id TEXT,
+    read_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  `CREATE TABLE IF NOT EXISTS program_versions (
+    id TEXT PRIMARY KEY NOT NULL,
+    by_email TEXT,
+    note TEXT,
+    episodes INTEGER NOT NULL DEFAULT 0,
+    data_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
 ];
 
 const COLUMNS = [
@@ -217,6 +246,10 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS subscribers_user_sub_idx ON subscribers(user_sub)",
   "CREATE UNIQUE INDEX IF NOT EXISTS program_episodes_slug_unique ON program_episodes(slug)",
   "CREATE INDEX IF NOT EXISTS program_episodes_visible_date_idx ON program_episodes(visible,date,number)",
+  "CREATE INDEX IF NOT EXISTS program_events_day_idx ON program_events(day,episode_id)",
+  "CREATE INDEX IF NOT EXISTS program_events_created_idx ON program_events(created_at)",
+  "CREATE INDEX IF NOT EXISTS program_messages_created_idx ON program_messages(created_at)",
+  "CREATE INDEX IF NOT EXISTS program_versions_created_idx ON program_versions(created_at)",
 ];
 
 const SEEDS = [

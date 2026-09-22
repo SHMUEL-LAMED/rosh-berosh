@@ -1,5 +1,6 @@
 import { createSession, GOOGLE_CLIENT_ID, readSession, verifyGoogleCredential } from "./auth";
 import seed from "./program-seed.json";
+import { programToolsApi, publicSettings, settingsStatements, versionStatements } from "./program-tools";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
 type Ctx = { waitUntil(promise: Promise<unknown>): void };
@@ -96,6 +97,8 @@ async function catalog(env: Env, includeHidden = false) {
     episodes: (episodes.results as Array<{ id: string; data_json: string }>).flatMap((row) => {
       try { return [{ ...JSON.parse(row.data_json), id: row.id }]; } catch { return []; }
     }),
+    // ההגדרות הציבוריות של אתר התוכניות (ההודעה בדף הבית ודף העדכונים)
+    settings: await publicSettings(env),
   };
 }
 
@@ -229,8 +232,9 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     }
   }
   if (url.pathname === "/api/program/catalog" && request.method === "POST") {
-    if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
-    let body: { seasons?: unknown[]; episodes?: Array<Record<string, unknown>>; removedIds?: string[] };
+    const publisher = await admin(request, env);
+    if (!publisher) return reply(request, { error: "אין הרשאת ניהול." }, 403);
+    let body: { seasons?: unknown[]; episodes?: Array<Record<string, unknown>>; removedIds?: string[]; settings?: Record<string, unknown> };
     try { body = await request.json(); } catch { return reply(request, { error: "בקשה לא תקינה." }, 400); }
     if (!Array.isArray(body.episodes) || !Array.isArray(body.seasons) || body.episodes.length > 2000) return reply(request, { error: "נתוני התוכניות אינם תקינים." }, 400);
     const statements = body.episodes.map((episode) => {
@@ -244,6 +248,12 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     statements.push(env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(body.seasons)));
     const removed = [...new Set((body.removedIds || []).map(safeId).filter(Boolean))].slice(0, 2000);
     for (const id of removed) statements.push(env.DB.prepare("DELETE FROM program_episodes WHERE id=?").bind(id));
+    // ההודעה בדף הבית ודף העדכונים מתפרסמים יחד עם הקטלוג
+    statements.push(...settingsStatements(env, body.settings));
+    // כל פרסום נשמר כגרסה — גיבוי אוטומטי שאפשר לחזור אליו מאזור הניהול
+    statements.push(...versionStatements(env, publisher.email, { seasons: body.seasons, episodes: body.episodes, settings: body.settings }));
+    // הטיוטה המשותפת מולאה בפרסום הזה; קישור התצוגה המקדימה כבר אינו נחוץ
+    statements.push(env.DB.prepare("DELETE FROM program_settings WHERE key IN ('draft')"));
     try { await env.DB.batch(statements); }
     catch (error) { console.error("program catalog write error", error); return reply(request, { error: "שמירת התוכניות נכשלה." }, 500); }
     return reply(request, { ok: true, episodes: body.episodes.length, removed: removed.length });
@@ -260,5 +270,7 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     await env.MEDIA.put(key, request.body, { httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" } });
     return reply(request, { url: `${url.origin}/media/${key}` });
   }
+  const tools = await programToolsApi(request, env, { reply, admin, safeId });
+  if (tools) return tools;
   return reply(request, { error: "הנתיב לא נמצא." }, 404);
 }
