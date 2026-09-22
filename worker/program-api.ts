@@ -55,14 +55,65 @@ async function admin(request: Request, env: Env) {
 const publicUser = (user: { email: string; name: string; picture?: string; isAdmin: boolean }) =>
   ({ email: user.email, name: user.name, picture: user.picture, isAdmin: !!user.isAdmin });
 
-async function catalog(env: Env, includeHidden = false) {
-  const existing = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_episodes").first<{ total: number }>();
-  if (!Number(existing?.total)) {
-    const inserts = seed.episodes.map((episode) => env.DB.prepare("INSERT OR IGNORE INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch())")
-      .bind(episode.id, episode.slug, episode.number, episode.date || null, episode.visible === false ? 0 : 1, JSON.stringify(episode)));
-    inserts.push(env.DB.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch())").bind(JSON.stringify(seed.seasons)));
-    await env.DB.batch(inserts);
+// `data/episodes.json` in the program site's own repository is the catalogue's
+// source of truth: it is built from the program's Drive folders and from the
+// mailing-list announcements, and it is what the site falls back to when this
+// worker is unreachable. D1 holds the working copy that the admin area edits.
+// Whenever CATALOG_VERSION below changes, the published catalogue is fetched
+// once and written over D1 — so a catalogue fix committed to the site reaches
+// the live database on deploy, with no manual publish. Between version bumps
+// the admin area is free to edit, and those edits stand until the next bump.
+// `program-seed.json` stays as the offline seed for a brand-new database.
+const CATALOG_SOURCE = "https://shmuel-lamed.github.io/Ringtones/data/episodes.json";
+const CATALOG_VERSION = "2026-09-22-drive-and-mail";
+
+type SeedCatalog = { seasons: unknown[]; episodes: Array<Record<string, unknown>> };
+
+async function publishedCatalog(): Promise<SeedCatalog | null> {
+  try {
+    const response = await fetch(CATALOG_SOURCE, { cf: { cacheTtl: 0 } });
+    if (!response.ok) return null;
+    const body = await response.json<SeedCatalog>();
+    return Array.isArray(body?.episodes) && body.episodes.length && Array.isArray(body?.seasons) ? body : null;
+  } catch (error) {
+    console.error("program catalog fetch error", error);
+    return null;
   }
+}
+
+function writeCatalog(env: Env, source: SeedCatalog, version: string | null) {
+  const statements = source.episodes.flatMap((episode) => {
+    const id = safeId(episode.id as string);
+    const slug = safeId((episode.slug as string) || (episode.id as string));
+    if (!id || !slug || !String(episode.title || "").trim()) return [];
+    const number = Number.isFinite(Number(episode.number)) ? Number(episode.number) : null;
+    return [env.DB.prepare("INSERT INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch()) ON CONFLICT(id) DO UPDATE SET slug=excluded.slug,number=excluded.number,date=excluded.date,visible=excluded.visible,data_json=excluded.data_json,updated_at=unixepoch()")
+      .bind(id, slug, number, String(episode.date || "") || null, episode.visible === false ? 0 : 1, JSON.stringify({ ...episode, id, slug }))];
+  });
+  statements.push(env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(source.seasons)));
+  if (version) statements.push(env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('catalog_version',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(version)));
+  return statements;
+}
+
+async function syncCatalog(env: Env): Promise<void> {
+  const row = await env.DB.prepare("SELECT value_json FROM program_settings WHERE key='catalog_version'").first<{ value_json: string }>();
+  let current = "";
+  try { current = String(JSON.parse(row?.value_json ?? '""') ?? ""); } catch { current = ""; }
+  if (current === CATALOG_VERSION) return;
+  const published = await publishedCatalog();
+  // Without the published catalogue, only a brand-new database is filled, from
+  // the offline seed — and the version is left unset so the next request tries
+  // again rather than freezing an out-of-date catalogue in place.
+  if (!published) {
+    const existing = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_episodes").first<{ total: number }>();
+    if (Number(existing?.total)) return;
+  }
+  try { await env.DB.batch(writeCatalog(env, published || (seed as SeedCatalog), published ? CATALOG_VERSION : null)); }
+  catch (error) { console.error("program catalog sync error", error); }
+}
+
+async function catalog(env: Env, includeHidden = false) {
+  await syncCatalog(env);
   const [episodes, settings] = await env.DB.batch([
     env.DB.prepare(`SELECT id,data_json FROM program_episodes ${includeHidden ? "" : "WHERE visible=1"} ORDER BY date DESC,number DESC`),
     env.DB.prepare("SELECT key,value_json FROM program_settings"),
@@ -79,8 +130,71 @@ async function catalog(env: Env, includeHidden = false) {
   };
 }
 
+/* ---------- The recordings, served from the site itself ----------
+   The masters live in the program's Drive folder. The first time a recording
+   is played it is copied, in the background, into the site's own R2 bucket;
+   every play after that is served straight from Cloudflare — real Range
+   seeking, no Google round trip, and nothing for the listener's filter to
+   block. If the copy has not happened yet (or fails), the Drive proxy below
+   still answers, so playback never depends on it. */
+const MEDIA_KEY = (id: string) => `program/drive/${id}.mp3`;
+const MAX_CACHED = 400 * 1024 * 1024;
+const copying = new Set<string>();
+
+async function readCached(env: Env, id: string, request: Request, range: string | null): Promise<Response | null> {
+  const key = MEDIA_KEY(id);
+  let object: R2Object | R2ObjectBody | null = null;
+  try {
+    object = request.method === "HEAD"
+      ? await env.MEDIA.head(key)
+      : await env.MEDIA.get(key, range ? { range: request.headers } : undefined);
+  } catch (error) { console.error("program media read error", error); return null; }
+  if (!object) return null;
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  if (!headers.get("content-type")) headers.set("content-type", "audio/mpeg");
+  headers.set("accept-ranges", "bytes");
+  headers.set("etag", object.httpEtag);
+  headers.set("content-disposition", "inline");
+  headers.set("cache-control", "public, max-age=31536000, immutable");
+  headers.set("x-content-type-options", "nosniff");
+  const part = (object as R2ObjectBody).range as { offset?: number; length?: number } | undefined;
+  let status = 200;
+  if (range && part && typeof part.offset === "number" && typeof part.length === "number") {
+    status = 206;
+    headers.set("content-range", `bytes ${part.offset}-${part.offset + part.length - 1}/${object.size}`);
+    headers.set("content-length", String(part.length));
+  } else {
+    headers.set("content-length", String(object.size));
+  }
+  const body = request.method === "HEAD" ? null : ((object as R2ObjectBody).body ?? null);
+  return new Response(body, { status, headers });
+}
+
+async function cacheRecording(env: Env, id: string): Promise<void> {
+  const key = MEDIA_KEY(id);
+  if (copying.has(id)) return;
+  copying.add(id);
+  try {
+    if (await env.MEDIA.head(key)) return;
+    const upstream = await fetch(DRIVE_DOWNLOAD(id), { redirect: "follow" });
+    const type = (upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const size = Number(upstream.headers.get("content-length") || 0);
+    if (!upstream.ok || !upstream.body || !type.startsWith("audio/") || size > MAX_CACHED) {
+      await upstream.body?.cancel().catch(() => {});
+      return;
+    }
+    await env.MEDIA.put(key, upstream.body, {
+      httpMetadata: { contentType: type || "audio/mpeg", cacheControl: "public, max-age=31536000, immutable" },
+    });
+  } catch (error) {
+    console.error("program media copy error", error);
+  } finally {
+    copying.delete(id);
+  }
+}
+
 export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<Response | null> {
-  void ctx;
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/program/")) return null;
   if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }));
@@ -136,8 +250,15 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     // the recording itself (audio/*, 200 or 206), never Google's HTML pages.
     const id = url.pathname.slice("/api/program/stream/".length);
     if (!DRIVE_ID.test(id)) return reply(request, { error: "מזהה הקלטה לא תקין." }, 400);
-    const upstreamHeaders = new Headers();
     const range = request.headers.get("range");
+
+    // Served from the site's own storage once the recording has been copied
+    // there; the copy is made in the background the first time it is played.
+    const cached = await readCached(env, id, request, range);
+    if (cached) return cors(request, cached);
+    if (request.method === "GET") ctx.waitUntil(cacheRecording(env, id));
+
+    const upstreamHeaders = new Headers();
     if (range) upstreamHeaders.set("range", range);
     let upstream: Response;
     try {
