@@ -13,17 +13,28 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 // Cloudflare's Git integration (Workers Builds) runs the deploy command for
 // every pushed branch, and a branch based on an older main once replaced the
-// production Worker minutes after main had deployed. So under Workers Builds
-// only the main branch builds as "rosh-berosh"; any other branch, or a build
-// whose branch is unknown, builds as a separate preview Worker instead.
-// Locally and in the GitHub Action these variables are unset.
+// production Worker minutes after main had deployed. It also forces the
+// Worker name (WRANGLER_CI_OVERRIDE_NAME), so a branch cannot be steered to a
+// preview Worker from here. Under Workers Builds, therefore, only main may
+// build at all: any other branch, or a build whose branch is unknown, fails
+// here, before anything is deployed. Once the dashboard's non-production
+// deploy command is `wrangler versions upload`, which never touches
+// production, set WORKERS_BUILDS_ALLOW_BRANCHES=1 there to lift this.
+// Locally and in the GitHub Action none of these variables is set.
 const PRODUCTION_BRANCH = "main";
-const isPreviewBuild =
-  !!process.env.WORKERS_CI && process.env.WORKERS_CI_BRANCH !== PRODUCTION_BRANCH;
-const workerName = isPreviewBuild ? "rosh-berosh-preview" : "rosh-berosh";
+if (
+  process.env.WORKERS_CI &&
+  process.env.WORKERS_CI_BRANCH !== PRODUCTION_BRANCH &&
+  !process.env.WORKERS_BUILDS_ALLOW_BRANCHES
+) {
+  throw new Error(
+    `Workers Builds: branch "${process.env.WORKERS_CI_BRANCH ?? "?"}" is not built or deployed. ` +
+      `Only "${PRODUCTION_BRANCH}" deploys the production Worker (the GitHub Action does that too). ` +
+      "See README, section פריסה.",
+  );
+}
 
 const localBindingConfig = {
-  name: workerName,
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
   d1_databases: d1
