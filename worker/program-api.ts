@@ -1,4 +1,4 @@
-import { createSession, readSession, verifyGoogleCredential } from "./auth";
+import { createSession, GOOGLE_CLIENT_ID, readSession, verifyGoogleCredential } from "./auth";
 import seed from "./program-seed.json";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
@@ -58,6 +58,11 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/program/")) return null;
   if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }));
+
+  if (url.pathname === "/api/program/login" && request.method === "GET") {
+    const html = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>כניסה לניהול ראש בראש</title><script src="https://accounts.google.com/gsi/client" async defer></script><style>body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Arial,sans-serif;background:#0d1d35;color:#fff}.card{width:min(380px,calc(100% - 40px));padding:36px;border:1px solid #d9b85c;border-radius:24px;text-align:center;background:#142642;box-shadow:0 24px 70px #0006}h1{margin:0 0 12px}p{color:#ccd5e4;line-height:1.6}#google{display:grid;place-items:center;margin-top:24px}.error{color:#ffd2d2}</style></head><body><main class="card"><h1>ניהול תוכניות ראש בראש</h1><p>התחברו עם אותו חשבון Google שמנהל את אתר הסקר.</p><div id="google"></div><p id="status"></p></main><script>const target=${JSON.stringify(ORIGIN)};window.onload=()=>{google.accounts.id.initialize({client_id:${JSON.stringify(GOOGLE_CLIENT_ID)},callback:async({credential})=>{const status=document.getElementById('status');status.textContent='בודק הרשאה…';try{const r=await fetch('/api/program/auth/google',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({credential})});const data=await r.json();if(!r.ok)throw Error(data.error||'הכניסה נכשלה');window.opener?.postMessage({type:'rosh-program-auth',...data},target);status.textContent='התחברתם. אפשר לסגור את החלון.';setTimeout(()=>window.close(),500)}catch(e){status.className='error';status.textContent=e.message}}});google.accounts.id.renderButton(document.getElementById('google'),{theme:'filled_blue',size:'large',shape:'pill',text:'continue_with',locale:'he',width:280})};</script></body></html>`;
+    return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; script-src 'unsafe-inline' https://accounts.google.com/gsi/client; frame-src https://accounts.google.com/gsi/; connect-src 'self' https://accounts.google.com/gsi/; style-src 'unsafe-inline'; img-src data: https://*.googleusercontent.com" } });
+  }
 
   if (url.pathname === "/api/program/catalog" && request.method === "GET") {
     const user = await readSession(request, env);
