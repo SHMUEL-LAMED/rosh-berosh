@@ -81,7 +81,8 @@ export async function verifyGoogleCredential(credential: string, env?: AuthEnv):
 
 export async function readSession(request: Request, env?: AuthEnv): Promise<SessionUser | null> {
   const cookie = request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith("rosh_session="));
-  const token = cookie?.slice("rosh_session=".length);
+  const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const token = bearer || cookie?.slice("rosh_session=".length);
   if (!token) return null;
   if (env?.DB && !token.includes(".")) {
     try {
