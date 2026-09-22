@@ -106,6 +106,16 @@ test("a manager added in the voting site's permissions tab manages the program s
   assert.equal((await response.json()).user.isAdmin, true);
 });
 
+test("the built-in managers are administrators with no setting at all", async () => {
+  const { worker, db, env } = await setup();
+  env.ADMIN_EMAILS = "";
+  for (const email of ["0534169095@xn--4dbjbascrao3i.com", "o0534169095@gmail.com", "O0534169095@Gmail.com", "smwlyqswkwt232@gmail.com"]) {
+    const response = await exchange(worker, env, await sessionCookie(db, email));
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.equal((await response.json()).user.isAdmin, true, email);
+  }
+});
+
 test("a signed-in voter who is not a manager gets a personal session without management", async () => {
   const { worker, db, env } = await setup();
   const cookie = await sessionCookie(db, "voter@example.com");

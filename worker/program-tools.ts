@@ -3,7 +3,7 @@
    קישור תצוגה מקדימה, גרסאות שנשמרות אוטומטית בכל פרסום, אירועי האזנה
    לסטטיסטיקה, הודעות מהמאזינים, רשימת המנהלים (אותה רשימה של אתר הסקר)
    ורשימת התפוצה (אותה טבלה של אתר הסקר, עם חשבון Google המחובר). */
-import { createSession, readAdminEmails, readSession, saveAdminEmails, sessionCookie, type SessionUser } from "./auth";
+import { configuredAdminEmails, createSession, readAdminEmails, readSession, saveAdminEmails, sessionCookie, type SessionUser } from "./auth";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 
@@ -320,7 +320,7 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
   if (path === "/admins") {
     const user = await h.admin(request, env);
     if (!user) return forbidden();
-    const fixed = String(env.ADMIN_EMAILS || "").split(/[\s,;]+/).map((email) => email.trim().toLowerCase()).filter(Boolean);
+    const fixed = configuredAdminEmails(env);
     const list = async () => {
       const seen = new Map<string, number>();
       try { for (const row of (await env.DB.prepare("SELECT LOWER(email) AS email, MAX(created_at) AS at FROM auth_sessions GROUP BY LOWER(email)").all<{ email: string; at: number }>()).results) seen.set(row.email, Number(row.at)); } catch { /* אין עדיין סשנים */ }
