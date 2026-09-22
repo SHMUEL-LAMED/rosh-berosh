@@ -1,4 +1,4 @@
-import { createSession, GOOGLE_CLIENT_ID, readSession, verifyGoogleCredential } from "./auth";
+import { createSession, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import seed from "./program-seed.json";
 import { programToolsApi, publicSettings, settingsStatements, versionStatements } from "./program-tools";
 
@@ -178,7 +178,10 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
       if (!credential) return reply(request, { error: "חסר אישור Google." }, 400);
       const user = await verifyGoogleCredential(credential, env);
       const token = await createSession(env, user);
-      return reply(request, { token, user: publicUser(user) });
+      // בחלון הכניסה (אותה כתובת של אתר הסקר) זה מחבר גם את אתר הסקר עצמו
+      const response = reply(request, { token, user: publicUser(user) });
+      response.headers.append("set-cookie", sessionCookie(token));
+      return response;
     } catch (error) {
       console.error("program google auth error", error);
       return reply(request, { error: "ההתחברות באמצעות Google נכשלה." }, 401);

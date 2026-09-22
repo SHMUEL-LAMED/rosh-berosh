@@ -204,3 +204,42 @@ test("one-click mailing-list signup uses the signed-in account and the voting si
   assert.equal((await (await call("/api/program/subscribe", { token: voter })).json()).subscribed, false);
   assert.equal((await call("/api/program/subscribers/count", { token: voter })).status, 403);
 });
+
+test("one sign-in covers both sites: the program site bounces through here and comes back signed in", async () => {
+  const { worker, env, db } = await setup();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("cookie-voter"));
+  db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,picture,expires_at) VALUES (?,?,?,?,?,?)")
+    .run([...new Uint8Array(digest)].map((v) => v.toString(16).padStart(2, "0")).join(""), "sub-cookie", "fan@example.com", "מאזין", null, Math.floor(Date.now() / 1000) + 3600);
+  const back = "https://shmuel-lamed.github.io/Ringtones/me.html?x=1";
+  const go = (cookie, target = back) => worker.fetch(new Request(`http://localhost/api/program/sso?return=${encodeURIComponent(target)}`, { headers: cookie ? { cookie } : {} }), env, ctx);
+
+  const signedIn = await go("rosh_session=cookie-voter");
+  assert.equal(signedIn.status, 302);
+  const landing = new URL(signedIn.headers.get("location"));
+  assert.equal(landing.origin + landing.pathname, "https://shmuel-lamed.github.io/Ringtones/me.html");
+  assert.equal(landing.searchParams.get("x"), "1");
+  const code = landing.searchParams.get("sso");
+  assert.match(code, /^[a-f0-9]{32}$/);
+  const redeem = await worker.fetch(new Request("http://localhost/api/program/auth/handoff", { method: "POST", headers: { "content-type": "application/json", origin: ORIGIN }, body: JSON.stringify({ code }) }), env, ctx);
+  assert.equal(redeem.status, 200);
+  assert.equal((await redeem.json()).user.email, "fan@example.com", "the program site gets a session for the same account");
+
+  const anonymous = await go(null);
+  assert.equal(new URL(anonymous.headers.get("location")).searchParams.get("sso"), "none");
+  assert.equal((await go(null, "https://evil.example/steal")).status, 400, "only the program site may be a return address");
+  assert.equal((await go(null, "https://shmuel-lamed.github.io/other/")).status, 400);
+});
+
+test("signing in on the program site signs in the voting site too", async () => {
+  const { worker, env, call, voter } = await setup();
+  const { code } = await (await call("/api/program/handoff", { method: "POST", token: voter, body: {} })).json();
+  const back = "https://shmuel-lamed.github.io/Ringtones/index.html";
+  const response = await worker.fetch(new Request(`http://localhost/api/program/handoff/${code}?return=${encodeURIComponent(back)}`), env, ctx);
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get("location"), back);
+  const cookie = response.headers.get("set-cookie");
+  assert.match(cookie, /^rosh_session=[^;.]+;/);
+  const me = await worker.fetch(new Request("http://localhost/api/auth/me", { headers: { cookie: cookie.split(";")[0] } }), env, ctx);
+  assert.equal(me.status, 200);
+  assert.equal((await me.json()).user.email, "voter@example.com", "the voting site now knows the same account");
+});

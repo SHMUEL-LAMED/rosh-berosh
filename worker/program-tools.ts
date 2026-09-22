@@ -144,11 +144,28 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     const code = await issueHandoff(user);
     return redirect(`${PROGRAM_SITE}admin.html?handoff=${code}${url.searchParams.get("embed") === "1" ? "&embed=1" : ""}`);
   }
+  /* כניסה אחת לשני האתרים. אתר התוכניות שולח את הדפדפן לכאן לרגע (ניווט
+     רגיל, שבו עוגיית אתר הסקר נשלחת): מי שמחובר כאן חוזר עם קוד מעבר, ומי
+     שלא — חוזר עם sso=none. רק כתובות של אתר התוכניות מותרות כיעד חזרה. */
+  const programReturn = (value: string | null) => {
+    try { const target = new URL(String(value || "")); const home = new URL(PROGRAM_SITE); return target.origin === home.origin && target.pathname.startsWith(home.pathname) ? target : null; }
+    catch { return null; }
+  };
+  if (path === "/sso" && method === "GET") {
+    const back = programReturn(url.searchParams.get("return"));
+    if (!back) return h.reply(request, { error: "כתובת חזרה לא תקינה." }, 400);
+    back.searchParams.delete("sso"); back.searchParams.delete("handoff");
+    const user = await readSession(request, env);
+    back.searchParams.set("sso", user ? await issueHandoff(user) : "none");
+    return redirect(back.toString());
+  }
   if (path.startsWith("/handoff/") && method === "GET") {
+    const back = programReturn(url.searchParams.get("return"));
     const user = await redeemHandoff(path.slice("/handoff/".length));
-    if (!user) return redirect("/admin?handoff=expired");
+    if (!user) return redirect(back ? back.toString() : "/admin?handoff=expired");
     const token = await createSession(env, user);
-    return redirect(url.searchParams.get("to") === "/" ? "/" : "/admin", sessionCookie(token));
+    // אחרי כניסה באתר התוכניות: העוגייה של אתר הסקר נקבעת כאן, והדפדפן חוזר לאן שהיה
+    return redirect(back ? back.toString() : url.searchParams.get("to") === "/" ? "/" : "/admin", sessionCookie(token));
   }
   if (path === "/auth/handoff" && method === "POST") {
     const { code } = await body<{ code?: string }>();
