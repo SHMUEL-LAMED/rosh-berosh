@@ -564,7 +564,7 @@ function VotersPanel({ onMessage }: { onMessage(message: string): void }) {
   const channelLabel = (ch: string) => ch === "phone" ? "טלפון" : ch === "site" ? "אתר" : ch;
   // איפוס מוחק את הפתק ומסיר את חסימת המחשב של המצביע, כך שיוכל להצביע מחדש.
   // הרשימה נטענת שוב מהשרת ולא מסוננת מקומית, כדי שהעמוד ישקף את המסד.
-  const resetVoter = async (payload: { email?: string; ballotId?: string }, label: string) => {
+  const resetVoter = async (payload: { email?: string; phone?: string; ballotId?: string }, label: string) => {
     if (!confirm(`לאפס את ההצבעה של ${label}? הפתק יימחק, חסימת המחשב שממנו הצביע תוסר, והמצביע יוכל להצביע מחדש.`)) return false;
     setResetting(true);
     try {
@@ -577,17 +577,22 @@ function VotersPanel({ onMessage }: { onMessage(message: string): void }) {
     } catch (error) { onMessage(error instanceof Error ? error.message : "איפוס ההצבעה נכשל."); return false; }
     finally { setResetting(false); }
   };
-  const resetByEmail = async (event: FormEvent<HTMLFormElement>) => {
+  // שני טפסים נפרדים: מייל למצביע מהאתר, מספר טלפון למצביע מהקו. שדה המייל
+  // נשאר טקסט חופשי כי כתובות עם דומיין בעברית אינן עוברות את בדיקת הדפדפן.
+  const resetFromForm = async (event: FormEvent<HTMLFormElement>, field: "email" | "phone") => {
     event.preventDefault();
     const form = event.currentTarget;
-    const email = String(new FormData(form).get("email") || "").trim();
-    if (!email) return;
-    if (await resetVoter({ email }, email)) form.reset();
+    const value = String(new FormData(form).get(field) || "").trim();
+    if (!value) return;
+    if (await resetVoter({ [field]: value }, value)) form.reset();
   };
   return <AdminSection title="מצביעים">
     <p className="panel-help">כל ההצבעות שנקלטו בסקר הנוכחי, מהחדשה לישנה.</p>
-    <form className="voter-reset-form" onSubmit={resetByEmail}><input name="email" type="text" placeholder="כתובת מייל או מספר טלפון של המצביע" dir="ltr" required /><button type="submit" className="danger" disabled={resetting}>איפוס הצבעה</button></form>
-    <p className="panel-help">איפוס מוחק את הפתק של המצביע בסקר הנוכחי ומסיר את חסימת המחשב שממנו הצביע, כך שיוכל להצביע מחדש.</p>
+    <div className="voter-reset-forms">
+      <form className="voter-reset-form" onSubmit={(event) => void resetFromForm(event, "email")}><input name="email" type="text" placeholder="כתובת מייל של מצביע מהאתר" dir="ltr" required /><button type="submit" className="danger" disabled={resetting}>איפוס לפי מייל</button></form>
+      <form className="voter-reset-form" onSubmit={(event) => void resetFromForm(event, "phone")}><input name="phone" type="tel" placeholder="מספר טלפון של מצביע מהקו" dir="ltr" required /><button type="submit" className="danger" disabled={resetting}>איפוס לפי טלפון</button></form>
+    </div>
+    <p className="panel-help">איפוס מוחק את הפתק של המצביע בסקר הנוכחי ומסיר את חסימת המחשב שממנו הצביע, כך שיוכל להצביע מחדש. אפשר גם ללחוץ „איפוס” על כרטיס הצבעה ברשימה.</p>
     {loading ? <p className="loading">טוען…</p> : !voters.length ? <p className="panel-help">אין הצבעות עדיין.</p> : <>
       <div className="voters-list">{voters.map((v) => <article key={v.id} className="voter-card">
         <div className="voter-header">

@@ -220,8 +220,13 @@ test("resetting one voter by phone or ballot id leaves the other ballots in plac
   db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,created_at) VALUES ('ballot-other','main','google-sub-2','other@example.com','site',2)").run();
 
   assert.equal((await resetVoter(worker, env, cookie, {})).status, 400);
-  const byPhone = await resetVoter(worker, env, cookie, { email: "050-123-4567" });
-  assert.equal(byPhone.status, 200);
+  // מספר שאינו מספר ישראלי נדחה לפני כל חיפוש, ומספר בלי הצבעה מחזיר 404.
+  assert.equal((await resetVoter(worker, env, cookie, { phone: "123" })).status, 400);
+  assert.equal((await resetVoter(worker, env, cookie, { phone: "0529999999" })).status, 404);
+  // המספר מנורמל כמו בקו: מקפים וקידומת בינלאומית אינם מפריעים.
+  const byPhone = await resetVoter(worker, env, cookie, { phone: "+972 50-123-4567" });
+  assert.equal(byPhone.status, 200, `איפוס לפי טלפון החזיר ${byPhone.status}: ${await byPhone.clone().text()}`);
+  assert.deepEqual(await byPhone.json(), { ok: true, deleted: 1, unblocked: 0 });
   assert.deepEqual(db.prepare("SELECT id FROM ballots ORDER BY id").all().map((row) => row.id), ["ballot-other"]);
   const byId = await resetVoter(worker, env, cookie, { ballotId: "ballot-other" });
   assert.equal(byId.status, 200);

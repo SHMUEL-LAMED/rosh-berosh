@@ -1059,18 +1059,25 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   }
 
   // איפוס מצביע: מוחק את הפתק שלו בסקר הפעיל ומסיר את חסימת המחשב שממנו
-  // הצביע, כדי שיוכל להצביע מחדש. המצביע מזוהה לפי כתובת המייל שנשמרה בפתק,
-  // לפי כתובת החיבור ל-Google בפתקים ישנים שלא שמרו כתובת, לפי מספר טלפון
-  // של הצבעה מהקו, או לפי מזהה הפתק עצמו מרשימת המצביעים.
+  // הצביע, כדי שיוכל להצביע מחדש. מצביע מהאתר מזוהה לפי כתובת המייל שנשמרה
+  // בפתק, או לפי כתובת החיבור ל-Google בפתקים ישנים שלא שמרו כתובת; מצביע
+  // מהקו מזוהה לפי מספר הטלפון, באותה נרמול שבו הקו שומר אותו; ואפשר גם
+  // לאפס פתק מסוים לפי המזהה שלו מרשימת המצביעים.
   if (request.method === "POST" && url.pathname === "/api/admin/voters/reset") {
-    const body = await request.json<{ email?: string; ballotId?: string }>().catch(() => ({}) as { email?: string; ballotId?: string });
-    const identifier = text(body.email).toLowerCase();
+    type ResetBody = { email?: string; phone?: string; ballotId?: string };
+    const body = await request.json<ResetBody>().catch(() => ({}) as ResetBody);
+    const email = text(body.email).toLowerCase();
+    const rawPhone = text(body.phone);
+    const phone = normalizePhone(rawPhone);
     const ballotId = text(body.ballotId);
-    if (!identifier && !ballotId) return json({ error: "יש להזין כתובת מייל או מספר טלפון של המצביע." }, 400);
+    if (rawPhone && !phone) return json({ error: "מספר הטלפון אינו תקין." }, 400);
+    if (!email && !phone && !ballotId) return json({ error: "יש להזין כתובת מייל או מספר טלפון של המצביע." }, 400);
     const found = ballotId
       ? await env.DB.prepare("SELECT id, voter_key AS voterKey, fingerprint FROM ballots WHERE survey_id=? AND id=?").bind(surveyId, ballotId).all<BallotRef>()
-      : await env.DB.prepare("SELECT id, voter_key AS voterKey, fingerprint FROM ballots WHERE survey_id=? AND (voter_email=? OR voter_key=? OR voter_key IN (SELECT user_sub FROM auth_sessions WHERE email=?))").bind(surveyId, identifier, normalizePhone(identifier) || identifier, identifier).all<BallotRef>();
-    if (!found.results.length) return json({ error: "לא נמצאה הצבעה של המצביע הזה בסקר הפעיל." }, 404);
+      : phone
+        ? await env.DB.prepare("SELECT id, voter_key AS voterKey, fingerprint FROM ballots WHERE survey_id=? AND channel='phone' AND voter_key=?").bind(surveyId, phone).all<BallotRef>()
+        : await env.DB.prepare("SELECT id, voter_key AS voterKey, fingerprint FROM ballots WHERE survey_id=? AND (voter_email=? OR voter_key IN (SELECT user_sub FROM auth_sessions WHERE email=?))").bind(surveyId, email, email).all<BallotRef>();
+    if (!found.results.length) return json({ error: phone ? "לא נמצאה הצבעה מהמספר הזה בסקר הפעיל." : "לא נמצאה הצבעה של המצביע הזה בסקר הפעיל." }, 404);
     const ids = found.results.map((row) => row.id);
     const voterKeys = [...new Set(found.results.map((row) => row.voterKey))];
     const fingerprints = [...new Set(found.results.map((row) => row.fingerprint).filter((value): value is string => Boolean(value)))];
