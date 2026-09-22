@@ -16,6 +16,51 @@ const STREAM_HEADERS = ["content-type", "content-length", "content-range", "etag
 const AUDIO = new Set(["audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg", "audio/flac", "audio/aac"]);
 const IMAGE = new Set(["image/jpeg", "image/png", "image/webp"]);
 const programAudioKey = (driveId: string) => `program-recordings/${driveId}.mp3`;
+const R2_BACKFILL_KEY = "program-recordings-r2-v1";
+
+function seedDriveId(episode: (typeof seed.episodes)[number]): string {
+  const values = [
+    episode.audio,
+    ...(episode.links || []).map((link) => link?.url),
+  ].filter((value): value is string => typeof value === "string" && !!value);
+  for (const value of values) {
+    const pathMatch = value.match(/drive\.google\.com\/file\/d\/([\w-]+)/);
+    if (pathMatch?.[1]) return pathMatch[1];
+    try {
+      const url = new URL(value);
+      if (url.hostname === "drive.google.com") {
+        const id = url.searchParams.get("id") || "";
+        if (DRIVE_ID.test(id)) return id;
+      }
+    } catch {}
+  }
+  return "";
+}
+
+// The one-time GitHub migration uploaded all 86 recordings to R2, but its API
+// token cannot write this D1 database. Mark the already-uploaded objects from
+// inside the Worker instead: the Worker has the real DB binding. A DB marker
+// makes this idempotent across isolates and avoids re-touching the catalogue.
+async function backfillSeedR2Metadata(env: Env): Promise<void> {
+  const done = await env.DB.prepare("SELECT 1 AS done FROM program_settings WHERE key=? LIMIT 1").bind(R2_BACKFILL_KEY).first();
+  if (done) return;
+
+  const migratedAt = new Date().toISOString();
+  const updates = seed.episodes.flatMap((episode) => {
+    const driveId = seedDriveId(episode);
+    if (!driveId) return [];
+    const expectedSize = Math.max(0, Math.floor(Number(episode.sourceFileBytes) || 0));
+    return [env.DB.prepare(
+      "UPDATE program_episodes SET data_json=json_set(data_json,'$.r2Key',?,'$.audioSource','r2','$.audioSize',?,'$.audioMigratedAt',?),updated_at=unixepoch() WHERE id=?"
+    ).bind(programAudioKey(driveId), expectedSize, migratedAt, episode.id)];
+  });
+  if (updates.length !== 86) throw new Error(`Expected 86 seeded recordings for R2 backfill, found ${updates.length}`);
+  updates.push(
+    env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES (?,?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()")
+      .bind(R2_BACKFILL_KEY, JSON.stringify({ count: updates.length, migratedAt })),
+  );
+  await env.DB.batch(updates);
+}
 
 async function r2AudioResponse(request: Request, env: Env, key: string): Promise<Response | null> {
   const range = request.headers.get("range");
@@ -84,6 +129,7 @@ async function catalog(env: Env, includeHidden = false) {
     inserts.push(env.DB.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch())").bind(JSON.stringify(seed.seasons)));
     await env.DB.batch(inserts);
   }
+  await backfillSeedR2Metadata(env);
   const [episodes, settings] = await env.DB.batch([
     env.DB.prepare(`SELECT id,data_json FROM program_episodes ${includeHidden ? "" : "WHERE visible=1"} ORDER BY date DESC,number DESC`),
     env.DB.prepare("SELECT key,value_json FROM program_settings"),
