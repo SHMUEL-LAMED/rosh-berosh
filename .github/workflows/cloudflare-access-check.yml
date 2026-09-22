@@ -1,0 +1,38 @@
+name: Cloudflare access check
+
+# Verifies, without printing any secret, which Cloudflare resources the
+# repository's deploy token can reach: the account, the R2 bucket and the D1
+# database used by the program site. Run it manually before a migration.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Who am I
+        run: npx wrangler whoami
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: R2 buckets
+        run: npx wrangler r2 bucket list
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: R2 objects under program/
+        run: npx wrangler r2 object list rosh-berosh-media --prefix program/ --remote 2>&1 | head -50 || true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: D1 databases
+        run: npx wrangler d1 list
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: D1 program episodes
+        run: npx wrangler d1 execute site-creator-d1 --remote --command "SELECT COUNT(*) AS total, SUM(json_extract(data_json,'$.audio') LIKE '%/media/%') AS on_r2 FROM program_episodes"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
