@@ -13,11 +13,21 @@ type AuthEnv = { DB?: D1Database; MEDIA?: R2Bucket; ADMIN_EMAILS?: string };
 const ADMIN_LIST_KEY = "settings/admin-emails.json";
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 
-function configuredAdminEmails(env?: AuthEnv): string[] {
-  return String(env?.ADMIN_EMAILS || "")
+/** מנהלים קבועים: תמיד מנהלים, ואי אפשר להסיר אותם מדף ההרשאות.
+    הדומיין העברי מופיע בשתי הצורות שבהן Google עשוי למסור אותו. */
+export const DEFAULT_ADMIN_EMAILS = [
+  "0534169095@xn--4dbjbascrao3i.com",
+  "0534169095@שמואלליווי.com",
+  "o0534169095@gmail.com",
+  "smwlyqswkwt232@gmail.com",
+];
+
+export function configuredAdminEmails(env?: AuthEnv): string[] {
+  const fromEnv = String(env?.ADMIN_EMAILS || "")
     .split(/[\s,;]+/)
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
+  return [...new Set([...DEFAULT_ADMIN_EMAILS, ...fromEnv])];
 }
 
 export async function readAdminEmails(env?: AuthEnv): Promise<string[]> {

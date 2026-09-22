@@ -172,17 +172,19 @@ test("the program site manages the same administrator list as the voting site", 
   const { call, admin, voter, saved } = await setup();
   assert.equal((await call("/api/program/admins", { token: voter })).status, 403);
   const list = await (await call("/api/program/admins", { token: admin })).json();
-  assert.equal(list.admins.length, 1);
-  assert.equal(list.admins[0].email, "admin@example.com");
-  assert.equal(list.admins[0].fixed, true);
-  assert.equal(list.admins[0].you, true);
-  assert.ok(Number(list.admins[0].lastSeen) > 0, "the last sign-in comes from the shared sessions table");
+  const DEFAULTS = ["0534169095@xn--4dbjbascrao3i.com", "0534169095@שמואלליווי.com", "o0534169095@gmail.com", "smwlyqswkwt232@gmail.com"];
+  assert.equal(list.admins.length, 1 + DEFAULTS.length);
+  const me = list.admins.find((row) => row.email === "admin@example.com");
+  assert.equal(me.fixed, true);
+  assert.equal(me.you, true);
+  assert.ok(Number(me.lastSeen) > 0, "the last sign-in comes from the shared sessions table");
+  for (const email of DEFAULTS) assert.equal(list.admins.find((row) => row.email === email)?.fixed, true, `${email} is a built-in manager`);
   const add = await call("/api/program/admins", { method: "POST", token: admin, body: { email: "Editor@Example.com" } });
   assert.equal(add.status, 200, await add.clone().text());
-  assert.deepEqual(saved, ["admin@example.com", "editor@example.com"], "the list is stored where the voting site reads it");
+  assert.ok(saved.includes("editor@example.com") && saved.includes("admin@example.com"), "the list is stored where the voting site reads it");
   assert.equal((await call("/api/program/admins", { method: "DELETE", token: admin, body: { email: "admin@example.com" } })).status, 400, "you cannot remove yourself");
   const remove = await call("/api/program/admins", { method: "DELETE", token: admin, body: { email: "editor@example.com" } });
-  assert.equal((await remove.json()).admins.length, 1);
+  assert.equal((await remove.json()).admins.length, 1 + DEFAULTS.length);
   assert.equal((await call("/api/program/admins", { method: "POST", token: admin, body: { email: "nope" } })).status, 400);
 });
 
