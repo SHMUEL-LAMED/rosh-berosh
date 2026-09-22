@@ -33,11 +33,11 @@ npm run dev
 הוורקר נפרס משני כיוונים:
 
 - **GitHub Action** (`.github/workflows/deploy.yml`) — על כל דחיפה ל־`main`, אחרי lint, build ובדיקות, `wrangler deploy` של `rosh-berosh`. זה מסלול הפרודקשן.
-- **חיבור ה־Git של Cloudflare (Workers Builds)** — בונה ופורס כל ענף שנדחף. ב־22.9.2026 ענף שהתבסס על `main` ישן יותר נפרס דקות אחרי שהפריסה מ־`main` הסתיימה, ודרס אותה.
+- **חיבור ה־Git של Cloudflare (Workers Builds)** — בונה ופורס כל ענף שנדחף. ב־22.9.2026 ענף שהתבסס על `main` ישן יותר נפרס דקות אחרי שהפריסה מ־`main` הסתיימה, ודרס אותה. Workers Builds גם כופה את שם הוורקר (`WRANGLER_CI_OVERRIDE_NAME`), ולכן אי אפשר להפנות ענף לוורקר אחר מתוך המאגר.
 
-לכן `vite.config.ts` קובע את שם הוורקר לפי הענף: תחת Workers Builds (המשתנה `WORKERS_CI` מוגדר) רק `main` בונה את `rosh-berosh`; כל ענף אחר, וגם בנייה שהענף שלה לא ידוע, בונה `rosh-berosh-preview` — וורקר נפרד עם אותם D1 ו־R2, בדיוק כמו גרסאות התצוגה המקדימה של Cloudflare — כך שהפרודקשן אינו נדרס. מקומית וב־GitHub Action המשתנים האלה אינם מוגדרים והשם נשאר `rosh-berosh`. `tests/deploy-guard.test.mjs` שומר על הכלל.
+לכן `vite.config.ts` עוצר בנייה כזו לפני שהיא מגיעה לפריסה: תחת Workers Builds (המשתנה `WORKERS_CI` מוגדר) רק `main` נבנה; כל ענף אחר, וגם בנייה שהענף שלה לא ידוע, נכשל מיד עם הודעה ברורה, וב־PR מופיע X של Workers Builds. זה מכוון: הענף לא נפרס לשום מקום, ו־`main` נפרס כרגיל. מקומית וב־GitHub Action המשתנים האלה אינם מוגדרים. `tests/deploy-guard.test.mjs` שומר על הכלל.
 
-מומלץ בנוסף, בלוח הבקרה של Cloudflare, בוורקר `rosh-berosh` → Settings → Builds: להגדיר את `main` כ־production branch ולכבות בנייה של ענפים אחרים (או להשאיר להם `npx wrangler versions upload --config dist/server/wrangler.json`, שיוצר גרסת תצוגה מקדימה בלי לגעת בפרודקשן). ההגדרה הזו אינה במאגר, ולכן ההגנה בקוד נשארת גם אחריה.
+התיקון השלם נמצא בלוח הבקרה של Cloudflare, בוורקר `rosh-berosh` → Settings → Builds: להגדיר את `main` כ־production branch ולכבות בנייה של ענפים אחרים, או להשאיר לענפים את `npx wrangler versions upload --config dist/server/wrangler.json`, שיוצר גרסת תצוגה מקדימה בלי לגעת בפרודקשן. במקרה השני מוסיפים שם למשתני הסביבה של הבנייה `WORKERS_BUILDS_ALLOW_BRANCHES=1`, וההגנה בקוד משחררת את הענפים.
 
 ## סיום השיחה בקו ההצבעה
 
