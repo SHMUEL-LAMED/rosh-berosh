@@ -146,3 +146,6 @@ body:has(.browse-wrap.open) .audio-dock{display:none}
 /* ההודעה המשותפת עם אתר התוכניות, ולשונית אתר התוכניות בניהול */
 .shared-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px auto 0;padding:12px 18px;max-width:1100px;border:1px solid rgba(196,160,53,.45);border-radius:16px;background:linear-gradient(90deg,rgba(196,160,53,.18),rgba(196,160,53,.05));color:#f6efd9;font-weight:700}.shared-banner span{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#c4a035;color:#17112b;flex:none}.shared-banner p{flex:1;margin:0;min-width:200px}.shared-banner a{padding:7px 12px;border:1px solid rgba(196,160,53,.5);border-radius:10px;color:#e0cd82;text-decoration:none}
 .admin-side nav .nav-group{margin:16px 0 2px;padding:0 15px;color:#c4a035;font-size:11px;font-weight:800;letter-spacing:.08em}
+/* תפריט הצד: כל הלשוניות נכנסות במסך, בלי לגלול בתוך התפריט */
+.admin-side nav{gap:1px;margin-top:22px}.admin-side nav button,.admin-side nav a{padding:7px 14px;font-size:14.5px;line-height:1.35}.admin-side nav a{margin-top:10px}.admin-side nav .nav-group{margin:12px 0 3px}.admin-side nav .nav-group:first-child{margin-top:0}.admin-logout{padding:10px 15px}
+@media(max-height:820px){.admin-side{padding-block:16px}.admin-side nav{margin-top:14px}.admin-side nav button,.admin-side nav a{padding:5px 14px}}

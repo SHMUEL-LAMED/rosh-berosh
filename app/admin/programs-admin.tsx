@@ -103,6 +103,20 @@ async function upload(file: File, episodeId: string, kind: "audio" | "cover", pr
   });
 }
 
+/** תמונה גדולה מוקטנת לפני ההעלאה, כדי שהאתר ייטען מהר גם בטלפון */
+async function shrinkImage(file: File): Promise<File> {
+  if (file.size < 700 * 1024) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas"); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+    const x = canvas.getContext("2d"); if (!x) return file;
+    x.fillStyle = "#0b0d18"; x.fillRect(0, 0, canvas.width, canvas.height); x.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+    return blob && blob.size < file.size ? new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
+  } catch { return file; }
+}
+
 /* ---------- תמונה אוטומטית בסגנון האתר ---------- */
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, max: number) {
@@ -181,7 +195,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   }, [origin, data]);
 
   if (!section) return null;
-  if (loadError) return <section className="admin-panel"><h2>אתר התוכניות</h2><p className="panel-help">{loadError}</p><button type="button" className="toggle" onClick={() => { setLoadError(""); setReload((v) => v + 1); }}>ניסיון חוזר</button></section>;
+  if (loadError) return <section className="admin-panel"><h2>אתר התוכניות</h2><p className="panel-help">{loadError}</p><button type="button" className="prog-btn" onClick={() => { setLoadError(""); setReload((v) => v + 1); }}>ניסיון חוזר</button></section>;
   if (!data || !origin) return <section className="admin-panel"><p className="panel-help">טוענים את אתר התוכניות…</p></section>;
 
   const status = !changes?.any ? { cls: "ok", text: "הכול מפורסם באתר התוכניות" } : { cls: "draft", text: `יש שינויים שעדיין לא פורסמו · ${sync === "saving" ? "שומרים…" : sync === "error" ? "השמירה נכשלה, ננסה שוב בשינוי הבא" : "נשמרו בטיוטה"}` };
@@ -189,7 +203,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   const common = { data, change, onMessage };
   return <div className="prog-admin">
     {statusBar}
-    {section === "programs" && <ProgramsSection {...common} surveys={surveys} />}
+    {section === "programs" && <ProgramsSection {...common} surveys={surveys} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} />}
     {section === "site" && <SiteSection {...common} />}
     {section === "listeners" && <ListenersSection data={data} onMessage={onMessage} />}
     {section === "publish" && <PublishSection {...common} origin={origin} changes={changes} onPublished={(published) => { setOrigin(published); setData(published); setSync(""); }} onDiscard={() => setReload((v) => v + 1)} />}
@@ -197,11 +211,15 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
 }
 
 type Common = { data: Catalog; change(next: Catalog): void; onMessage(message: string): void };
+/** מתג הפעלה/כיבוי שנראה כמו מתג */
+const Switch = ({ on, onClick, children }: { on: boolean; onClick(): void; children: ReactNode }) => <button type="button" role="switch" aria-checked={on} className={`prog-switch${on ? " on" : ""}`} onClick={onClick}><i aria-hidden="true" /><span>{children}</span></button>;
+/** בחירת קובץ בעברית, במקום הכפתור האנגלי של הדפדפן */
+const FilePick = ({ accept, onChange, children }: { accept: string; onChange(event: ChangeEvent<HTMLInputElement>): void; children: ReactNode }) => <label className="prog-file"><input type="file" accept={accept} onChange={onChange} /><span>{children}</span></label>;
 const Section = ({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) => <section className="admin-panel prog-panel"><header className="prog-panel-head"><h2>{title}</h2>{aside}</header>{children}</section>;
 
 /* ======================= 1. תוכניות ======================= */
 
-function ProgramsSection({ data, change, onMessage, surveys }: Common & { surveys: SurveyRow[] }) {
+function ProgramsSection({ data, change, onMessage, surveys, live }: Common & { surveys: SurveyRow[]; live: Set<string> }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState(""), [filter, setFilter] = useState("all");
   const [bulk, setBulk] = useState(false), [picked, setPicked] = useState<Set<string>>(new Set());
@@ -240,7 +258,7 @@ function ProgramsSection({ data, change, onMessage, surveys }: Common & { survey
       <div className="prog-filters">
         <select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="סינון"><option value="all">כל התוכניות</option><option value="visible">מוצגות באתר</option><option value="hidden">מוסתרות</option><option value="scheduled">מתוזמנות</option><option value="noaudio">בלי הקלטה</option><option value="nocover">בלי תמונה</option></select>
         <small>{shown.length === data.episodes.length ? `${shown.length} תוכניות` : `${shown.length} מתוך ${data.episodes.length}`}</small>
-        <button type="button" className={`toggle ${bulk ? "on" : ""}`} onClick={() => { setBulk(!bulk); setPicked(new Set()); }}>{bulk ? "סיום בחירה" : "בחירה מרובה"}</button>
+        <Switch on={bulk} onClick={() => { setBulk(!bulk); setPicked(new Set()); }}>בחירה מרובה</Switch>
       </div>
       {bulk && <div className="prog-bulk">
         <small>{picked.size ? `נבחרו ${picked.size}` : "לחצו על תוכניות כדי לבחור"}</small>
@@ -264,18 +282,20 @@ function ProgramsSection({ data, change, onMessage, surveys }: Common & { survey
       </div>
     </aside>
     <div className="prog-editor">
-      {current ? <Editor key={current.id} episode={current} data={data} surveys={surveys} onPatch={(fields) => patch(current.id, fields)} onFeatured={(on) => setEpisodes(data.episodes.map((e) => ({ ...e, featured: on && e.id === current.id })))} onDuplicate={() => duplicate(current)} onDelete={() => { if (confirm(`למחוק את "${label(current)}"?`)) removeIds([current.id]); }} onSeasons={(seasons) => change({ ...data, seasons })} uniqueSlug={uniqueSlug} onMessage={onMessage} />
+      {current ? <Editor key={current.id} episode={current} live={live.has(current.id)} data={data} surveys={surveys} onPatch={(fields) => patch(current.id, fields)} onFeatured={(on) => setEpisodes(data.episodes.map((e) => ({ ...e, featured: on && e.id === current.id })))} onDuplicate={() => duplicate(current)} onDelete={() => { if (confirm(`למחוק את "${label(current)}"?`)) removeIds([current.id]); }} onSeasons={(seasons) => change({ ...data, seasons })} uniqueSlug={uniqueSlug} onMessage={onMessage} />
         : <section className="admin-panel prog-empty"><b>♫</b><h2>בחרו תוכנית מהרשימה</h2><p className="panel-help">או לחצו „+ תוכנית חדשה”. כל שינוי נשמר מיד; כשמסיימים לוחצים „פרסום התוכניות” בתפריט.</p></section>}
     </div>
   </div>;
 }
 
-function Editor({ episode, data, surveys, onPatch, onFeatured, onDuplicate, onDelete, onSeasons, uniqueSlug, onMessage }: { episode: Episode; data: Catalog; surveys: SurveyRow[]; onPatch(fields: Partial<Episode>): void; onFeatured(on: boolean): void; onDuplicate(): void; onDelete(): void; onSeasons(seasons: Season[]): void; uniqueSlug(base: string, self: string): string; onMessage(message: string): void }) {
+function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate, onDelete, onSeasons, uniqueSlug, onMessage }: { episode: Episode; live: boolean; data: Catalog; surveys: SurveyRow[]; onPatch(fields: Partial<Episode>): void; onFeatured(on: boolean): void; onDuplicate(): void; onDelete(): void; onSeasons(seasons: Season[]): void; uniqueSlug(base: string, self: string): string; onMessage(message: string): void }) {
   const [audioStatus, setAudioStatus] = useState(""), [coverStatus, setCoverStatus] = useState("");
+  const historyRef = useRef<HTMLDivElement>(null);
   const [attempt, setAttempt] = useState(0), [history, setHistory] = useState<Array<{ version: Version; found: Episode | null }> | null>(null);
   const stream = streamUrl(episode);
   const onUpload = (kind: "audio" | "cover") => async (event: ChangeEvent<HTMLInputElement>) => {
-    const input = event.currentTarget, file = input.files?.[0]; if (!file) return;
+    const input = event.currentTarget, picked = input.files?.[0]; if (!picked) return;
+    const file = kind === "cover" ? await shrinkImage(picked) : picked;
     const setStatus = kind === "audio" ? setAudioStatus : setCoverStatus;
     try { const url = await upload(file, episode.id, kind, (pct) => setStatus(`מעלים את ${file.name} — ${pct}%`)); onPatch(kind === "audio" ? { audio: url, duration: 0 } : { cover: url }); setStatus(""); onMessage("הקובץ הועלה. כשתפרסמו, הוא יופיע באתר."); }
     catch (error) { setStatus(error instanceof Error ? error.message : "ההעלאה נכשלה."); }
@@ -292,7 +312,7 @@ function Editor({ episode, data, surveys, onPatch, onFeatured, onDuplicate, onDe
     try { await navigator.clipboard.writeText(text); onMessage("הטקסט הועתק — הדביקו בוואטסאפ."); } catch { onMessage("ההעתקה לא הצליחה."); }
   };
   const loadHistory = async () => {
-    setHistory([]);
+    setHistory([]); requestAnimationFrame(() => historyRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
     try {
       const { versions } = await api<{ versions: Version[] }>("/api/program/versions");
       const rows: Array<{ version: Version; found: Episode | null }> = []; let previous: string | null = null;
@@ -313,8 +333,8 @@ function Editor({ episode, data, surveys, onPatch, onFeatured, onDuplicate, onDe
 
   return <>
     <Section title={label(episode)} aside={<div className="row-actions">
-      <a href={`${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(episode.slug)}`} target="_blank" rel="noopener">צפייה באתר</a>
-      <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={loadHistory}>גרסאות קודמות</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
+      {live ? <a href={`${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(episode.slug)}`} target="_blank" rel="noopener">צפייה באתר ↗</a> : <button type="button" onClick={() => onMessage("התוכנית עוד לא באתר. היא תופיע אחרי „פרסום התוכניות”.")}>צפייה באתר ↗</button>}
+      <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={() => (history ? setHistory(null) : loadHistory())}>{history ? "הסתרת הגרסאות" : "גרסאות קודמות"}</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
     </div>}>
       <div className="prog-form">
         <label className="wide"><span>שם התוכנית</span><input value={episode.title} placeholder="למשל: שירי הסתיו" onChange={(e) => onPatch({ title: e.target.value })} /></label>
@@ -327,13 +347,13 @@ function Editor({ episode, data, surveys, onPatch, onFeatured, onDuplicate, onDe
         <label><span>פרסום מתוזמן (לא חובה)</span><input type="datetime-local" value={episode.publishAt} onChange={(e) => onPatch({ publishAt: e.target.value })} /><small>{episode.publishAt ? (scheduled(episode) ? `תופיע באתר ב־${when(episode.publishAt)}.` : "המועד עבר — מוצגת כרגיל.") : "ריק = מופיעה מיד אחרי הפרסום."}</small></label>
       </div>
       <div className="prog-switches">
-        <button type="button" className={`toggle ${episode.visible ? "on" : ""}`} onClick={() => onPatch({ visible: !episode.visible })}>{episode.visible ? "✓ מוצגת באתר" : "מוסתרת מהאתר"}</button>
-        <button type="button" className={`toggle ${episode.featured ? "on" : ""}`} onClick={() => onFeatured(!episode.featured)}>{episode.featured ? "★ המומלצת בדף הבית" : "להציג כמומלצת בדף הבית"}</button>
+        <Switch on={episode.visible} onClick={() => onPatch({ visible: !episode.visible })}>{episode.visible ? "מוצגת באתר" : "מוסתרת מהאתר"}</Switch>
+        <Switch on={episode.featured} onClick={() => onFeatured(!episode.featured)}>המומלצת בדף הבית</Switch>
       </div>
-      {history && <div className="prog-history">
+      {history && <div className="prog-history" ref={historyRef}>
         <h3>גרסאות קודמות של התוכנית</h3>
         {!history.length ? <p className="panel-help">טוענים… (גרסה נשמרת בכל פרסום)</p> : <div className="admin-list">{history.map(({ version, found }) => <article key={version.id}><div><span><b>{when(version.createdAt)}</b><small>{found ? `${found.title || "בלי שם"}${found.date ? ` · ${fmtDate(found.date)}` : ""}` : "התוכנית לא הייתה קיימת"}{version.by ? ` · ${version.by}` : ""}</small></span></div>{found && <button type="button" onClick={() => { onPatch(found); setHistory(null); onMessage("התוכנית שוחזרה לטיוטה. פרסמו כדי להעלות לאתר."); }}>שחזור</button>}</article>)}</div>}
-        <button type="button" className="toggle" onClick={() => setHistory(null)}>סגירה</button>
+        <button type="button" className="prog-btn" onClick={() => setHistory(null)}>סגירה</button>
       </div>}
     </Section>
 
@@ -341,7 +361,7 @@ function Editor({ episode, data, surveys, onPatch, onFeatured, onDuplicate, onDe
       <p className={`prog-note ${stream ? "ok" : ""}`}>{stream ? "✓ יש הקלטה לתוכנית הזו. המאזינים שומעים אותה בנגן של האתר." : "עדיין אין הקלטה. העלו קובץ או הדביקו קישור."}</p>
       {stream && <audio className="prog-audio" controls preload="metadata" src={stream} onLoadedMetadata={(e) => { const d = e.currentTarget.duration; if (!episode.duration && Number.isFinite(d)) onPatch({ duration: Math.round(d) }); }} />}
       <div className="prog-form">
-        <label><span>{stream ? "החלפת ההקלטה — העלאת קובץ" : "העלאת קובץ ההקלטה"}</span><input type="file" accept=".mp3,.m4a,.wav,.ogg,.flac,.aac" onChange={onUpload("audio")} /><small>{audioStatus || "קובץ שמע עד 50MB. לקובץ גדול יותר — הדביקו קישור."}</small></label>
+        <div className="prog-field"><span>{stream ? "החלפת ההקלטה" : "העלאת ההקלטה"}</span><FilePick accept=".mp3,.m4a,.wav,.ogg,.flac,.aac" onChange={onUpload("audio")}>⬆ בחירת קובץ הקלטה מהמחשב</FilePick><small>{audioStatus || "קובץ שמע עד 50MB. לקובץ גדול יותר — הדביקו קישור."}</small></div>
         <label><span>או קישור להקלטה</span><input dir="ltr" value={episode.audio} placeholder="https://…" onChange={(e) => onPatch({ audio: e.target.value, duration: 0 })} /><small>קישור שיתוף לקובץ בדרייב מספיק.</small></label>
       </div>
     </Section>
@@ -352,21 +372,21 @@ function Editor({ episode, data, surveys, onPatch, onFeatured, onDuplicate, onDe
         {episode.cover ? <img src={episode.cover} alt="" /> : <div className="prog-cover-empty">♫<small>בלי תמונה האתר מציג עטיפה צבעונית משלו</small></div>}
         <div className="prog-form single">
           <div className="prog-field"><span>יצירת תמונה אוטומטית</span><button type="button" className="prog-primary" onClick={autoCover}>{episode.cover ? "יצירת תמונה חדשה" : "ליצור תמונה עכשיו"}</button><small>{coverStatus || "עטיפה בסגנון האתר עם שם התוכנית, המספר ומשפט מהתיאור."}</small></div>
-          <label><span>העלאת תמונה משלכם</span><input type="file" accept=".jpg,.jpeg,.png,.webp" onChange={onUpload("cover")} /></label>
+          <div className="prog-field"><span>או תמונה משלכם</span><FilePick accept=".jpg,.jpeg,.png,.webp" onChange={onUpload("cover")}>⬆ בחירת תמונה מהמחשב</FilePick></div>
           <label><span>או קישור לתמונה</span><input dir="ltr" value={episode.cover} placeholder="https://…" onChange={(e) => onPatch({ cover: e.target.value })} /></label>
-          {episode.cover && <button type="button" className="toggle" onClick={() => onPatch({ cover: "" })}>הסרת התמונה</button>}
+          {episode.cover && <button type="button" className="danger" onClick={() => onPatch({ cover: "" })}>הסרת התמונה</button>}
         </div>
       </div>
     </Section>
 
     <details className="admin-panel prog-more">
-      <summary>עוד פרטים (לא חובה)</summary>
+      <summary><span>עוד פרטים</span><small>מילות חיפוש, כתובת הדף וקישורים — לא חובה</small></summary>
       <div className="prog-form single">
         <label><span>מילות חיפוש</span><input value={episode.tags.join(", ")} placeholder="למשל: מצעד, ראיון, חנוכה" onChange={(e) => onPatch({ tags: splitList(e.target.value) })} /><small>עוזרות למאזינים למצוא את התוכנית. מופרדות בפסיק.</small></label>
         <label><span>כתובת הדף</span><input dir="ltr" value={episode.slug} onChange={(e) => onPatch({ slug: e.target.value })} onBlur={(e) => onPatch({ slug: uniqueSlug(e.target.value, episode.id) })} /><small>{PROGRAM_SITE}episode.html?ep={episode.slug}</small></label>
         <div className="prog-field"><span>קישורים בדף התוכנית</span>
           {episode.links.map((link, i) => <div key={i} className="prog-link-row"><input value={link.label} placeholder="מה זה? (למשל: הפלייליסט)" onChange={(e) => onPatch({ links: episode.links.map((l, j) => (j === i ? { ...l, label: e.target.value } : l)) })} /><input dir="ltr" value={link.url} placeholder="https://…" onChange={(e) => onPatch({ links: episode.links.map((l, j) => (j === i ? { ...l, url: e.target.value } : l)) })} /><button type="button" className="danger" onClick={() => onPatch({ links: episode.links.filter((_, j) => j !== i) })}>✕</button></div>)}
-          <button type="button" className="toggle" onClick={() => onPatch({ links: [...episode.links, { label: "", url: "" }] })}>+ קישור</button>
+          <button type="button" className="prog-btn" onClick={() => onPatch({ links: [...episode.links, { label: "", url: "" }] })}>+ הוספת קישור</button>
         </div>
       </div>
     </details>
@@ -375,14 +395,14 @@ function Editor({ episode, data, surveys, onPatch, onFeatured, onDuplicate, onDe
 
 /* ======================= 2. הודעה ועדכונים ======================= */
 
-function SiteSection({ data, change }: Common) {
+function SiteSection({ data, change, onMessage }: Common) {
   const banner = data.settings.banner, updates = data.settings.updates;
   const setBanner = (fields: Partial<Banner>) => change({ ...data, settings: { ...data.settings, banner: { ...banner, ...fields } } });
   const setUpdates = (next: Update[]) => change({ ...data, settings: { ...data.settings, updates: next } });
   const counts = data.episodes.reduce<Record<string, number>>((acc, e) => { acc[e.season] = (acc[e.season] || 0) + 1; return acc; }, {});
   const setSeason = (i: number, fields: Partial<Season>) => change({ ...data, seasons: data.seasons.map((s, j) => (j === i ? { ...s, ...fields } : s)) });
   return <>
-    <Section title="הודעה בראש האתר" aside={<span className={`toggle ${banner.enabled ? "on" : ""}`}>{banner.enabled ? "מוצגת" : "כבויה"}</span>}>
+    <Section title="הודעה בראש האתר" aside={<strong className={`prog-badge${banner.enabled ? " ok" : " off"}`}>{banner.enabled ? "● מוצגת עכשיו" : "○ לא מוצגת"}</strong>}>
       <p className="panel-help">פס הודעה בראש הדפים — למשל „התוכנית הבאה ביום חמישי” או ברכה לחג. נעלם לבד בתאריך שתבחרו.</p>
       <div className="prog-form">
         <label className="wide"><span>ההודעה</span><input value={banner.text} maxLength={300} placeholder="למשל: התוכנית הבאה — יום חמישי ב־20:00" onChange={(e) => setBanner({ text: e.target.value })} /></label>
@@ -391,7 +411,7 @@ function SiteSection({ data, change }: Common) {
         <label><span>להציג עד (לא חובה)</span><input type="date" value={banner.until} onChange={(e) => setBanner({ until: e.target.value })} /></label>
         <div className="prog-field"><span>איפה להציג</span><label className="prog-check"><input type="checkbox" checked={banner.sites.program} onChange={(e) => setBanner({ sites: { ...banner.sites, program: e.target.checked } })} /> באתר התוכניות</label><label className="prog-check"><input type="checkbox" checked={banner.sites.survey} onChange={(e) => setBanner({ sites: { ...banner.sites, survey: e.target.checked } })} /> באתר הסקר</label></div>
       </div>
-      <div className="prog-switches"><button type="button" className={`toggle ${banner.enabled ? "on" : ""}`} onClick={() => setBanner({ enabled: !banner.enabled && !!banner.text.trim() })}>{banner.enabled ? "✓ ההודעה מוצגת" : "להציג את ההודעה"}</button></div>
+      <div className="prog-switches"><Switch on={banner.enabled} onClick={() => { if (!banner.enabled && !banner.text.trim()) return onMessage("כתבו קודם את ההודעה, ואז הפעילו אותה."); setBanner({ enabled: !banner.enabled }); }}>להציג את ההודעה</Switch></div>
       {banner.enabled && banner.text && <div className="shared-banner prog-banner-preview"><span aria-hidden="true">✦</span><p>{banner.text}</p>{banner.link && <a>{banner.linkLabel || "לפרטים"} ←</a>}</div>}
     </Section>
 
@@ -399,7 +419,7 @@ function SiteSection({ data, change }: Common) {
       <p className="panel-help">הודעות קצרות למאזינים בדף „עדכונים” באתר התוכניות. החדש למעלה; אפשר לנעוץ עדכון חשוב.</p>
       <button type="button" className="prog-primary" onClick={() => setUpdates([{ id: `u-${Date.now().toString(36)}`, date: today(), title: "", text: "", link: "", pinned: false }, ...updates])}>+ עדכון חדש</button>
       <div className="prog-updates">{updates.map((u, i) => <article key={u.id} className={u.pinned ? "pinned" : ""}>
-        <div className="prog-update-head"><input type="date" value={u.date} onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))} /><input value={u.title} placeholder="כותרת" onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} /><button type="button" className={`toggle ${u.pinned ? "on" : ""}`} onClick={() => setUpdates(updates.map((x, j) => (j === i ? { ...x, pinned: !x.pinned } : x)))}>{u.pinned ? "📌 נעוץ" : "נעיצה"}</button><button type="button" className="danger" onClick={() => { if (confirm("למחוק את העדכון?")) setUpdates(updates.filter((_, j) => j !== i)); }}>מחיקה</button></div>
+        <div className="prog-update-head"><input type="date" value={u.date} onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))} /><input value={u.title} placeholder="כותרת" onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} /><Switch on={u.pinned} onClick={() => setUpdates(updates.map((x, j) => (j === i ? { ...x, pinned: !x.pinned } : x)))}>נעוץ למעלה</Switch><button type="button" className="danger" onClick={() => { if (confirm("למחוק את העדכון?")) setUpdates(updates.filter((_, j) => j !== i)); }}>מחיקה</button></div>
         <textarea value={u.text} placeholder="תוכן העדכון" onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} />
         <input dir="ltr" value={u.link} placeholder="קישור (לא חובה)" onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, link: e.target.value } : x)))} />
       </article>)}{!updates.length && <p className="panel-help">עדיין אין עדכונים.</p>}</div>
@@ -408,7 +428,7 @@ function SiteSection({ data, change }: Common) {
     <Section title="עונות" aside={<strong className="prog-badge">{data.seasons.length}</strong>}>
       <p className="panel-help">עונה היא קבוצה של תוכניות — לפי שנה, תקופה או מגישים. בארכיון אפשר לסנן לפי עונה. מחיקת עונה לא מוחקת תוכניות.</p>
       <div className="prog-seasons">{data.seasons.map((s, i) => <div key={s.id}><input value={s.title} placeholder="שם העונה" onChange={(e) => setSeason(i, { title: e.target.value })} /><input type="number" value={s.year ?? ""} placeholder="שנה" onChange={(e) => setSeason(i, { year: e.target.value ? Number(e.target.value) : null })} /><input value={s.note} placeholder="הערה" onChange={(e) => setSeason(i, { note: e.target.value })} /><small>{counts[s.id] || 0} תוכניות</small><button type="button" className="danger" onClick={() => { if (confirm(`למחוק את העונה "${s.title}"?`)) change({ ...data, seasons: data.seasons.filter((_, j) => j !== i), episodes: data.episodes.map((e) => (e.season === s.id ? { ...e, season: "" } : e)) }); }}>✕</button></div>)}</div>
-      <button type="button" className="toggle" onClick={() => { const y = new Date().getFullYear(); let id = String(y), n = 2; while (data.seasons.some((s) => s.id === id)) id = `${y}-${n++}`; change({ ...data, seasons: [...data.seasons, { id, title: `עונת ${y}`, year: y, note: "" }] }); }}>+ עונה חדשה</button>
+      <button type="button" className="prog-btn" onClick={() => { const y = new Date().getFullYear(); let id = String(y), n = 2; while (data.seasons.some((s) => s.id === id)) id = `${y}-${n++}`; change({ ...data, seasons: [...data.seasons, { id, title: `עונת ${y}`, year: y, note: "" }] }); }}>+ עונה חדשה</button>
     </Section>
   </>;
 }
@@ -431,7 +451,7 @@ function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(messag
   if (!stats || !messages) return <Section title="מאזינים"><p className="panel-help">טוענים…</p></Section>;
   const max = Math.max(1, ...stats.days.map((d) => Number(d.plays) || 0));
   return <>
-    <Section title="מי מאזין" aside={<button type="button" className="toggle" onClick={() => setTick((v) => v + 1)}>רענון</button>}>
+    <Section title="מי מאזין" aside={<button type="button" className="prog-btn" onClick={() => { setTick((v) => v + 1); onMessage("המספרים עודכנו."); }}>↻ רענון</button>}>
       <div className="stat-grid prog-stats"><article><small>האזנות בשבוע האחרון</small><b>{n2(stats.week.plays)}</b></article><article><small>מאזינים בשבוע האחרון</small><b>{n2(stats.week.listeners)}</b></article><article><small>האזנות מאז ההתחלה</small><b>{n2(stats.totals.plays)}</b></article><article><small>שעות האזנה</small><b>{n2(Math.round((Number(stats.totals.seconds) || 0) / 3600))}</b></article></div>
       <h3>30 הימים האחרונים</h3>
       {stats.days.length ? <div className="prog-bars">{stats.days.map((d) => <div key={d.day} title={`${fmtDate(d.day)}: ${n2(d.plays)} האזנות`}><i style={{ height: `${Math.round(((Number(d.plays) || 0) / max) * 100)}%` }} /><small>{d.day.slice(8)}</small></div>)}</div> : <p className="panel-help">עדיין אין האזנות שנרשמו.</p>}
@@ -475,7 +495,12 @@ function PublishSection({ data, change, onMessage, origin, changes, onPublished,
     }
     for (const [n, l] of byNumber) if (l.length > 1) dup.push(`${l.length} תוכניות עם המספר ${n}: ${l.map(label).join(", ")}`);
     for (const [, l] of byDrive) if (l.length > 1) dup.push(`אותה הקלטה ב־${l.length} תוכניות: ${l.map(label).join(", ")}`);
-    return { must, should, dup };
+    const groups = [
+      { key: "audio", title: "תוכניות בלי הקלטה", hint: "המאזינים לא יוכלו לשמוע אותן", items: data.episodes.filter((e) => !streamUrl(e)) },
+      { key: "date", title: "תוכניות בלי תאריך", hint: "הן יופיעו בסוף הארכיון", items: data.episodes.filter((e) => !e.date) },
+      { key: "cover", title: "תוכניות בלי תמונה", hint: "האתר מציג להן עטיפה צבעונית; אפשר ליצור תמונה בלחיצה", items: data.episodes.filter((e) => !e.cover) },
+    ].filter((g) => g.items.length);
+    return { must, should, dup, groups };
   }, [data.episodes]);
 
   const publish = async () => {
@@ -536,29 +561,29 @@ function PublishSection({ data, change, onMessage, origin, changes, onPublished,
   if (changes?.removed.length) list.push(changes.removed.length === 1 ? `תוכנית אחת תימחק מהאתר (${label(changes.removed[0])})` : `${changes.removed.length} תוכניות יימחקו מהאתר`);
   if (changes?.seasons) list.push("העונות השתנו");
   if (changes?.settings) list.push("ההודעה או העדכונים השתנו");
-  const check = (kind: "audio" | "media", title: string, hint: string) => { const r = checks[kind]; return <article><div><span><b>{title}</b><small>{r ? (r.running ? `בודקים… ${r.done}/${r.total}` : r.problems.length ? `${r.problems.length} בעיות:` : `✓ הכול תקין (${r.total} נבדקו)`) : hint}</small>{r && !r.running && !!r.problems.length && <ul className="prog-problems">{r.problems.map((p, i) => <li key={i}>{p.text}</li>)}</ul>}</span></div><button type="button" disabled={r?.running} onClick={() => runCheck(kind)}>{r ? "בדיקה חוזרת" : "בדיקה"}</button></article>; };
+  const check = (kind: "audio" | "media", title: string, hint: string) => { const r = checks[kind]; return <article><div><span><b>{title}</b><small>{r ? (r.running ? `בודקים… ${r.done}/${r.total}` : r.problems.length ? `${r.problems.length} בעיות:` : `✓ הכול תקין (${r.total} נבדקו)`) : hint}</small>{r && !r.running && !!r.problems.length && <ul className="prog-problems">{r.problems.map((p, i) => <li key={i}>{p.text}</li>)}</ul>}</span></div><button type="button" className="prog-btn" disabled={r?.running} onClick={() => runCheck(kind)}>{r?.running ? "בודקים…" : r ? "↻ בדיקה חוזרת" : "▶ להתחיל בדיקה"}</button></article>; };
 
   return <>
     <Section title={changes?.any ? "יש שינויים שמחכים לפרסום" : "הכול מפורסם"}>
       <p className="panel-help">{changes?.any ? "עד הפרסום, השינויים נראים רק כאן (ולמי שקיבל קישור תצוגה מקדימה)." : "אתר התוכניות מציג בדיוק את מה שיש כאן."}</p>
       {!!list.length && <ul className="prog-changes">{list.map((x) => <li key={x}>{x}</li>)}</ul>}
       {!!health.must.length && <div className="prog-must"><b>לפני שמפרסמים, צריך לתקן:</b><ul>{health.must.map((p) => <li key={p.id}>{p.text}</li>)}</ul></div>}
-      <div className="row-actions"><button type="button" className="prog-primary big" disabled={!changes?.any || !!health.must.length || busy} onClick={publish}>פרסום לאתר התוכניות</button>{changes?.any && <button type="button" onClick={discard}>ביטול כל השינויים</button>}</div>
+      <div className="row-actions">{changes?.any ? <><button type="button" className="prog-primary big" disabled={!!health.must.length || busy} onClick={publish}>{busy ? "מפרסמים…" : "פרסום לאתר התוכניות ←"}</button><button type="button" onClick={discard}>ביטול כל השינויים</button></> : <span className="prog-done">✓ אין שינויים שמחכים לפרסום</span>}</div>
     </Section>
 
-    <Section title="בדיקת תקינות" aside={<strong className="prog-badge">{health.should.length + health.dup.length}</strong>}>
+    <Section title="בדיקת תקינות" aside={<strong className="prog-badge">{health.groups.length + health.dup.length ? `${health.groups.length + health.dup.length} נושאים` : "✓ תקין"}</strong>}>
       {health.dup.length > 0 && <div className="prog-must soft"><b>כפילויות:</b><ul>{health.dup.map((d) => <li key={d}>{d}</li>)}</ul></div>}
-      {health.should.length ? <><ul className="prog-problems">{health.should.slice(0, 30).map((p, i) => <li key={i}>{p.text}</li>)}{health.should.length > 30 && <li>ועוד {health.should.length - 30}…</li>}</ul><p className="panel-help">אלה הצעות בלבד — הן לא חוסמות פרסום.</p></> : <p className="panel-help">✓ לכל התוכניות יש שם, תאריך, הקלטה ותמונה.</p>}
+      {health.groups.length ? <><div className="prog-groups">{health.groups.map((g) => <details key={g.key}><summary><b>{g.items.length}</b><span>{g.title}</span><small>{g.hint}</small></summary><ul className="prog-problems">{g.items.map((e) => <li key={e.id}>{label(e)}</li>)}</ul></details>)}</div><p className="panel-help">אלה הצעות בלבד — הן לא חוסמות פרסום. לחיצה על שורה מציגה את התוכניות.</p></> : <p className="panel-help">✓ לכל התוכניות יש שם, תאריך, הקלטה ותמונה.</p>}
       <div className="admin-list">{check("audio", "בדיקת ההקלטות", "עובר על כל ההקלטות ומוודא שהן נטענות בנגן.")}{check("media", "בדיקת תמונות וקישורים", "מוודא שהתמונות נטענות ושהקישורים עונים.")}</div>
     </Section>
 
-    <Section title="גרסאות קודמות" aside={<button type="button" className="toggle" onClick={loadVersions}>{versions ? "רענון" : "הצגה"}</button>}>
+    <Section title="גרסאות קודמות" aside={<button type="button" className="prog-btn" onClick={loadVersions}>{versions ? "↻ רענון" : "הצגת הגרסאות"}</button>}>
       <p className="panel-help">כל פרסום נשמר אוטומטית. שחזור מחזיר גרסה לטיוטה, ואז מפרסמים. גם הגיבוי של לשונית „ארכיון וגיבויים” כולל את אתר התוכניות.</p>
       {versions && (versions.length ? <div className="admin-list">{versions.map((v, i) => <article key={v.id}><div><span><b>{when(v.createdAt)}{i === 0 ? " · הגרסה שבאתר" : ""}</b><small>{n2(v.episodes)} תוכניות{v.by ? ` · ${v.by}` : ""}</small></span></div><button type="button" onClick={() => restoreVersion(v)}>שחזור</button></article>)}</div> : <p className="panel-help">עדיין אין גרסאות — הראשונה תישמר בפרסום הבא.</p>)}
     </Section>
 
     <details className="admin-panel prog-more">
-      <summary>כלים מתקדמים</summary>
+      <summary><span>כלים מתקדמים</span><small>תצוגה מקדימה, קובץ גיבוי, שחזור והעברת הקלטות</small></summary>
       <div className="admin-list">
         <article><div><span><b>קישור לתצוגה מקדימה</b><small>מישהו אחר יכול לראות את האתר עם הטיוטה לפני הפרסום. עובד עד הפרסום הבא.</small>{preview && <input dir="ltr" readOnly value={preview} onFocus={(e) => e.currentTarget.select()} />}</span></div><button type="button" onClick={makePreview}>יצירת קישור</button></article>
         <article><div><span><b>קובץ גיבוי של אתר התוכניות</b><small>כל התוכניות, העונות וההודעות בקובץ אחד.</small></span></div><button type="button" onClick={backup}>הורדה</button></article>
