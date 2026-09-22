@@ -11,6 +11,7 @@ import { normalizePhone } from "./phone";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 import { readIvrCatalog } from "./ivr-catalog.js";
+import { programApi } from "./program-api";
 import { placeholders } from "./sql.js";
 
 interface Env {
@@ -309,6 +310,11 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
+  if (url.pathname.startsWith("/api/program/")) {
+    await ensureRuntimeSchema(env);
+    const response = await programApi(request, env, ctx);
+    if (response) return response;
+  }
   // The voting line calls these two endpoints at the start of every call. Do not
   // run the legacy full runtime-schema reconciliation here: on a cold isolate it
   // issues dozens of D1 statements and makes Yemot time out before the caller
