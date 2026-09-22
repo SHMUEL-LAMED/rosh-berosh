@@ -11,7 +11,19 @@ const { d1, r2 } = hostingConfig;
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
+// Cloudflare's Git integration (Workers Builds) runs the deploy command for
+// every pushed branch, and a branch based on an older main once replaced the
+// production Worker minutes after main had deployed. So under Workers Builds
+// only the main branch builds as "rosh-berosh"; any other branch, or a build
+// whose branch is unknown, builds as a separate preview Worker instead.
+// Locally and in the GitHub Action these variables are unset.
+const PRODUCTION_BRANCH = "main";
+const isPreviewBuild =
+  !!process.env.WORKERS_CI && process.env.WORKERS_CI_BRANCH !== PRODUCTION_BRANCH;
+const workerName = isPreviewBuild ? "rosh-berosh-preview" : "rosh-berosh";
+
 const localBindingConfig = {
+  name: workerName,
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
   d1_databases: d1
