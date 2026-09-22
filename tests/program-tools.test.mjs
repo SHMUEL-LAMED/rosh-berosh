@@ -172,7 +172,11 @@ test("the program site manages the same administrator list as the voting site", 
   const { call, admin, voter, saved } = await setup();
   assert.equal((await call("/api/program/admins", { token: voter })).status, 403);
   const list = await (await call("/api/program/admins", { token: admin })).json();
-  assert.deepEqual(list.admins, [{ email: "admin@example.com", fixed: true, you: true }]);
+  assert.equal(list.admins.length, 1);
+  assert.equal(list.admins[0].email, "admin@example.com");
+  assert.equal(list.admins[0].fixed, true);
+  assert.equal(list.admins[0].you, true);
+  assert.ok(Number(list.admins[0].lastSeen) > 0, "the last sign-in comes from the shared sessions table");
   const add = await call("/api/program/admins", { method: "POST", token: admin, body: { email: "Editor@Example.com" } });
   assert.equal(add.status, 200, await add.clone().text());
   assert.deepEqual(saved, ["admin@example.com", "editor@example.com"], "the list is stored where the voting site reads it");

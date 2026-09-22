@@ -121,7 +121,7 @@ async function admin(request: Request, env: Env) {
 const publicUser = (user: { email: string; name: string; picture?: string; isAdmin: boolean }) =>
   ({ email: user.email, name: user.name, picture: user.picture, isAdmin: !!user.isAdmin });
 
-async function catalog(env: Env, includeHidden = false) {
+async function catalog(env: Env, includeHidden = false, origin = "") {
   const existing = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_episodes").first<{ total: number }>();
   if (!Number(existing?.total)) {
     const inserts = seed.episodes.map((episode) => env.DB.prepare("INSERT OR IGNORE INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch())")
@@ -144,7 +144,7 @@ async function catalog(env: Env, includeHidden = false) {
       try { return [{ ...JSON.parse(row.data_json), id: row.id }]; } catch { return []; }
     }),
     // ההגדרות הציבוריות של אתר התוכניות (ההודעה בדף הבית ודף העדכונים)
-    settings: await publicSettings(env),
+    settings: await publicSettings(env, origin),
   };
 }
 
@@ -170,7 +170,7 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
 
   if (url.pathname === "/api/program/catalog" && request.method === "GET") {
     const user = await readSession(request, env);
-    return reply(request, await catalog(env, !!user?.isAdmin), 200);
+    return reply(request, await catalog(env, !!user?.isAdmin, url.origin), 200);
   }
   if (url.pathname === "/api/program/auth/google" && request.method === "POST") {
     try {

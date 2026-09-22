@@ -3,7 +3,7 @@
    קישור תצוגה מקדימה, גרסאות שנשמרות אוטומטית בכל פרסום, אירועי האזנה
    לסטטיסטיקה, הודעות מהמאזינים, רשימת המנהלים (אותה רשימה של אתר הסקר)
    ורשימת התפוצה (אותה טבלה של אתר הסקר, עם חשבון Google המחובר). */
-import { readAdminEmails, readSession, saveAdminEmails, type SessionUser } from "./auth";
+import { createSession, readAdminEmails, readSession, saveAdminEmails, sessionCookie, type SessionUser } from "./auth";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 
@@ -15,6 +15,9 @@ type Helpers = {
 };
 
 export const PUBLIC_SETTING_KEYS = ["banner", "updates"] as const;
+/** כתובת אתר התוכניות (GitHub Pages) — יעד המעבר מניהול הסקר. */
+export const PROGRAM_SITE = "https://shmuel-lamed.github.io/Ringtones/";
+const HANDOFF_TTL = 180;
 export const VERSIONS_KEPT = 40;
 const MAX_TEXT = 4000;
 const DAY_SECONDS = 86400;
@@ -42,7 +45,13 @@ export function settingStatement(env: Env, key: string, value: unknown) {
 export function normalizeBanner(raw: unknown) {
   const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const message = text(b.text, 300);
-  return { enabled: !!b.enabled && !!message, text: message, link: text(b.link, 500), linkLabel: text(b.linkLabel, 80), until: /^\d{4}-\d{2}-\d{2}/.test(String(b.until || "")) ? String(b.until).slice(0, 10) : "" };
+  const sites = (b.sites && typeof b.sites === "object" ? b.sites : {}) as Record<string, unknown>;
+  return {
+    enabled: !!b.enabled && !!message, text: message, link: text(b.link, 500), linkLabel: text(b.linkLabel, 80),
+    until: /^\d{4}-\d{2}-\d{2}/.test(String(b.until || "")) ? String(b.until).slice(0, 10) : "",
+    // באילו אתרים ההודעה מופיעה: אתר התוכניות (ברירת מחדל) ו/או אתר הסקר
+    sites: { program: sites.program !== false, survey: sites.survey === true },
+  };
 }
 
 /** דף העדכונים: הודעות קצרות עם תאריך. הפריטים נשמרים מהחדש לישן. */
@@ -54,11 +63,25 @@ export function normalizeUpdates(raw: unknown) {
   }).filter((u) => u.title || u.text).sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.date.localeCompare(a.date));
 }
 
+/** ההודעה פעילה עכשיו? (מסומנת, יש טקסט, והתאריך לא עבר) */
+export function bannerLive(banner: ReturnType<typeof normalizeBanner>) {
+  return banner.enabled && !!banner.text && (!banner.until || banner.until >= day());
+}
+
+/** הסקר הפעיל, כפי שאתר התוכניות מציג אותו: שם, האם ההצבעה פתוחה, וכתובת. */
+export async function activeSurveyStatus(env: Env, origin: string) {
+  try {
+    const row = await env.DB.prepare("SELECT s.id, s.name, COALESCE(p.voting_open,0) AS open FROM surveys s LEFT JOIN poll_settings p ON p.id=s.id WHERE s.active=1 ORDER BY s.created_at DESC LIMIT 1").first<{ id: string; name: string; open: number }>();
+    if (!row) return null;
+    return { id: row.id, name: row.name, open: !!Number(row.open), url: `${origin}/` };
+  } catch { return null; }
+}
+
 /** מה מתפרסם לציבור יחד עם הקטלוג. */
-export async function publicSettings(env: Env) {
+export async function publicSettings(env: Env, origin = "") {
   const rows = await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates')").all<{ key: string; value_json: string }>();
   const values = new Map(rows.results.map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
-  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")) };
+  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), survey: await activeSurveyStatus(env, origin) };
 }
 
 /** משפטי הכתיבה של ההגדרות שהגיעו עם פרסום הקטלוג. */
@@ -87,6 +110,73 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
   const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
   const tooMany = () => h.reply(request, { error: "יותר מדי בקשות. נסו שוב בעוד דקה." }, 429);
   const forbidden = () => h.reply(request, { error: "אין הרשאת ניהול." }, 403);
+  const redirect = (to: string, cookie?: string) => { const headers = new Headers({ location: to, "cache-control": "no-store" }); if (cookie) headers.set("set-cookie", cookie); return new Response(null, { status: 302, headers }); };
+
+  /* ---------- כניסה אחת לשני האתרים: מעבר עם קוד חד־פעמי ----------
+     המשתמש מחובר באתר אחד (טוקן באתר התוכניות, עוגייה באתר הסקר) ומבקש
+     קוד; האתר השני ממיר את הקוד לסשן משלו לאותו חשבון. הקוד תקף לשלוש
+     דקות ולשימוש אחד. */
+  const issueHandoff = async (user: SessionUser) => {
+    const code = crypto.randomUUID().replace(/-/g, "");
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM program_settings WHERE key LIKE 'handoff:%' AND updated_at < unixepoch()-?").bind(HANDOFF_TTL),
+      settingStatement(env, `handoff:${code}`, { sub: user.sub, email: user.email, name: user.name, picture: user.picture || null }),
+    ]);
+    return code;
+  };
+  const redeemHandoff = async (code: string): Promise<SessionUser | null> => {
+    if (!/^[a-f0-9]{32}$/.test(code)) return null;
+    const row = await env.DB.prepare("SELECT value_json FROM program_settings WHERE key=? AND updated_at >= unixepoch()-?").bind(`handoff:${code}`, HANDOFF_TTL).first<{ value_json: string }>();
+    await env.DB.prepare("DELETE FROM program_settings WHERE key=?").bind(`handoff:${code}`).run();
+    if (!row) return null;
+    try { const u = JSON.parse(row.value_json); const admins = await readAdminEmails(env); return { sub: u.sub, email: u.email, name: u.name, picture: u.picture || undefined, isAdmin: admins.includes(String(u.email).toLowerCase()), exp: 0 }; }
+    catch { return null; }
+  };
+  if (path === "/handoff" && method === "POST") {
+    const user = await readSession(request, env);
+    if (!user) return h.reply(request, { error: "לא מחוברים." }, 401);
+    const code = await issueHandoff(user);
+    return h.reply(request, { code, toSurvey: `${url.origin}/api/program/handoff/${code}`, toPrograms: `${PROGRAM_SITE}admin.html?handoff=${code}` });
+  }
+  if (path === "/handoff/to-programs" && method === "GET") {
+    const user = await readSession(request, env);
+    if (!user) return redirect("/admin");
+    const code = await issueHandoff(user);
+    return redirect(`${PROGRAM_SITE}admin.html?handoff=${code}${url.searchParams.get("embed") === "1" ? "&embed=1" : ""}`);
+  }
+  if (path.startsWith("/handoff/") && method === "GET") {
+    const user = await redeemHandoff(path.slice("/handoff/".length));
+    if (!user) return redirect("/admin?handoff=expired");
+    const token = await createSession(env, user);
+    return redirect(url.searchParams.get("to") === "/" ? "/" : "/admin", sessionCookie(token));
+  }
+  if (path === "/auth/handoff" && method === "POST") {
+    const { code } = await body<{ code?: string }>();
+    const user = await redeemHandoff(String(code || ""));
+    if (!user) return h.reply(request, { error: "קוד המעבר פג או כבר נוצל. נסו שוב מהאתר השני." }, 401);
+    const token = await createSession(env, user);
+    return h.reply(request, { token, user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } });
+  }
+  /* התנתקות במקום אחד מנתקת מכל המקומות: כל הסשנים של החשבון נמחקים. */
+  if (path === "/logout" && method === "POST") {
+    const user = await readSession(request, env);
+    if (user?.sub) await env.DB.prepare("DELETE FROM auth_sessions WHERE user_sub=?").bind(user.sub).run();
+    return h.reply(request, { ok: true });
+  }
+
+  /* ---------- ההודעה המשותפת, כפי שאתר הסקר מציג אותה ---------- */
+  if (path === "/banner" && method === "GET") {
+    const banner = normalizeBanner(await readSetting(env, "banner"));
+    return h.reply(request, { banner: bannerLive(banner) && banner.sites.survey ? banner : null });
+  }
+  /* ---------- הסקרים, לקישור תוכנית לסקר ---------- */
+  if (path === "/surveys" && method === "GET") {
+    if (!await h.admin(request, env)) return forbidden();
+    try {
+      const rows = await env.DB.prepare("SELECT s.id, s.name, s.active, COALESCE(p.voting_open,0) AS open, s.created_at AS createdAt FROM surveys s LEFT JOIN poll_settings p ON p.id=s.id ORDER BY s.active DESC, s.created_at DESC").all();
+      return h.reply(request, { surveys: rows.results.map((r) => ({ ...(r as object), active: !!Number((r as { active: number }).active), open: !!Number((r as { open: number }).open) })) });
+    } catch { return h.reply(request, { surveys: [] }); }
+  }
 
   /* ---------- טיוטה משותפת ---------- */
   if (path === "/draft") {
@@ -214,7 +304,11 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     const user = await h.admin(request, env);
     if (!user) return forbidden();
     const fixed = String(env.ADMIN_EMAILS || "").split(/[\s,;]+/).map((email) => email.trim().toLowerCase()).filter(Boolean);
-    const list = async () => (await readAdminEmails(env)).map((email) => ({ email, fixed: fixed.includes(email), you: email === user.email }));
+    const list = async () => {
+      const seen = new Map<string, number>();
+      try { for (const row of (await env.DB.prepare("SELECT LOWER(email) AS email, MAX(created_at) AS at FROM auth_sessions GROUP BY LOWER(email)").all<{ email: string; at: number }>()).results) seen.set(row.email, Number(row.at)); } catch { /* אין עדיין סשנים */ }
+      return (await readAdminEmails(env)).map((email) => ({ email, fixed: fixed.includes(email), you: email === user.email, lastSeen: seen.get(email) || null }));
+    };
     if (method === "GET") return h.reply(request, { admins: await list() });
     const { email: raw } = await body<{ email?: string }>();
     const email = normalizeEmail(raw);

@@ -5,13 +5,16 @@ import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrP
 import { normalizePhone } from "./phone";
 import { resolveCatalogPosition } from "./catalog-position.js";
 import { placeholders } from "./sql.js";
+import { normalizeBanner, normalizeUpdates, settingStatement, versionStatements } from "./program-tools";
 
 export type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; ADMIN_EMAILS?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const ARCHIVE_PREFIX = "poll-archives/";
 
+/** אתר התוכניות בתוך אותו גיבוי: התוכניות, העונות וההגדרות (הודעה, עדכונים). */
+type ProgramSnapshot = { seasons: unknown[]; episodes: Record<string, unknown>[]; settings: { banner: unknown; updates: unknown } };
 type PollSnapshot = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   id: string;
   name: string;
   createdAt: number;
@@ -24,7 +27,38 @@ type PollSnapshot = {
   artistVotes: Record<string, unknown>[];
   settings: Record<string, unknown> | null;
   media?: Array<{ sourceUrl: string; archiveKey: string }>;
+  program?: ProgramSnapshot;
 };
+
+async function readProgramSnapshot(env: AdminEnv): Promise<ProgramSnapshot> {
+  const [episodes, settings] = await env.DB.batch([
+    env.DB.prepare("SELECT id,data_json FROM program_episodes ORDER BY date DESC,number DESC"),
+    env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('seasons','banner','updates')"),
+  ]);
+  const values = new Map((settings.results as Array<{ key: string; value_json: string }>).map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
+  return {
+    seasons: Array.isArray(values.get("seasons")) ? values.get("seasons") : [],
+    episodes: (episodes.results as Array<{ id: string; data_json: string }>).flatMap((row) => { try { return [{ ...JSON.parse(row.data_json), id: row.id }]; } catch { return []; } }),
+    settings: { banner: values.get("banner") ?? null, updates: values.get("updates") ?? [] },
+  };
+}
+
+/** שחזור אתר התוכניות מתוך גיבוי משותף: מחליף את הקטלוג וההגדרות, ושומר גרסה. */
+async function restoreProgramSnapshot(env: AdminEnv, program: ProgramSnapshot, by: string) {
+  const statements = [env.DB.prepare("DELETE FROM program_episodes")];
+  for (const episode of program.episodes) {
+    const id = String(episode.id || episode.slug || "").trim().replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 120);
+    const slug = String(episode.slug || episode.id || "").trim().replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 120);
+    if (!id || !slug) continue;
+    statements.push(env.DB.prepare("INSERT INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch())")
+      .bind(id, slug, Number.isFinite(Number(episode.number)) ? Number(episode.number) : null, String(episode.date || "") || null, episode.visible === false ? 0 : 1, JSON.stringify({ ...episode, id, slug })));
+  }
+  statements.push(settingStatement(env, "seasons", program.seasons));
+  statements.push(settingStatement(env, "banner", normalizeBanner(program.settings?.banner)));
+  statements.push(settingStatement(env, "updates", normalizeUpdates(program.settings?.updates)));
+  statements.push(...versionStatements(env, by, { seasons: program.seasons, episodes: program.episodes, settings: program.settings }));
+  for (let index = 0; index < statements.length; index += 80) await env.DB.batch(statements.slice(index, index + 80));
+}
 
 async function requireAdmin(request: Request, env: AdminEnv) {
   const user = await readSession(request, env);
@@ -194,7 +228,10 @@ export async function createPollSnapshot(env: AdminEnv, requestedName = "", surv
   let media: Array<{ sourceUrl: string; archiveKey: string }>;
   try { media = await archiveMediaFiles(env, id, snapshotMediaUrls(albums.results, songs.results, artists.results)); }
   catch (error) { await deleteR2Prefix(env.MEDIA, `${ARCHIVE_PREFIX}assets/${id}/`); throw error; }
-  const snapshot: PollSnapshot = { version: 2, id, name, createdAt, albums: albums.results, songs: songs.results, artists: artists.results, ballots: ballots.results, albumVotes: albumVotes.results, songVotes: songVotes.results, artistVotes: artistVotes.results, settings: settings.results[0] || null, media };
+  // גיבוי אחד לשני האתרים: גם אתר התוכניות נשמר באותו קובץ
+  let program: ProgramSnapshot | undefined;
+  try { program = await readProgramSnapshot(env); } catch (error) { console.error("program snapshot skipped", error); }
+  const snapshot: PollSnapshot = { version: 3, id, name, createdAt, albums: albums.results, songs: songs.results, artists: artists.results, ballots: ballots.results, albumVotes: albumVotes.results, songVotes: songVotes.results, artistVotes: artistVotes.results, settings: settings.results[0] || null, media, program };
   const key = `${ARCHIVE_PREFIX}${createdAt}-${id}.json`;
   try {
     await env.MEDIA.put(key, JSON.stringify(snapshot), { httpMetadata: { contentType: "application/json" }, customMetadata: { name, createdAt: String(createdAt), votes: String(ballots.results.length) } });
@@ -234,7 +271,7 @@ export async function listPollArchives(env: AdminEnv) {
   const archives = await Promise.all(objects.map(async (object) => {
     try {
       const snapshot = await readPollSnapshot(env, object.key);
-      return snapshot ? { key: object.key, name: snapshot.name, createdAt: snapshot.createdAt, votes: snapshot.ballots.length, albums: snapshot.albums.length, songs: snapshot.songs.length, artists: snapshot.artists.length } : null;
+      return snapshot ? { key: object.key, name: snapshot.name, createdAt: snapshot.createdAt, votes: snapshot.ballots.length, albums: snapshot.albums.length, songs: snapshot.songs.length, artists: snapshot.artists.length, programs: snapshot.program ? snapshot.program.episodes.length : null } : null;
     } catch (error) {
       console.error("invalid poll archive", object.key, error);
       return null;
@@ -243,7 +280,7 @@ export async function listPollArchives(env: AdminEnv) {
   return archives.filter((item): item is NonNullable<typeof item> => !!item).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export async function restorePollArchive(env: AdminEnv, restoreKey: string, surveyId: string): Promise<void> {
+export async function restorePollArchive(env: AdminEnv, restoreKey: string, surveyId: string, by = "backup"): Promise<void> {
   const snapshot = await readPollSnapshot(env, restoreKey);
   if (!snapshot) throw new Error("הסקר שבארכיון לא נמצא.");
   const restoredMedia = await materializeArchiveMedia(env, snapshot);
@@ -272,6 +309,8 @@ export async function restorePollArchive(env: AdminEnv, restoreKey: string, surv
     throw error;
   }
   await deleteMediaUrls(env, previousUrls);
+  // אתר התוכניות משוחזר מאותו גיבוי; גיבוי ישן (בלי תוכניות) משאיר אותו כמו שהוא
+  if (snapshot.program) await restoreProgramSnapshot(env, snapshot.program, by);
 }
 
 export async function deletePollArchive(env: AdminEnv, key: string): Promise<void> {
@@ -675,7 +714,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       catch (error) { console.error("archive failed", error); return json({ error: "הגיבוי בוטל כי אחד מקובצי המדיה חסר." }, 500); }
     }
     try {
-      await restorePollArchive(env, body.restoreKey, surveyId);
+      await restorePollArchive(env, body.restoreKey, surveyId, currentAdmin.email);
     } catch (error) {
       console.error("archive restore failed", error);
       return json({ error: "השחזור נכשל — המצב הקודם שוחזר מגיבוי אוטומטי." }, 500);
