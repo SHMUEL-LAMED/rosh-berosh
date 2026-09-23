@@ -578,37 +578,59 @@ test("new recordings transcribe in the scheduled job without a manager click", a
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs WHERE episode_id='auto'").get().n, 0, "publishing the same recording does not restart transcription");
 });
 
-test("the one-time vote reset looks up ballots once, in one pass, and never repeats from the cron", async () => {
-  const run = async (seed) => {
-    const { worker, db, env, ctx, settle } = await setup();
-    seed(db);
-    const lookups = [];
-    const prepare = env.DB.prepare;
-    env.DB.prepare = (sql) => { if (/FROM ballots b WHERE/.test(sql)) lookups.push(sql); return prepare(sql); };
-    for (let i = 0; i < 3; i += 1) { await worker.scheduled({}, env, ctx); await settle(); }
-    return { db, lookups };
-  };
-  const later = Math.floor(Date.now() / 1000) + 3600;
+/** אישור Google חתום (RS256) עם מפתח שנוצר לבדיקה, ו־JWKS תואם להגשה במקום googleapis */
+async function googleCredential({ email = "listener@example.com", sub = "sub-google-1" } = {}) {
+  const pair = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  const part = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const head = part({ alg: "RS256", kid: "kid-test" });
+  const body = part({ sub, email, email_verified: true, name: "מאזין", aud: "601586229891-tv0i3h3m526m9l0clffqghkspjptt2s2.apps.googleusercontent.com", iss: "https://accounts.google.com", exp: Math.floor(Date.now() / 1000) + 600 });
+  const signature = Buffer.from(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, new TextEncoder().encode(`${head}.${body}`))).toString("base64url");
+  return { credential: `${head}.${body}.${signature}`, jwks: { keys: [{ ...jwk, kid: "kid-test", alg: "RS256", use: "sig" }] } };
+}
 
-  // Two ballots belong to the voter (one through a site session, one through a program profile):
-  // nothing is deleted, and the lookup is not repeated every minute.
-  const two = await run((db) => {
-    db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,expires_at) VALUES ('h-ml','sub-ml','ML1701ML@gmail.com','m',?)").run(later);
-    db.prepare("INSERT INTO program_user_data (user_sub,email,data_json) VALUES ('sub-ml2','ml1701ml@gmail.com','{}')").run();
-    for (const [id, key] of [["b-1", "sub-ml"], ["b-2", "sub-ml2"], ["b-3", "someone-else"]]) db.prepare("INSERT INTO ballots (id,voter_key) VALUES (?,?)").run(id, key);
-  });
-  assert.equal(two.lookups.length, 1, "three cron runs, one ballot lookup");
-  assert.doesNotMatch(two.lookups[0], /EXISTS/, "no per-ballot subquery");
-  assert.equal(two.db.prepare("SELECT COUNT(*) AS n FROM ballots").get().n, 3);
+test("when the session database is down, sign-in and session reads say 503 'unavailable', never 401 'signed out'", async () => {
+  const { worker, env, ctx, call } = await setup();
+  const { credential, jwks } = await googleCredential();
+  const restore = withFetch(async (url) => (url.startsWith("https://www.googleapis.com/oauth2/v3/certs") ? Response.json(jwks) : undefined));
+  try {
+    const ok = await call("/api/program/auth/google", { method: "POST", body: { credential } });
+    assert.equal(ok.status, 200, await ok.clone().text());
+    const { token } = await ok.json();
+    assert.ok(token);
 
-  // Exactly one ballot: it is reset once, and later runs stop at the marker.
-  const one = await run((db) => {
-    db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,expires_at) VALUES ('h-ml','sub-ml','ml1701ml@gmail.com','m',?)").run(later);
-    for (const [id, key] of [["b-1", "sub-ml"], ["b-3", "someone-else"]]) db.prepare("INSERT INTO ballots (id,voter_key) VALUES (?,?)").run(id, key);
-  });
-  assert.equal(one.lookups.length, 1);
-  assert.deepEqual(one.db.prepare("SELECT id FROM ballots ORDER BY id").all().map((row) => row.id), ["b-3"]);
-  assert.ok(one.db.prepare("SELECT 1 FROM program_settings WHERE key='one-time-vote-reset-ml1701ml-20260923'").get());
+    // המסד נופל (למשל המכסה היומית נגמרה): כל שאילתה נכשלת
+    const boom = async () => { throw new Error("D1_ERROR: Your account has exceeded D1's free tier daily row read limit"); };
+    const statement = { bind: () => statement, all: boom, first: boom, run: boom };
+    env.DB.prepare = () => statement;
+    env.DB.batch = boom;
+
+    const down = await call("/api/program/auth/google", { method: "POST", body: { credential } });
+    assert.equal(down.status, 503, "Google accepted the credential; only the session write failed");
+    assert.equal(down.headers.get("access-control-allow-origin"), ORIGIN, "the program site can read the answer");
+    assert.match((await down.json()).error, /לא זמין/);
+    const bad = await call("/api/program/auth/google", { method: "POST", body: { credential: "a.b.c" } });
+    assert.equal(bad.status, 401, "a rejected Google credential is still 401");
+
+    const me = await call("/api/program/me", { token });
+    assert.equal(me.status, 503, "a valid token during an outage is not 'signed out'");
+    assert.equal(me.headers.get("access-control-allow-origin"), ORIGIN);
+    assert.equal((await call("/api/program/userdata", { token })).status, 503);
+
+    const voting = await worker.fetch(new Request("http://localhost/api/auth/google", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ credential }) }), env, ctx);
+    assert.equal(voting.status, 503);
+    const votingMe = await worker.fetch(new Request("http://localhost/api/auth/me", { headers: { cookie: `rosh_session=${token}` } }), env, ctx);
+    assert.equal(votingMe.status, 503);
+
+    // ניווטים של דף שלם חוזרים לאתר במקום להיתקע על JSON של שגיאה
+    const sso = await call(`/api/program/sso?return=${encodeURIComponent("https://shmuel-lamed.github.io/rosh-berosh-2/me.html")}`, { token });
+    assert.equal(sso.status, 302);
+    assert.match(sso.headers.get("location"), /[?&]sso=none/);
+    const handoff = await call(`/api/program/handoff/some-code?return=${encodeURIComponent("https://shmuel-lamed.github.io/rosh-berosh-2/me.html")}`);
+    assert.equal(handoff.status, 302);
+    assert.match(handoff.headers.get("location"), /^https:\/\/shmuel-lamed\.github\.io\/rosh-berosh-2\/me\.html/);
+  } finally { restore(); }
+  assert.equal((await call("/api/maintenance/vote-reset-status-20260923")).status, 404, "the public diagnostic that scanned the database is gone");
 });
 
 test("the share page gives crawlers Open Graph tags and sends people to the episode", async () => {

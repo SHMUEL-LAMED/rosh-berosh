@@ -228,17 +228,26 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     const back = programReturn(url.searchParams.get("return"));
     if (!back) return h.reply(request, { error: "כתובת חזרה לא תקינה." }, 400);
     back.searchParams.delete("sso"); back.searchParams.delete("handoff");
-    const user = await readSession(request, env);
-    back.searchParams.set("sso", user ? await issueHandoff(user) : "none");
+    // ניווט של דף שלם: כשמסד הסשנים לא עונה חוזרים לאתר בלי חיבור, לא לדף שגיאה
+    const user = await readSession(request, env).catch(() => null);
+    const code = user ? await issueHandoff(user).catch(() => null) : null;
+    back.searchParams.set("sso", code || "none");
     return redirect(back.toString());
   }
   if (path.startsWith("/handoff/") && method === "GET") {
     const back = programReturn(url.searchParams.get("return"));
-    const user = await redeemHandoff(path.slice("/handoff/".length));
-    if (!user) return redirect(back ? back.toString() : "/admin?handoff=expired");
-    const token = await createSession(env, user);
-    // אחרי כניסה באתר התוכניות: העוגייה של אתר הסקר נקבעת כאן, והדפדפן חוזר לאן שהיה
-    return redirect(back ? back.toString() : url.searchParams.get("to") === "/" ? "/" : "/admin", sessionCookie(token));
+    try {
+      const user = await redeemHandoff(path.slice("/handoff/".length));
+      if (!user) return redirect(back ? back.toString() : "/admin?handoff=expired");
+      const token = await createSession(env, user);
+      // אחרי כניסה באתר התוכניות: העוגייה של אתר הסקר נקבעת כאן, והדפדפן חוזר לאן שהיה
+      return redirect(back ? back.toString() : url.searchParams.get("to") === "/" ? "/" : "/admin", sessionCookie(token));
+    } catch (error) {
+      // גם כאן זה ניווט של דף שלם: הכניסה באתר התוכניות כבר הצליחה, ורק העוגייה של אתר
+      // הסקר לא נקבעה — חוזרים לאן שהיו במקום להשאיר את הדפדפן על JSON של שגיאה
+      console.error("program handoff error", error);
+      return redirect(back ? back.toString() : "/admin?handoff=expired");
+    }
   }
   if (path === "/auth/handoff" && method === "POST") {
     const { code } = await body<{ code?: string }>();

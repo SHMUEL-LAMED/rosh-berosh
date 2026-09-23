@@ -1,4 +1,4 @@
-import { createSession, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
+import { createSession, GOOGLE_CLIENT_ID, readSession, sessionCookie, type SessionUser, verifyGoogleCredential } from "./auth";
 import seed from "./program-seed.json";
 import { latestVersion, PROGRAM_SITE, programToolsApi, publicSettings, readSetting, settingsStatements, versionStatements } from "./program-tools";
 import { DRIVE_DOWNLOAD, DRIVE_ID, driveIdOf, loadEpisode, programAudioKey, safeMediaKey, audioKeysOf } from "./program-audio";
@@ -70,7 +70,7 @@ async function r2AudioResponse(request: Request, env: Env, key: string, disposit
   return new Response(request.method === "HEAD" ? null : object.body, { status: range && "range" in object ? 206 : 200, headers });
 }
 
-function cors(request: Request, response: Response): Response {
+export function cors(request: Request, response: Response): Response {
   const origin = request.headers.get("origin");
   if (origin === ORIGIN) {
     const headers = new Headers(response.headers);
@@ -205,7 +205,8 @@ export async function programApi(request: Request, env: Env): Promise<Response |
     // session cookie. Whoever is signed in there as an administrator is handed
     // a program token at once; everyone else gets the Google button, and the
     // same admin list decides in both cases.
-    const user = await readSession(request, env);
+    // כשמסד הסשנים לא עונה, חלון הכניסה עדיין מציג את כפתור Google
+    const user = await readSession(request, env).catch(() => null);
     const known = user ? { email: user.email, isAdmin: user.isAdmin } : null;
     const intro = known
       ? `מחוברים לאתר הסקר כ־<span class="who">${escapeHtml(known.email)}</span>.`
@@ -222,19 +223,23 @@ export async function programApi(request: Request, env: Env): Promise<Response |
     return reply(request, data, 200);
   }
   if (url.pathname === "/api/program/auth/google" && request.method === "POST") {
+    // רק אישור Google שנדחה הוא 401 "ההתחברות באמצעות Google נכשלה". תקלה בשמירת הסשן
+    // (createSession) עולה כ־SessionStoreUnavailable ונענית 503 — אחרת תקלה במסד נראית
+    // למאזינים ולמנהלים כבעיה בגוגל.
+    let user: SessionUser;
     try {
       const { credential } = await request.json<{ credential?: string }>();
       if (!credential) return reply(request, { error: "חסר אישור Google." }, 400);
-      const user = await verifyGoogleCredential(credential, env);
-      const token = await createSession(env, user);
-      // בחלון הכניסה (אותה כתובת של אתר הסקר) זה מחבר גם את אתר הסקר עצמו
-      const response = reply(request, { token, user: publicUser(user) });
-      response.headers.append("set-cookie", sessionCookie(token));
-      return response;
+      user = await verifyGoogleCredential(credential, env);
     } catch (error) {
       console.error("program google auth error", error);
       return reply(request, { error: "ההתחברות באמצעות Google נכשלה." }, 401);
     }
+    const token = await createSession(env, user);
+    // בחלון הכניסה (אותה כתובת של אתר הסקר) זה מחבר גם את אתר הסקר עצמו
+    const response = reply(request, { token, user: publicUser(user) });
+    response.headers.append("set-cookie", sessionCookie(token));
+    return response;
   }
   if (url.pathname === "/api/program/auth/session" && request.method === "POST") {
     // Same-origin only: the login window exchanges the voting site's session

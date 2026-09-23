@@ -104,7 +104,7 @@ export async function readSession(request: Request, env?: AuthEnv): Promise<Sess
       return { ...row, isAdmin: admins.includes(row.email.toLowerCase()) };
     } catch (error) {
       console.error("session read error", error);
-      return null;
+      throw new SessionStoreUnavailable(error);
     }
   }
   // Accept the old one-hour Google-token cookie during the rollout window.
@@ -114,6 +114,16 @@ export async function readSession(request: Request, env?: AuthEnv): Promise<Sess
     return null;
   }
 }
+
+/** מסד הסשנים לא עונה (לא טוקן חסר או שפג). הנתיבים עונים על זה 503 ולא 401, כדי
+    שהאתרים לא יפרשו תקלה בשרת כהתנתקות ולא ימחקו סשן תקין מהמכשיר. */
+export class SessionStoreUnavailable extends Error {
+  readonly unavailable = true;
+  constructor(cause: unknown) {
+    super(`session store unavailable: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+}
+export const isUnavailable = (error: unknown): boolean => !!(error as { unavailable?: boolean } | null)?.unavailable;
 
 function base64Url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
@@ -129,11 +139,16 @@ export async function createSession(env: AuthEnv, user: SessionUser): Promise<st
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   const token = base64Url(bytes);
   const expiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM auth_sessions WHERE expires_at<=unixepoch()"),
-    env.DB.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,picture,expires_at) VALUES (?,?,?,?,?,?)")
-      .bind(await hashToken(token), user.sub, user.email, user.name, user.picture || null, expiresAt),
-  ]);
+  try {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM auth_sessions WHERE expires_at<=unixepoch()"),
+      env.DB.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,picture,expires_at) VALUES (?,?,?,?,?,?)")
+        .bind(await hashToken(token), user.sub, user.email, user.name, user.picture || null, expiresAt),
+    ]);
+  } catch (error) {
+    console.error("session write error", error);
+    throw new SessionStoreUnavailable(error);
+  }
   return token;
 }
 
