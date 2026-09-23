@@ -19,7 +19,7 @@ const EXPECTED_TABLES = [
   "ballot_rate_limits", "ivr_recorders", "ivr_prompts", "ivr_store_meta", "ivr_admin_audit",
   "auth_sessions", "site_ballot_progress", "media_uploads", "subscribers",
   "program_episodes", "program_settings", "program_events", "program_messages", "program_versions",
-  "program_user_data", "program_likes", "program_push", "program_transcripts",
+  "program_user_data", "program_likes", "program_push", "program_transcripts", "program_transcription_jobs",
   "program_comments", "program_moments",
 ];
 

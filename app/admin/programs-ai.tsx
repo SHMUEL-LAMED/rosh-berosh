@@ -7,7 +7,7 @@
    - לכל האתר: הגהת כתיב (/ai/proofread) עם רשימת תיקונים לאישור.
    מצב התמלול נשמר מחוץ לרכיב, כך שהוא ממשיך לרוץ גם כשעוברים לתוכנית אחרת. */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, copyText, createMapStore, errorText, label, uniq, type AiSummary, type ApiError, type Catalog, type Episode, type ProofResult, type Transcript } from "./programs-core";
 import { Status } from "./programs-ui";
 
@@ -59,6 +59,15 @@ export function summaryPatch(episode: Episode, sum: AiSummary): Partial<Episode>
 export function AiCard({ episode, onPatch, onMessage }: { episode: Episode; onPatch(fields: Partial<Episode>): void; onMessage(message: string): void }) {
   const st = ai.useEntry(episode.id) || EMPTY;
   const id = episode.id;
+  const [automatic, setAutomatic] = useState<Transcript | null>(null);
+  useEffect(() => {
+    let active = true;
+    const refresh = () => api<Transcript>(`/api/program/ai/transcript/${encodeURIComponent(id)}`)
+      .then((result) => { if (active) setAutomatic(result); }).catch(() => {});
+    void refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [id]);
   const run = () => aiRun(id).catch(() => {});
   const titles = async () => {
     ai.set(id, { titlesBusy: true, error: "" });
@@ -77,9 +86,11 @@ export function AiCard({ episode, onPatch, onMessage }: { episode: Episode; onPa
   const sum = st.summary;
   return <section className="admin-panel prog-panel prog-ai">
     <header className="prog-panel-head"><h2>תיאור וסיכום מההקלטה</h2><strong className="prog-badge">AI</strong></header>
-    <p className="panel-help">המערכת מתמללת את ההקלטה, ומהתמלול כותבת תיאור, סיכום של מה שהיה בתוכנית, מילות חיפוש ושמות האורחים. התמלול עצמו גלוי רק למנהלים ולא מופיע באתר. תוכנית של שעה לוקחת כמה דקות; אפשר בינתיים לעבור לתוכנית אחרת.</p>
+    <p className="panel-help">ההקלטה מתומללת אוטומטית ברקע אחרי הפרסום, בלי ללחוץ על כפתור. אפשר לצאת מהדף וההתקדמות תישמר. התמלול גלוי למנהלים בלבד.</p>
+    {automatic?.automatic && <p className="panel-help" role="status">{automatic.partsTotal ? `תומללו ${automatic.partsDone} מתוך ${automatic.partsTotal} חלקים.` : "התמלול ממתין לתחילת העיבוד."}{automatic.automatic.error && ` ניסיון קודם נכשל: ${automatic.automatic.error} המערכת תנסה שוב.`}</p>}
+    {automatic && !automatic.automatic && automatic.partsTotal > 0 && <p className="panel-help">התמלול הושלם ({automatic.partsDone} חלקים).</p>}
     <div className="row-actions">
-      <button type="button" className="prog-primary" disabled={!!st.running} onClick={run}>{st.running ? "מתמללים…" : sum ? "יצירה מחדש" : "תמלול ויצירת תיאור"}</button>
+      <button type="button" className="prog-primary" disabled={!!st.running} onClick={run}>{st.running ? "מעבדים…" : "יצירת תיאור וסיכום"}</button>
       <button type="button" disabled={!!st.transcriptBusy} onClick={transcript}>{st.transcript != null ? "הסתרת התמלול" : st.transcriptBusy ? "טוענים…" : "הצגת התמלול"}</button>
       <button type="button" disabled={!!st.titlesBusy} onClick={titles}>{st.titlesBusy ? "חושבים על שמות…" : "הצעות לשם התוכנית"}</button>
     </div>

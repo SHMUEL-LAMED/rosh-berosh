@@ -40,7 +40,7 @@ export type EpisodeStats = { plays: number; listeners: number; retention: Array<
 export type Moments = { id: string; total: number; buckets: Array<{ at: number; count: number }>; top: Array<{ at: number; count: number }> };
 export type Comment = { id: string; episodeId: string; name: string; email: string; text: string; at: number | null; status: "pending" | "approved" | "hidden"; pinned: boolean; reply: string | null; replyBy: string | null; createdAt: number };
 export type AiSummary = { description: string; summary: string; tags: string[]; guests: string[]; model?: string; createdAt?: string };
-export type Transcript = { text: string; partsDone: number; partsTotal: number; summary: AiSummary | null; updatedAt: string | null };
+export type Transcript = { text: string; partsDone: number; partsTotal: number; summary: AiSummary | null; updatedAt: string | null; automatic?: { attempts: number; error: string | null; nextAt: number } | null };
 export type ProofResult = { key: string; fixed: string; changes: Array<{ from: string; to: string }>; original: string; applied?: boolean; ignored?: boolean; stale?: boolean };
 
 /* ---------- עזרים ---------- */
