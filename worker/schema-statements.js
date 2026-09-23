@@ -301,6 +301,8 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS ballot_rate_limits_reset_idx ON ballot_rate_limits(reset_at)",
   "CREATE INDEX IF NOT EXISTS ivr_admin_audit_created_idx ON ivr_admin_audit(created_at)",
   "CREATE INDEX IF NOT EXISTS auth_sessions_expires_idx ON auth_sessions(expires_at)",
+  // התנתקות מוחקת את כל הסשנים של החשבון (WHERE user_sub=?): בלי האינדקס זו סריקה של כל הטבלה
+  "CREATE INDEX IF NOT EXISTS auth_sessions_user_sub_idx ON auth_sessions(user_sub)",
   "CREATE INDEX IF NOT EXISTS site_ballot_progress_updated_idx ON site_ballot_progress(updated_at)",
   "CREATE INDEX IF NOT EXISTS media_uploads_created_idx ON media_uploads(created_at)",
   "CREATE UNIQUE INDEX IF NOT EXISTS subscribers_email_unique ON subscribers(email)",
@@ -360,35 +362,51 @@ export async function applyRuntimeSchema(db) {
     try { await run(); }
     catch (error) { failures.push({ statement, error }); }
   };
+  // קבוצה שנכשלה מורצת משפט־משפט רק כשהשגיאה היא של משפט מסוים. כשהמסד כולו לא עונה
+  // (מכסה שנגמרה, עומס, רשת) כל משפט ייכשל שוב — ועשרות קריאות נוספות למסד שכבר נופל
+  // רק מכבידות עליו; אז הקבוצה נרשמת ככשל אחד.
   const group = async (statements) => {
-    if (await inOneBatch(db, statements)) return;
+    const error = await inOneBatch(db, statements);
+    if (!error) return;
+    if (!statementError(error)) { failures.push({ statement: `batch of ${statements.length} statements`, error }); return; }
     for (const statement of statements) await step(statement, () => db.prepare(statement).run());
   };
   await group(TABLES);
   const columns = await existingColumns(db);
-  for (const spec of COLUMNS) {
-    if (!columns) await step(columnStatement(spec), () => addMissingColumn(db, spec));
-    else if (!columns.get(spec.table)?.has(spec.column)) await step(columnStatement(spec), () => db.prepare(columnStatement(spec)).run());
+  if (columns instanceof Error) failures.push({ statement: "PRAGMA table_info (batch)", error: columns });
+  else {
+    for (const spec of COLUMNS) {
+      if (!columns) await step(columnStatement(spec), () => addMissingColumn(db, spec));
+      else if (!columns.get(spec.table)?.has(spec.column)) await step(columnStatement(spec), () => db.prepare(columnStatement(spec)).run());
+    }
   }
   await group([...DROPPED_INDEXES, ...INDEXES, ...SEEDS]);
   return failures;
 }
 
-/** כל המשפטים בקריאה אחת. false — אין `batch`, או שמשפט נכשל והקבוצה בוטלה. */
-async function inOneBatch(db, statements) {
-  if (typeof db.batch !== "function") return false;
-  try { await db.batch(statements.map((statement) => db.prepare(statement))); return true; }
-  catch { return false; }
+/** שגיאה של משפט מסוים (תחביר, אילוץ, טבלה חסרה) — להבדיל ממסד שלא עונה בכלל */
+export function statementError(error) {
+  return /SQLITE_|syntax error|constraint|no such|already exists|duplicate column|unrecognized token/i.test(String(error?.message || error));
 }
 
-/** העמודות הקיימות בכל טבלה של COLUMNS, בקריאה אחת; null — אם אי אפשר לקרוא כך. */
+/** כל המשפטים בקריאה אחת. מחזיר null כשהצליח, אחרת את השגיאה (אין `batch` — שגיאה של משפט, כדי לרדת להרצה משפט־משפט). */
+async function inOneBatch(db, statements) {
+  if (typeof db.batch !== "function") return new Error("SQLITE_MISUSE: batch is not available");
+  try { await db.batch(statements.map((statement) => db.prepare(statement))); return null; }
+  catch (error) { return error instanceof Error ? error : new Error(String(error)); }
+}
+
+/** העמודות הקיימות בכל טבלה של COLUMNS, בקריאה אחת. null — אין `batch` (נופלים לקריאה לכל עמודה);
+    Error — המסד לא עונה, ואין טעם לנסות עמודה־עמודה. */
 async function existingColumns(db) {
   if (typeof db.batch !== "function") return null;
   const tables = [...new Set(COLUMNS.map((spec) => spec.table))];
   try {
     const results = await db.batch(tables.map((table) => db.prepare(`PRAGMA table_info(${table})`)));
     return new Map(tables.map((table, i) => [table, new Set((results[i]?.results ?? []).map((row) => row.name))]));
-  } catch { return null; }
+  } catch (error) {
+    return statementError(error) ? null : (error instanceof Error ? error : new Error(String(error)));
+  }
 }
 
 /** בונה רק את טבלאות הקו הטלפוני, בלי שאר הסכמה. */

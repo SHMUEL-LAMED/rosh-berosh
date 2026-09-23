@@ -142,7 +142,7 @@ function batchingDb(options = {}) {
   };
   db.batch = async (statements) => {
     db.batches++;
-    if (statements.some((statement) => options.fail?.(statement.sql))) throw new Error("D1_ERROR: batch rolled back");
+    if (statements.some((statement) => options.fail?.(statement.sql))) throw new Error(options.batchError || "D1_ERROR: UNIQUE constraint failed: SQLITE_CONSTRAINT");
     const results = [];
     for (const statement of statements) {
       if (statement.sql.startsWith("PRAGMA")) results.push(await statement.all());
@@ -178,6 +178,16 @@ test("batched: a failing statement rolls back its batch, and the rest still run 
   assert.ok(failures.every((failure) => failure.statement.includes("album_votes")));
   assert.ok(created(db.executed).includes("ivr_store_meta"));
   assert.ok(db.executed.includes("CREATE INDEX IF NOT EXISTS program_moments_episode_idx ON program_moments(episode_id)"));
+});
+
+test("batched: when the database itself is down, the whole schema costs three failed calls, not ninety", async () => {
+  // מכסה שנגמרה / עומס / רשת: כל משפט ייכשל שוב; מריצים משפט־משפט רק על שגיאה של משפט
+  const db = batchingDb({ fail: () => true, batchError: "D1_ERROR: Your account has exceeded D1's free tier daily row read limit" });
+  const failures = await applyRuntimeSchema(db);
+  assert.equal(db.batches, 3);
+  assert.equal(db.runs, 0);
+  assert.equal(failures.length, 3);
+  assert.ok(failures.every((failure) => /daily row read limit/.test(failure.error.message)));
 });
 
 test("batched statements run against SQLite from an empty database and stay idempotent", async (t) => {

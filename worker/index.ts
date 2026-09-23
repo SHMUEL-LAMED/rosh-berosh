@@ -1,7 +1,7 @@
 /** Cloudflare Worker entry point. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { clearSessionCookie, createSession, destroySession, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
+import { clearSessionCookie, createSession, destroySession, GOOGLE_CLIENT_ID, isUnavailable, readSession, sessionCookie, type SessionUser, verifyGoogleCredential } from "./auth";
 import { adminApi } from "./admin";
 import { subscribersAdminApi } from "./subscribers-admin";
 import { ivrAdminApi } from "./ivr-admin";
@@ -11,7 +11,7 @@ import { normalizePhone } from "./phone";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 import { readIvrCatalog } from "./ivr-catalog.js";
-import { programApi, programSharePage } from "./program-api";
+import { cors, programApi, programSharePage } from "./program-api";
 import { runScheduledPush } from "./program-push";
 import { runAutomaticTranscription, type AiBinding } from "./program-ai";
 import { placeholders } from "./sql.js";
@@ -70,33 +70,6 @@ const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORD
 const SONG_MEDIA_SQL = `SELECT s.id, s.audio_url AS audioUrl, COALESCE(NULLIF(a.cover_url,''), s.cover_url) AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.active=1 AND a.survey_id=${ACTIVE_SURVEY_SQL}`;
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
-const REQUESTED_VOTE_RESET_ID = "one-time-vote-reset-ml1701ml-20260923";
-const REQUESTED_VOTE_RESET_EMAIL = "ml1701ml@gmail.com";
-// The voter's accounts are collected once (IN over a non-correlated subquery) and ballots are
-// read once. The previous form ran EXISTS over auth_sessions — which has no user_sub index —
-// for every ballot, so each run read ballots × sessions rows.
-const REQUESTED_VOTE_RESET_WHERE = "b.channel='site' AND (lower(b.voter_email)=?1 OR b.voter_key IN (SELECT user_sub FROM auth_sessions WHERE lower(email)=?1 UNION SELECT user_sub FROM program_user_data WHERE lower(email)=?1))";
-async function runOneTimeRequestedVoteReset(env: Env): Promise<void> {
-  // One attempt only. The cron fires every minute, and a run that did not find exactly one
-  // ballot used to repeat forever; any earlier attempt now ends it for good.
-  if (await env.DB.prepare("SELECT key FROM program_settings WHERE key IN (?,?) LIMIT 1").bind(REQUESTED_VOTE_RESET_ID, `${REQUESTED_VOTE_RESET_ID}-attempt`).first()) return;
-  await env.DB.prepare("INSERT INTO program_settings (key,value_json) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()")
-    .bind(`${REQUESTED_VOTE_RESET_ID}-attempt`, JSON.stringify({ at: Math.floor(Date.now() / 1000) })).run();
-  const rows = await env.DB.prepare(`SELECT b.id, b.voter_key AS voterKey, b.survey_id AS surveyId FROM ballots b WHERE ${REQUESTED_VOTE_RESET_WHERE}`)
-    .bind(REQUESTED_VOTE_RESET_EMAIL).all<{ id: string; voterKey: string; surveyId: string }>();
-  if (rows.results.length !== 1) { console.error("requested vote reset requires exactly one matching ballot; found", rows.results.length); return; }
-  const { id, voterKey, surveyId } = rows.results[0];
-  // D1 batch is transactional: an audit conflict or failed deletion rolls back the whole reset.
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO program_settings (key,value_json) VALUES (?,?)").bind(REQUESTED_VOTE_RESET_ID, JSON.stringify({ ballotId: id })),
-    env.DB.prepare("DELETE FROM song_votes WHERE ballot_id=?").bind(id),
-    env.DB.prepare("DELETE FROM album_votes WHERE ballot_id=?").bind(id),
-    env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id=?").bind(id),
-    env.DB.prepare("DELETE FROM ballots WHERE id=? AND survey_id=?").bind(id, surveyId),
-    env.DB.prepare("DELETE FROM site_ballot_progress WHERE survey_id=? AND user_sub=?").bind(surveyId, voterKey),
-  ]);
-  console.log("one-time requested vote reset completed");
-}
 const unique = (items: string[]) => [...new Set(items)];
 const CATALOG_CACHE_SECONDS = 60;
 // מפתחות המטמון אינם נתיבים אמיתיים של האתר. קטלוג הקו מוגש רק אחרי בדיקת
@@ -400,15 +373,6 @@ async function serveMedia(request: Request, env: Env, ctx: ExecutionContext, pat
 
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname === "/api/maintenance/vote-reset-status-20260923" && request.method === "GET") {
-    try {
-      const complete = !!(await env.DB.prepare("SELECT key FROM program_settings WHERE key=?").bind(REQUESTED_VOTE_RESET_ID).first());
-      const attempt = await env.DB.prepare("SELECT updated_at AS at FROM program_settings WHERE key=?").bind(`${REQUESTED_VOTE_RESET_ID}-attempt`).first<{ at: number }>();
-      const matches = await env.DB.prepare(`SELECT COUNT(*) AS total FROM ballots b WHERE ${REQUESTED_VOTE_RESET_WHERE}`)
-        .bind(REQUESTED_VOTE_RESET_EMAIL).first<{ total: number }>();
-      return json({ complete, lastAttempt: attempt?.at || null, matches: matches?.total ?? null });
-    } catch { return json({ complete: false, diagnostic: "unavailable" }); }
-  }
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, ctx, url.pathname);
   // דף שיתוף לתוכנית (תגי Open Graph לוואטסאפ/פייסבוק, והפניה מיידית לאתר התוכניות)
   if (url.pathname.startsWith("/p/") && (request.method === "GET" || request.method === "HEAD")) {
@@ -430,15 +394,18 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
   if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
   if (url.pathname === "/api/auth/google" && request.method === "POST") {
+    // 401 רק כש־Google דחה את האישור. תקלה בשמירת הסשן עולה כ־SessionStoreUnavailable
+    // ונענית 503 (למטה), כדי שתקלה במסד לא תיראה למצביעים כבעיה בגוגל.
+    let user: SessionUser;
     try {
       const { credential } = await request.json<{ credential?: string }>();
       if (!credential) return json({ error: "חסר אישור Google." }, 400);
-      const user = await verifyGoogleCredential(credential, env);
-      const token = await createSession(env, user);
-      const response = json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } });
-      response.headers.set("set-cookie", sessionCookie(token));
-      return response;
+      user = await verifyGoogleCredential(credential, env);
     } catch (error) { console.error("google auth error", error); return json({ error: "ההתחברות באמצעות Google נכשלה." }, 401); }
+    const token = await createSession(env, user);
+    const response = json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } });
+    response.headers.set("set-cookie", sessionCookie(token));
+    return response;
   }
   if (url.pathname === "/api/auth/me" && request.method === "GET") {
     const user = await readSession(request, env);
@@ -675,18 +642,26 @@ const worker = {
       // בלי זה חריגה לא צפויה חוזרת כ-500 ריק, וקו הטלפון מפרש אותה כחוסר הרשאה.
       const { pathname } = new URL(request.url);
       console.error("unhandled worker error", pathname, error);
-      if (pathname.startsWith("/api/")) return json({ error: "שגיאה בשרת." }, 500);
+      if (pathname.startsWith("/api/")) {
+        // מסד שלא עונה הוא 503 "השרת לא זמין" ולא 500 "שגיאה": האתרים מציגים "נסו שוב"
+        // ושומרים על הסשן. לאתר התוכניות (מקור אחר) התשובה חייבת לשאת כותרות CORS,
+        // אחרת הדפדפן מסתיר אותה והמאזין רואה "Failed to fetch" באנגלית.
+        const response = isUnavailable(error)
+          ? json({ error: "השרת לא זמין כרגע. נסו שוב בעוד כמה דקות.", unavailable: true }, 503)
+          : json({ error: "שגיאה בשרת." }, 500);
+        return pathname.startsWith("/api/program/") ? cors(request, response) : response;
+      }
       throw error;
     }
   },
-  // כל חמש דקות: מנה מתור התראות הדחיפה, ותוכניות מתוזמנות שמועד הפרסום שלהן הגיע
+  // כל דקה (vite.config.ts): מנה מתור התראות הדחיפה, תוכניות מתוזמנות שמועד הפרסום שלהן
+  // הגיע, ותמלול אוטומטי. כל צעד תופס את השגיאות שלו, כדי שכשל באחד לא יעצור את הבאים.
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
       await ensureRuntimeSchema(env);
       await runScheduledPush(env).catch((error) => console.error("scheduled push error", error));
-      await runAutomaticTranscription(env, "https://rosh-berosh.smwlyqswkwt232.workers.dev");
-      await runOneTimeRequestedVoteReset(env).catch((error) => console.error("requested vote reset failed", error));
-    })().catch((error) => console.error("scheduled push error", error)));
+      await runAutomaticTranscription(env, "https://rosh-berosh.smwlyqswkwt232.workers.dev").catch((error) => console.error("scheduled transcription error", error));
+    })().catch((error) => console.error("scheduled job error", error)));
   },
 };
 
