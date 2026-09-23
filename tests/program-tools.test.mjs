@@ -226,6 +226,28 @@ test("the mailing list for the Gmail draft: active addresses only, for managers 
   assert.equal(body.active, 2);
 });
 
+test("the email editor can add addresses to the list: no duplicates, and people who left stay out", async () => {
+  const { call, admin, voter, db } = await setup();
+  db.prepare("INSERT INTO subscribers (id, email, name, source, consented_at, unsubscribed_at) VALUES (?, ?, ?, 'site', unixepoch(), ?)").run("s1", "here@example.com", "", null);
+  db.prepare("INSERT INTO subscribers (id, email, name, source, consented_at, unsubscribed_at) VALUES (?, ?, ?, 'site', unixepoch(), ?)").run("s2", "left@example.com", "", Math.floor(Date.now() / 1000));
+  const content = "email\tname\nNew@Example.com\tשרה\nhere@example.com\nleft@example.com\nnew@example.com\nnot an address\nדוד <david@example.com>";
+  assert.equal((await call("/api/program/subscribers", { method: "POST", body: { content } })).status, 403);
+  assert.equal((await call("/api/program/subscribers", { method: "POST", token: voter, body: { content } })).status, 403, "listeners cannot add people");
+  const response = await call("/api/program/subscribers", { method: "POST", token: admin, body: { content } });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.headers.get("access-control-allow-origin"), ORIGIN);
+  const result = await response.json();
+  assert.deepEqual({ found: result.found, added: result.added, duplicates: result.duplicates, optedOut: result.optedOut, skipped: result.skipped }, { found: 4, added: 2, duplicates: 1, optedOut: 1, skipped: 2 });
+  const rows = db.prepare("SELECT email, name, source, unsubscribed_at AS gone FROM subscribers ORDER BY email").all();
+  assert.deepEqual(rows.map((row) => row.email), ["david@example.com", "here@example.com", "left@example.com", "new@example.com"]);
+  assert.equal(rows.find((row) => row.email === "new@example.com").name, "שרה");
+  assert.equal(rows.find((row) => row.email === "david@example.com").source, "import");
+  assert.ok(rows.find((row) => row.email === "left@example.com").gone, "someone who unsubscribed is not signed up again");
+  const list = await (await call("/api/program/subscribers", { token: admin })).json();
+  assert.equal(list.active, 3);
+  assert.equal((await call("/api/program/subscribers", { method: "POST", token: admin, body: { content: "nothing here" } })).status, 400);
+});
+
 test("one sign-in covers both sites: the program site bounces through here and comes back signed in", async () => {
   const { worker, env, db } = await setup();
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("cookie-voter"));

@@ -6,6 +6,40 @@ import { isValidEmail, normalizeEmail, normalizeName, parseSubscriberList } from
 type SubscribersEnv = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 
+export type ImportResult = { found: number; added: number; duplicates: number; optedOut: number; skipped: number };
+
+/**
+ * ייבוא כתובות לרשימה — מדף הניהול (כאן) ומעורך טיוטת המייל באתר התוכניות
+ * (`POST /api/program/subscribers`). כתובת שכבר ברשימה לא משתנה, ומי שהסיר את
+ * עצמו בעבר *לא* חוזר לרשימה: ההסרה שלו גוברת על ייבוא. מחזיר null כשאין בתוכן
+ * אף כתובת תקינה.
+ */
+export async function importSubscribers(db: D1Database, content: unknown): Promise<ImportResult | null> {
+  const { entries, skipped } = parseSubscriberList(content);
+  if (!entries.length) return null;
+  const before = await db.prepare("SELECT COUNT(*) AS total FROM subscribers").first<{ total: number }>();
+  // D1 מגביל את גודל ה-batch, ולכן הייבוא רץ במנות. מנה שנכשלת אינה
+  // עוצרת את השאר — הדיווח בסוף מבוסס על ספירה אמיתית ולא על הערכה.
+  const CHUNK = 50;
+  let optedOut = 0;
+  for (let index = 0; index < entries.length; index += CHUNK) {
+    const part = entries.slice(index, index + CHUNK);
+    const chunk = part.map((entry) => db.prepare(`
+      INSERT INTO subscribers (id, email, name, source, consented_at)
+      VALUES (?, ?, ?, 'import', unixepoch())
+      ON CONFLICT(email) DO UPDATE SET
+        name = CASE WHEN excluded.name != '' AND COALESCE(subscribers.name,'') = '' THEN excluded.name ELSE subscribers.name END
+    `).bind(crypto.randomUUID(), entry.email, entry.name));
+    try { await db.batch(chunk); }
+    catch (error) { console.error("subscriber import chunk error", error); }
+    const gone = await db.prepare(`SELECT COUNT(*) AS n FROM subscribers WHERE unsubscribed_at IS NOT NULL AND email IN (${part.map(() => "?").join(",")})`).bind(...part.map((entry) => entry.email)).first<{ n: number }>();
+    optedOut += Number(gone?.n || 0);
+  }
+  const after = await db.prepare("SELECT COUNT(*) AS total FROM subscribers").first<{ total: number }>();
+  const added = Number(after?.total || 0) - Number(before?.total || 0);
+  return { found: entries.length, added, duplicates: entries.length - added - optedOut, optedOut, skipped };
+}
+
 /** מחזיר null כשהנתיב אינו שייך למודול, כדי ש-`index.ts` ימשיך לנתב הלאה. */
 export async function subscribersAdminApi(request: Request, env: SubscribersEnv): Promise<Response | null> {
   const url = new URL(request.url);
@@ -47,25 +81,9 @@ export async function subscribersAdminApi(request: Request, env: SubscribersEnv)
 
   if (request.method === "POST" && url.pathname === "/api/admin/subscribers/import") {
     const body = await request.json<{ content?: string }>();
-    const { entries, skipped } = parseSubscriberList(body.content);
-    if (!entries.length) return json({ error: "לא נמצאה אף כתובת דוא״ל תקינה בקובץ." }, 400);
-    const before = await env.DB.prepare("SELECT COUNT(*) AS total FROM subscribers").first<{ total: number }>();
-    // D1 מגביל את גודל ה-batch, ולכן הייבוא רץ במנות. מנה שנכשלת אינה
-    // עוצרת את השאר — הדיווח בסוף מבוסס על ספירה אמיתית ולא על הערכה.
-    const CHUNK = 50;
-    for (let index = 0; index < entries.length; index += CHUNK) {
-      const chunk = entries.slice(index, index + CHUNK).map((entry) => env.DB.prepare(`
-        INSERT INTO subscribers (id, email, name, source, consented_at)
-        VALUES (?, ?, ?, 'import', unixepoch())
-        ON CONFLICT(email) DO UPDATE SET
-          name = CASE WHEN excluded.name != '' AND COALESCE(subscribers.name,'') = '' THEN excluded.name ELSE subscribers.name END
-      `).bind(crypto.randomUUID(), entry.email, entry.name));
-      try { await env.DB.batch(chunk); }
-      catch (error) { console.error("subscriber import chunk error", error); }
-    }
-    const after = await env.DB.prepare("SELECT COUNT(*) AS total FROM subscribers").first<{ total: number }>();
-    const added = Number(after?.total || 0) - Number(before?.total || 0);
-    return json({ ok: true, found: entries.length, added, duplicates: entries.length - added, skipped });
+    const result = await importSubscribers(env.DB, body.content);
+    if (!result) return json({ error: "לא נמצאה אף כתובת דוא״ל תקינה בקובץ." }, 400);
+    return json({ ok: true, ...result });
   }
 
   if (request.method === "DELETE" && url.pathname === "/api/admin/subscribers") {

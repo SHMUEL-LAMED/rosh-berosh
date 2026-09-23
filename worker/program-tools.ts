@@ -6,6 +6,7 @@
 import { configuredAdminEmails, createSession, readAdminEmails, readSession, saveAdminEmails, sessionCookie, type SessionUser } from "./auth";
 import { checkBallotRate, checkRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
+import { importSubscribers } from "./subscribers-admin";
 import { israelHour, isPublic, israelWallClock } from "./program-schedule.js";
 import { loadEpisode } from "./program-audio";
 
@@ -694,6 +695,15 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     const rows = await env.DB.prepare("SELECT email, COALESCE(name,'') AS name FROM subscribers WHERE unsubscribed_at IS NULL ORDER BY created_at ASC, rowid ASC LIMIT 20000").all<{ email: string; name: string }>();
     const subscribers = rows.results.map((row) => ({ email: normalizeEmail(row.email), name: row.name })).filter((row) => isValidEmail(row.email));
     return h.reply(request, { subscribers, active: subscribers.length });
+  }
+  /* הוספת כתובות לרשימה מעורך המייל באתר התוכניות (הדבקה או קובץ) — אותו ייבוא כמו בלשונית "רשימת תפוצה" */
+  if (path === "/subscribers" && method === "POST") {
+    if (!await h.admin(request, env)) return forbidden();
+    const { content } = await body<{ content?: string }>();
+    if (String(content ?? "").length > 2_000_000) return h.reply(request, { error: "הרשימה גדולה מדי. חלקו אותה לכמה קבצים." }, 413);
+    const result = await importSubscribers(env.DB, content);
+    if (!result) return h.reply(request, { error: "לא נמצאה אף כתובת דוא״ל תקינה." }, 400);
+    return h.reply(request, { ok: true, ...result });
   }
   if (path === "/subscribers/count" && method === "GET") {
     if (!await h.admin(request, env)) return forbidden();
