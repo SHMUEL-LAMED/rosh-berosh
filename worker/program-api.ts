@@ -1,41 +1,28 @@
 import { createSession, GOOGLE_CLIENT_ID, readSession, sessionCookie, verifyGoogleCredential } from "./auth";
 import seed from "./program-seed.json";
-import { programToolsApi, publicSettings, settingsStatements, versionStatements } from "./program-tools";
+import { latestVersion, PROGRAM_SITE, programToolsApi, publicSettings, readSetting, settingsStatements, versionStatements } from "./program-tools";
+import { DRIVE_DOWNLOAD, DRIVE_ID, driveIdOf, loadEpisode, programAudioKey, safeMediaKey, audioKeysOf } from "./program-audio";
+import { isPublic, israelWallClock } from "./program-schedule.js";
+import { NOTIFIED_KEY, notifiedStatement, notifyEpisodes, programPushApi } from "./program-push";
+import { programAiApi, type AiBinding } from "./program-ai";
 
-type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
+type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string };
 type Ctx = { waitUntil(promise: Promise<unknown>): void };
 const ORIGIN = "https://shmuel-lamed.github.io";
 const MAX_FILE = 50 * 1024 * 1024;
+// העלאה בחלקים (R2 multipart) לקבצים גדולים: הקלטה עד 1GB, עטיפה עד 15MB.
+const MAX_MULTIPART_AUDIO = 1024 * 1024 * 1024;
+const MAX_MULTIPART_COVER = 15 * 1024 * 1024;
+const PART_SIZE = 20 * 1024 * 1024;
 // Recordings live in shared Google Drive files. Google serves them as plain
 // audio with Range support to servers, but answers 403 to any browser request
 // that carries `Sec-Fetch-Site: cross-site` — so the program site's own player
 // cannot load them directly and streams them through this worker instead.
-const DRIVE_ID = /^[\w-]{10,128}$/;
-const DRIVE_DOWNLOAD = (id: string) => `https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=download&confirm=t`;
 const STREAM_HEADERS = ["content-type", "content-length", "content-range", "etag", "last-modified"];
 const AUDIO = new Set(["audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg", "audio/flac", "audio/aac"]);
 const IMAGE = new Set(["image/jpeg", "image/png", "image/webp"]);
-const programAudioKey = (driveId: string) => `program-recordings/${driveId}.mp3`;
 const R2_BACKFILL_KEY = "program-recordings-r2-v1";
-
-function seedDriveId(episode: (typeof seed.episodes)[number]): string {
-  const values = [
-    episode.audio,
-    ...(episode.links || []).map((link) => link?.url),
-  ].filter((value): value is string => typeof value === "string" && !!value);
-  for (const value of values) {
-    const pathMatch = value.match(/drive\.google\.com\/file\/d\/([\w-]+)/);
-    if (pathMatch?.[1]) return pathMatch[1];
-    try {
-      const url = new URL(value);
-      if (url.hostname === "drive.google.com") {
-        const id = url.searchParams.get("id") || "";
-        if (DRIVE_ID.test(id)) return id;
-      }
-    } catch {}
-  }
-  return "";
-}
+const seedDriveId = driveIdOf;
 
 // The one-time GitHub migration uploaded all 86 recordings to R2, but its API
 // token cannot write this D1 database. Mark the already-uploaded objects from
@@ -62,7 +49,7 @@ async function backfillSeedR2Metadata(env: Env): Promise<void> {
   await env.DB.batch(updates);
 }
 
-async function r2AudioResponse(request: Request, env: Env, key: string): Promise<Response | null> {
+async function r2AudioResponse(request: Request, env: Env, key: string, disposition = "inline"): Promise<Response | null> {
   const range = request.headers.get("range");
   const object = range ? await env.MEDIA.get(key, { range: request.headers }) : await env.MEDIA.get(key);
   if (!object) return null;
@@ -70,7 +57,7 @@ async function r2AudioResponse(request: Request, env: Env, key: string): Promise
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
   headers.set("accept-ranges", "bytes");
-  headers.set("content-disposition", "inline");
+  headers.set("content-disposition", disposition);
   headers.set("cache-control", "public, max-age=31536000, immutable");
   headers.set("x-content-type-options", "nosniff");
   if ("range" in object && object.range) {
@@ -87,8 +74,8 @@ function cors(request: Request, response: Response): Response {
     const headers = new Headers(response.headers);
     headers.set("access-control-allow-origin", ORIGIN);
     headers.set("access-control-allow-headers", "authorization,content-type,range");
-    headers.set("access-control-allow-methods", "GET,HEAD,POST,DELETE,OPTIONS");
-    headers.set("access-control-expose-headers", "content-length,content-range,accept-ranges");
+    headers.set("access-control-allow-methods", "GET,HEAD,POST,PUT,DELETE,OPTIONS");
+    headers.set("access-control-expose-headers", "content-length,content-range,accept-ranges,content-disposition");
     headers.set("vary", "Origin");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
@@ -109,6 +96,14 @@ const deliver=(data)=>{if(!window.opener){fail('החלון הזה לא נפתח 
 const exchange=async(url,body)=>{const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'הכניסה נכשלה');return data};
 const showGoogle=()=>{if(!window.google){fail('כפתור Google לא נטען. רעננו את החלון ונסו שוב.');return}google.accounts.id.initialize({client_id:${JSON.stringify(GOOGLE_CLIENT_ID)},callback:async({credential})=>{out.className='';out.textContent='בודק הרשאה…';try{deliver(await exchange('/api/program/auth/google',{credential}))}catch(e){fail(e.message)}}});google.accounts.id.renderButton(document.getElementById('google'),{theme:'filled_blue',size:'large',shape:'pill',text:'continue_with',locale:'he',width:280})};
 window.onload=async()=>{if(known){out.textContent=known.isAdmin?'מעבירים אתכם לניהול התוכניות…':'מעבירים אתכם לאזור האישי…';try{return deliver(await exchange('/api/program/auth/session'))}catch(e){fail(e.message)}}showGoogle()};`;
+
+/** שם קובץ להורדה: חלופת ASCII ולצדה השם המלא בעברית (RFC 6266 / RFC 5987). */
+export function downloadDisposition(title: string, id: string, ext: string) {
+  const ascii = title.replace(/[^\x20-\x7e]+/g, " ").replace(/["\\]/g, "").replace(/\s+/g, " ").trim();
+  const fallback = /[a-z]/i.test(ascii) ? ascii : `rosh-berosh-${id}`;
+  const encoded = encodeURIComponent(`${title}.${ext}`).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${fallback}.${ext}"; filename*=UTF-8''${encoded}`;
+}
 
 async function admin(request: Request, env: Env) {
   const user = await readSession(request, env);
@@ -137,11 +132,16 @@ async function catalog(env: Env, includeHidden = false, origin = "") {
   const values = new Map((settings.results as Array<{ key: string; value_json: string }>).map((row) => {
     try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; }
   }));
+  // תוכנית מתוזמנת (publishAt בעתיד, בשעון ישראל) אינה מגיעה לציבור; מנהלים רואים הכול
+  const now = israelWallClock();
   return {
     version: 1,
     seasons: values.get("seasons") || [],
     episodes: (episodes.results as Array<{ id: string; data_json: string }>).flatMap((row) => {
-      try { return [{ ...JSON.parse(row.data_json), id: row.id }]; } catch { return []; }
+      try {
+        const data = { ...JSON.parse(row.data_json), id: row.id };
+        return includeHidden || isPublic(data, true, now) ? [data] : [];
+      } catch { return []; }
     }),
     // ההגדרות הציבוריות של אתר התוכניות (ההודעה בדף הבית ודף העדכונים)
     settings: await publicSettings(env, origin),
@@ -149,7 +149,6 @@ async function catalog(env: Env, includeHidden = false, origin = "") {
 }
 
 export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<Response | null> {
-  void ctx;
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/program/")) return null;
   if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }));
@@ -170,7 +169,10 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
 
   if (url.pathname === "/api/program/catalog" && request.method === "GET") {
     const user = await readSession(request, env);
-    return reply(request, await catalog(env, !!user?.isAdmin, url.origin), 200);
+    const data = await catalog(env, !!user?.isAdmin, url.origin);
+    // למנהלים: מזהה הגרסה האחרונה, שנשלח בחזרה בפרסום (baseVersion) כהגנה מהתנגשות
+    if (user?.isAdmin) return reply(request, { ...data, versionId: (await latestVersion(env))?.id ?? null });
+    return reply(request, data, 200);
   }
   if (url.pathname === "/api/program/auth/google" && request.method === "POST") {
     try {
@@ -283,9 +285,22 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
   if (url.pathname === "/api/program/catalog" && request.method === "POST") {
     const publisher = await admin(request, env);
     if (!publisher) return reply(request, { error: "אין הרשאת ניהול." }, 403);
-    let body: { seasons?: unknown[]; episodes?: Array<Record<string, unknown>>; removedIds?: string[]; settings?: Record<string, unknown> };
+    let body: { seasons?: unknown[]; episodes?: Array<Record<string, unknown>>; removedIds?: string[]; settings?: Record<string, unknown>; baseVersion?: string | null; force?: boolean; notify?: boolean };
     try { body = await request.json(); } catch { return reply(request, { error: "בקשה לא תקינה." }, 400); }
     if (!Array.isArray(body.episodes) || !Array.isArray(body.seasons) || body.episodes.length > 2000) return reply(request, { error: "נתוני התוכניות אינם תקינים." }, 400);
+    // הגנה מהתנגשות: מי שפותח את העורך מקבל את מזהה הגרסה האחרונה; אם מאז
+    // מישהו אחר פרסם, הפרסום נעצר (אלא אם ביקשו במפורש לדרוס).
+    if ("baseVersion" in body && body.force !== true) {
+      const latest = await latestVersion(env);
+      if ((latest?.id ?? null) !== (body.baseVersion ?? null)) {
+        return reply(request, { error: "מישהו אחר פרסם בינתיים. טענו מחדש את הנתונים כדי לא לדרוס את השינויים שלו, או פרסמו בכל זאת.", conflict: true, latest }, 409);
+      }
+    }
+    // מה היה גלוי לציבור לפני הפרסום — כדי לדעת אילו תוכניות חדשות עכשיו
+    const beforeNow = israelWallClock();
+    const before = new Set(((await env.DB.prepare("SELECT id,data_json FROM program_episodes WHERE visible=1").all<{ id: string; data_json: string }>()).results).flatMap((row) => {
+      try { return isPublic(JSON.parse(row.data_json), true, beforeNow) ? [row.id] : []; } catch { return []; }
+    }));
     const statements = body.episodes.map((episode) => {
       const id = safeId(episode.id || episode.slug);
       const slug = safeId(episode.slug || episode.id);
@@ -300,12 +315,23 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     // ההודעה בדף הבית ודף העדכונים מתפרסמים יחד עם הקטלוג
     statements.push(...settingsStatements(env, body.settings));
     // כל פרסום נשמר כגרסה — גיבוי אוטומטי שאפשר לחזור אליו מאזור הניהול
-    statements.push(...versionStatements(env, publisher.email, { seasons: body.seasons, episodes: body.episodes, settings: body.settings }));
+    const versionId = crypto.randomUUID();
+    statements.push(...versionStatements(env, publisher.email, { seasons: body.seasons, episodes: body.episodes, settings: body.settings }, versionId));
+    // תוכניות שהפכו עכשיו לציבוריות נרשמות כ"כבר הודיעו", כדי שהבדיקה
+    // המתוזמנת לא תשלח עליהן התראה מאוחרת; notify שולח עליהן התראה מיד.
+    const fresh = body.episodes
+      .map((episode) => ({ ...episode, id: safeId(episode.id || episode.slug), slug: safeId(episode.slug || episode.id) }))
+      .filter((episode) => episode.visible !== false && isPublic(episode, true, beforeNow) && !before.has(episode.id));
+    const notified = await readSetting<string[]>(env, NOTIFIED_KEY);
+    if (fresh.length || !Array.isArray(notified)) {
+      statements.push(notifiedStatement(env, [...(Array.isArray(notified) ? notified : before), ...fresh.map((episode) => episode.id)]));
+    }
     // הטיוטה המשותפת מולאה בפרסום הזה; קישור התצוגה המקדימה כבר אינו נחוץ
     statements.push(env.DB.prepare("DELETE FROM program_settings WHERE key IN ('draft')"));
     try { await env.DB.batch(statements); }
     catch (error) { console.error("program catalog write error", error); return reply(request, { error: "שמירת התוכניות נכשלה." }, 500); }
-    return reply(request, { ok: true, episodes: body.episodes.length, removed: removed.length });
+    if (body.notify === true && fresh.length) ctx.waitUntil(notifyEpisodes(env, fresh).catch((error) => console.error("program publish push error", error)));
+    return reply(request, { ok: true, episodes: body.episodes.length, removed: removed.length, versionId, notified: body.notify === true ? fresh.length : 0 });
   }
   if (url.pathname === "/api/program/upload" && request.method === "POST") {
     if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
@@ -319,7 +345,143 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     await env.MEDIA.put(key, request.body, { httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" } });
     return reply(request, { url: `${url.origin}/media/${key}` });
   }
+  /* ---------- העלאה בחלקים (R2 multipart) לקבצים גדולים ----------
+     start → part (PUT לכל חלק של 20MB) → complete, או abort בביטול. */
+  if (url.pathname.startsWith("/api/program/upload/")) {
+    if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
+    const step = url.pathname.slice("/api/program/upload/".length);
+    const validKey = (key: unknown): key is string => typeof key === "string" && key.startsWith("program/") && !key.includes("..") && safeMediaKey(key);
+    const readBody = async <T>() => { try { return await request.json<T>(); } catch { return null; } };
+    if (step === "start" && request.method === "POST") {
+      const episodeId = safeId(url.searchParams.get("episode"));
+      const kind = url.searchParams.get("kind") === "cover" ? "cover" : "audio";
+      const input = await readBody<{ contentType?: string; size?: number; name?: string }>();
+      const contentType = String(input?.contentType || "").split(";")[0].trim().toLowerCase();
+      const size = Number(input?.size || 0);
+      const limit = kind === "audio" ? MAX_MULTIPART_AUDIO : MAX_MULTIPART_COVER;
+      if (!episodeId || !(kind === "audio" ? AUDIO : IMAGE).has(contentType)) return reply(request, { error: "סוג הקובץ אינו נתמך." }, 400);
+      if (!Number.isFinite(size) || size <= 0 || size > limit) return reply(request, { error: kind === "audio" ? "הקובץ גדול מ־1GB." : "התמונה גדולה מ־15MB." }, 400);
+      const ext = contentType === "audio/mpeg" ? "mp3" : contentType.split("/")[1].replace("jpeg", "jpg").replace("mp4", "m4a");
+      const key = `program/${episodeId}/${crypto.randomUUID()}.${ext}`;
+      const upload = await env.MEDIA.createMultipartUpload(key, {
+        httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" },
+        customMetadata: { episodeId, kind, name: String(input?.name || "").slice(0, 200) },
+      });
+      return reply(request, { key, uploadId: upload.uploadId, partSize: PART_SIZE });
+    }
+    if (step === "part" && request.method === "PUT") {
+      const key = url.searchParams.get("key"), uploadId = url.searchParams.get("uploadId") || "";
+      const part = Number(url.searchParams.get("part"));
+      if (!validKey(key) || !uploadId || !Number.isInteger(part) || part < 1 || part > 10000) return reply(request, { error: "פרטי החלק אינם תקינים." }, 400);
+      if (!request.body) return reply(request, { error: "החלק ריק." }, 400);
+      try {
+        const uploaded = await env.MEDIA.resumeMultipartUpload(key, uploadId).uploadPart(part, request.body);
+        return reply(request, { part: uploaded.partNumber, etag: uploaded.etag });
+      } catch (error) {
+        console.error("program multipart part error", key, part, error);
+        return reply(request, { error: "העלאת החלק נכשלה." }, 500);
+      }
+    }
+    if (step === "complete" && request.method === "POST") {
+      const input = await readBody<{ key?: string; uploadId?: string; parts?: Array<{ part?: number; etag?: string }> }>();
+      const key = input?.key;
+      const parts = Array.isArray(input?.parts) ? input!.parts.map((item) => ({ partNumber: Number(item?.part), etag: String(item?.etag || "") })) : [];
+      if (!validKey(key) || !input?.uploadId || !parts.length || parts.some((item) => !Number.isInteger(item.partNumber) || item.partNumber < 1 || !item.etag)) return reply(request, { error: "פרטי ההעלאה אינם תקינים." }, 400);
+      try {
+        const object = await env.MEDIA.resumeMultipartUpload(key, String(input.uploadId)).complete(parts.sort((a, b) => a.partNumber - b.partNumber));
+        return reply(request, { url: `${url.origin}/media/${key}`, key, size: object.size });
+      } catch (error) {
+        console.error("program multipart complete error", key, error);
+        return reply(request, { error: "סיום ההעלאה נכשל." }, 500);
+      }
+    }
+    if (step === "abort" && request.method === "POST") {
+      const input = await readBody<{ key?: string; uploadId?: string }>();
+      if (!validKey(input?.key) || !input?.uploadId) return reply(request, { error: "פרטי ההעלאה אינם תקינים." }, 400);
+      try { await env.MEDIA.resumeMultipartUpload(input.key, String(input.uploadId)).abort(); }
+      catch (error) { console.error("program multipart abort error", input.key, error); }
+      return reply(request, { ok: true });
+    }
+    return reply(request, { error: "הנתיב לא נמצא." }, 404);
+  }
+
+  /* ---------- הורדת תוכנית עם שם קובץ נכון ---------- */
+  if (url.pathname.startsWith("/api/program/download/") && (request.method === "GET" || request.method === "HEAD")) {
+    let requested = "";
+    try { requested = decodeURIComponent(url.pathname.slice("/api/program/download/".length)); } catch { /* נשאר ריק */ }
+    const episode = await loadEpisode(env, safeId(requested));
+    const user = episode && !(episode.visible && isPublic(episode.data, true)) ? await readSession(request, env) : null;
+    if (!episode || (!(episode.visible && isPublic(episode.data, true)) && !user?.isAdmin)) return reply(request, { error: "התוכנית לא נמצאה." }, 404);
+    const title = String(episode.data.title || "").replace(/[/\\:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 150) || episode.id;
+    for (const key of audioKeysOf(episode.data, url.origin)) {
+      const ext = (key.match(/\.([a-z0-9]{2,4})$/i)?.[1] || "mp3").toLowerCase();
+      const response = await r2AudioResponse(request, env, key, downloadDisposition(title, episode.id, ext));
+      if (response) {
+        response.headers.set("cache-control", "public, max-age=3600");
+        return cors(request, response);
+      }
+    }
+    const driveId = driveIdOf(episode.data);
+    if (driveId) return cors(request, new Response(null, { status: 302, headers: { location: DRIVE_DOWNLOAD(driveId), "cache-control": "no-store" } }));
+    return reply(request, { error: "ההקלטה של התוכנית אינה זמינה להורדה." }, 404);
+  }
+
+  const push = await programPushApi(request, env, { reply, admin });
+  if (push) return push;
+  const ai = await programAiApi(request, env, { reply, admin, safeId });
+  if (ai) return ai;
   const tools = await programToolsApi(request, env, { reply, admin, safeId });
   if (tools) return tools;
   return reply(request, { error: "הנתיב לא נמצא." }, 404);
+}
+
+const OG_DEFAULT_IMAGE = `${PROGRAM_SITE}assets/img/og-default.png`;
+
+/**
+ * דף שיתוף לתוכנית: `GET /p/<slug>`. וואטסאפ ופייסבוק קוראים ממנו תגי Open
+ * Graph (כותרת, תיאור, תמונה) ומקבלים 200 — לא הפניה — ואדם שנכנס מועבר מיד
+ * לדף התוכנית באתר התוכניות, כולל נקודת ההתחלה (`?t=<שניות>`) אם צוינה.
+ */
+export async function programSharePage(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  let requested = "";
+  try { requested = decodeURIComponent(url.pathname.slice("/p/".length).replace(/\/+$/, "")); } catch { /* נשאר ריק */ }
+  const episode = await loadEpisode(env, safeId(requested));
+  const html = (body: string, status: number, cache: string) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": cache, "x-content-type-options": "nosniff" } });
+  if (!episode || !episode.visible || !isPublic(episode.data, true)) {
+    const home = escapeHtml(PROGRAM_SITE);
+    return html(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>התוכנית לא נמצאה — ראש בראש</title><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0;url=${home}"></head><body><p>התוכנית לא נמצאה. <a href="${home}">לאתר התוכניות</a></p><script>location.replace(${JSON.stringify(PROGRAM_SITE).replace(/</g, "\\u003c")})</script></body></html>`, 404, "public, max-age=60");
+  }
+  const data = episode.data;
+  const slug = String(data.slug || episode.id);
+  const title = String(data.title || "").trim() || "תוכנית";
+  const number = Number(data.number);
+  const ogTitle = Number.isFinite(number) && number > 0 && data.number !== null && data.number !== "" ? `תוכנית ${number} · ${title}` : title;
+  const description = String(data.description || "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const cover = typeof data.cover === "string" && /^https:\/\//i.test(data.cover) ? data.cover : "";
+  const image = cover || OG_DEFAULT_IMAGE;
+  const canonical = `${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(slug)}`;
+  const seconds = Math.floor(Number(url.searchParams.get("t")));
+  const target = Number.isFinite(seconds) && seconds > 0 ? `${canonical}&t=${seconds}` : canonical;
+  const shareUrl = `${url.origin}${url.pathname}${url.search}`;
+  const e = (value: string) => escapeHtml(value);
+  const meta = [
+    `<meta name="description" content="${e(description)}">`,
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:site_name" content="ראש בראש">`,
+    `<meta property="og:locale" content="he_IL">`,
+    `<meta property="og:title" content="${e(ogTitle)}">`,
+    `<meta property="og:description" content="${e(description)}">`,
+    `<meta property="og:url" content="${e(shareUrl)}">`,
+    `<meta property="og:image" content="${e(image)}">`,
+    ...(cover ? [] : [`<meta property="og:image:width" content="1200">`, `<meta property="og:image:height" content="630">`]),
+    `<meta name="twitter:card" content="summary_large_image">`,
+    `<meta name="twitter:title" content="${e(ogTitle)}">`,
+    `<meta name="twitter:description" content="${e(description)}">`,
+    `<meta name="twitter:image" content="${e(image)}">`,
+    `<link rel="canonical" href="${e(canonical)}">`,
+    `<meta http-equiv="refresh" content="0;url=${e(target)}">`,
+  ].join("");
+  const body = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${e(title)} — ראש בראש</title>${meta}</head><body><p><a href="${e(target)}">${e(ogTitle)}</a></p><script>location.replace(${JSON.stringify(target).replace(/</g, "\\u003c")})</script></body></html>`;
+  return html(body, 200, "public, max-age=300");
 }

@@ -19,6 +19,7 @@ const EXPECTED_TABLES = [
   "ballot_rate_limits", "ivr_recorders", "ivr_prompts", "ivr_store_meta", "ivr_admin_audit",
   "auth_sessions", "site_ballot_progress", "media_uploads", "subscribers",
   "program_episodes", "program_settings", "program_events", "program_messages", "program_versions",
+  "program_user_data", "program_likes", "program_push", "program_transcripts",
 ];
 
 function fakeDb({ existingColumns = {}, fail = () => false } = {}) {
@@ -60,7 +61,7 @@ test("every statement is a single statement, because prepare runs one at a time"
 });
 
 test("the bootstrap covers every table the worker queries", () => {
-  const sources = ["worker/index.ts", "worker/admin.ts", "worker/subscribers-admin.ts", "worker/ivr-admin.ts", "worker/ivr-prompts.ts", "worker/rate-limit.js", "worker/auth.ts", "worker/program-api.ts", "worker/program-tools.ts"];
+  const sources = ["worker/index.ts", "worker/admin.ts", "worker/subscribers-admin.ts", "worker/ivr-admin.ts", "worker/ivr-prompts.ts", "worker/rate-limit.js", "worker/auth.ts", "worker/program-api.ts", "worker/program-tools.ts", "worker/program-push.ts", "worker/program-ai.ts"];
   const referenced = new Set();
   for (const file of sources) {
     const sql = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");

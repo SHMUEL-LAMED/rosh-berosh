@@ -54,6 +54,10 @@ const localBindingConfig = {
         },
       ]
     : [],
+  // Workers AI: תמלול וסיכום של תוכניות באתר התוכניות (צריך להיות מופעל בחשבון)
+  ai: { binding: "AI" },
+  // כל רבע שעה: התראות דחיפה על תוכניות מתוזמנות שהגיע מועד פרסומן
+  triggers: { crons: ["*/15 * * * *"] },
 };
 
 export default defineConfig(async () => {

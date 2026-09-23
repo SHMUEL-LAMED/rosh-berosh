@@ -6,6 +6,7 @@
 import { configuredAdminEmails, createSession, readAdminEmails, readSession, saveAdminEmails, sessionCookie, type SessionUser } from "./auth";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
+import { israelHour } from "./program-schedule.js";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
 type Helpers = {
@@ -93,13 +94,28 @@ export function settingsStatements(env: Env, raw: unknown) {
   return statements;
 }
 
-/** גרסה נשמרת אוטומטית בכל פרסום; רק האחרונות נשארות. */
-export function versionStatements(env: Env, by: string, snapshot: { seasons: unknown[]; episodes: unknown[]; settings?: unknown }) {
-  const id = crypto.randomUUID();
+/** גרסה נשמרת אוטומטית בכל פרסום; רק האחרונות נשארות. `id` — מזהה הגרסה החדשה. */
+export function versionStatements(env: Env, by: string, snapshot: { seasons: unknown[]; episodes: unknown[]; settings?: unknown }, id: string = crypto.randomUUID()) {
   return [
     env.DB.prepare("INSERT INTO program_versions (id,by_email,episodes,data_json) VALUES (?,?,?,?)").bind(id, by, snapshot.episodes.length, JSON.stringify(snapshot)),
     env.DB.prepare(`DELETE FROM program_versions WHERE id NOT IN (SELECT id FROM program_versions ORDER BY created_at DESC, rowid DESC LIMIT ${VERSIONS_KEPT})`),
   ];
+}
+
+/** הגרסה האחרונה שפורסמה (להגנה מפני פרסום על גבי פרסום של מישהו אחר). */
+export async function latestVersion(env: Env) {
+  return await env.DB.prepare("SELECT id, by_email AS by, created_at AS createdAt FROM program_versions ORDER BY created_at DESC, rowid DESC LIMIT 1")
+    .first<{ id: string; by: string | null; createdAt: number }>() ?? null;
+}
+
+export const REFS = ["whatsapp", "google", "facebook", "direct", "internal", "other"] as const;
+export const normalizeRef = (value: unknown) => (REFS as readonly string[]).includes(String(value)) ? String(value) : "other";
+export const USERDATA_MAX = 300 * 1024;
+export const RETENTION_BUCKETS = Array.from({ length: 20 }, (_, i) => i * 5);
+
+/** לכל סף (0,5,…,95): כמה מאזינים שונים הגיעו לאחוז הזה לפחות. */
+export function retentionCurve(maxima: Array<{ pct: number }>) {
+  return RETENTION_BUCKETS.map((pct) => ({ pct, listeners: maxima.filter((row) => Number(row.pct) >= pct).length }));
 }
 
 export async function programToolsApi(request: Request, env: Env, h: Helpers): Promise<Response | null> {
@@ -254,14 +270,18 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
   /* ---------- אירועי האזנה (ציבורי, מוגבל בקצב) ---------- */
   if (path === "/events" && method === "POST") {
     if (!(await checkBallotRate(env.DB, `pevent:${clientIp}`))) return tooMany();
-    const event = await body<{ kind?: string; episodeId?: string; seconds?: number; device?: string }>();
+    const event = await body<{ kind?: string; episodeId?: string; seconds?: number; device?: string; pct?: number; ref?: string }>();
     const kind = event.kind === "listen" ? "listen" : "play";
     const episodeId = h.safeId(event.episodeId);
     if (!episodeId) return h.reply(request, { error: "חסר מזהה תוכנית." }, 400);
     const seconds = Math.min(600, Math.max(0, Math.floor(Number(event.seconds) || 0)));
     const device = event.device === "phone" ? "phone" : "desktop";
     const client = await hash(`${clientIp}|${request.headers.get("user-agent") || ""}|${day()}`);
-    await env.DB.prepare("INSERT INTO program_events (episode_id,kind,seconds,device,day,client_hash) VALUES (?,?,?,?,?,?)").bind(episodeId, kind, seconds, device, day(), client).run();
+    // מיקום בתוכנית באחוזים (נשלח עם "listen" כל כמה דקות ובעצירה), מקור ההגעה, ושעת ההאזנה בישראל
+    const rawPct = Number(event.pct);
+    const pct = event.pct === undefined || event.pct === null || !Number.isFinite(rawPct) ? null : Math.min(100, Math.max(0, Math.round(rawPct)));
+    const ref = event.ref === undefined || event.ref === null || event.ref === "" ? null : normalizeRef(event.ref);
+    await env.DB.prepare("INSERT INTO program_events (episode_id,kind,seconds,device,day,client_hash,pct,ref,hour) VALUES (?,?,?,?,?,?,?,?,?)").bind(episodeId, kind, seconds, device, day(), client, pct, ref, israelHour()).run();
     return h.reply(request, { ok: true });
   }
 
@@ -269,17 +289,96 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
   if (path === "/stats" && method === "GET") {
     if (!await h.admin(request, env)) return forbidden();
     const since30 = nowSeconds() - 30 * DAY_SECONDS, since7 = nowSeconds() - 7 * DAY_SECONDS;
-    const [days, episodes, recent, totals, devices, week] = await env.DB.batch([
+    const [days, episodes, recent, totals, devices, week, sources, hours, likes] = await env.DB.batch([
       env.DB.prepare("SELECT day, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events WHERE created_at>=? GROUP BY day ORDER BY day").bind(since30),
       env.DB.prepare("SELECT episode_id AS id, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events GROUP BY episode_id ORDER BY plays DESC LIMIT 300"),
       env.DB.prepare("SELECT episode_id AS id, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events WHERE created_at>=? GROUP BY episode_id ORDER BY plays DESC LIMIT 300").bind(since30),
       env.DB.prepare("SELECT SUM(kind='play') AS plays, COUNT(DISTINCT client_hash || day) AS listeners, SUM(seconds) AS seconds FROM program_events"),
       env.DB.prepare("SELECT device, SUM(kind='play') AS plays FROM program_events WHERE created_at>=? GROUP BY device").bind(since30),
       env.DB.prepare("SELECT SUM(kind='play') AS plays, COUNT(DISTINCT client_hash || day) AS listeners FROM program_events WHERE created_at>=?").bind(since7),
+      // אירועים מלפני הוספת העמודות (בלי ref/hour) אינם נספרים כאן
+      env.DB.prepare("SELECT ref, COUNT(*) AS plays FROM program_events WHERE kind='play' AND created_at>=? AND ref IS NOT NULL GROUP BY ref ORDER BY plays DESC").bind(since30),
+      env.DB.prepare("SELECT hour, COUNT(*) AS plays FROM program_events WHERE kind='play' AND created_at>=? AND hour IS NOT NULL GROUP BY hour").bind(since30),
+      env.DB.prepare("SELECT episode_id AS id, COUNT(*) AS likes FROM program_likes GROUP BY episode_id ORDER BY likes DESC LIMIT 20"),
     ]);
+    const byHour = new Map((hours.results as Array<{ hour: number; plays: number }>).map((row) => [Number(row.hour), Number(row.plays) || 0]));
     const deviceMap: Record<string, number> = {};
     for (const row of devices.results as Array<{ device: string; plays: number }>) deviceMap[row.device] = Number(row.plays) || 0;
-    return h.reply(request, { days: days.results, episodes: episodes.results, recent: recent.results, totals: totals.results[0] || {}, week: week.results[0] || {}, devices: deviceMap });
+    return h.reply(request, { days: days.results, episodes: episodes.results, recent: recent.results, totals: totals.results[0] || {}, week: week.results[0] || {}, devices: deviceMap,
+      sources: (sources.results as Array<{ ref: string; plays: number }>).map((row) => ({ ref: row.ref, plays: Number(row.plays) || 0 })),
+      hours: Array.from({ length: 24 }, (_, hour) => ({ hour, plays: byHour.get(hour) || 0 })),
+      likes: (likes.results as Array<{ id: string; likes: number }>).map((row) => ({ id: row.id, likes: Number(row.likes) || 0 })) });
+  }
+  if (path.startsWith("/stats/episode/") && method === "GET") {
+    if (!await h.admin(request, env)) return forbidden();
+    const id = h.safeId(decodeURIComponent(path.slice("/stats/episode/".length)));
+    if (!id) return h.reply(request, { error: "חסר מזהה תוכנית." }, 400);
+    const [totals, maxima] = await env.DB.batch([
+      env.DB.prepare("SELECT SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners FROM program_events WHERE episode_id=?").bind(id),
+      env.DB.prepare("SELECT client_hash, MAX(pct) AS pct FROM program_events WHERE episode_id=? AND pct IS NOT NULL GROUP BY client_hash").bind(id),
+    ]);
+    const row = (totals.results[0] || {}) as { plays?: number; listeners?: number };
+    return h.reply(request, { id, plays: Number(row.plays) || 0, listeners: Number(row.listeners) || 0, retention: retentionCurve(maxima.results as Array<{ pct: number }>) });
+  }
+
+  /* ---------- נתונים אישיים לכל חשבון (סנכרון בין מכשירים) ----------
+     השרת אינו מפרש את התוכן — הלקוח ממזג — רק בודק שזה אובייקט ושהוא לא גדול מדי. */
+  if (path === "/userdata") {
+    const user = await readSession(request, env);
+    if (!user?.sub) return h.reply(request, { error: "צריך להתחבר." }, 401);
+    if (method === "GET") {
+      const row = await env.DB.prepare("SELECT data_json, updated_at FROM program_user_data WHERE user_sub=?").bind(user.sub).first<{ data_json: string; updated_at: number }>();
+      if (!row) return h.reply(request, { data: null, updatedAt: null });
+      let data = null;
+      try { data = JSON.parse(row.data_json); } catch { data = null; }
+      return h.reply(request, { data, updatedAt: new Date(Number(row.updated_at) * 1000).toISOString() });
+    }
+    if (method === "PUT") {
+      let input: { data?: unknown };
+      try { input = await request.json(); } catch { return h.reply(request, { error: "בקשה לא תקינה." }, 400); }
+      const data = input?.data;
+      if (!data || typeof data !== "object" || Array.isArray(data)) return h.reply(request, { error: "הנתונים האישיים אינם תקינים." }, 400);
+      const serialized = JSON.stringify(data);
+      if (new TextEncoder().encode(serialized).length > USERDATA_MAX) return h.reply(request, { error: "הנתונים האישיים גדולים מדי." }, 413);
+      const at = nowSeconds();
+      await env.DB.prepare("INSERT INTO program_user_data (user_sub,email,data_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(user_sub) DO UPDATE SET email=excluded.email,data_json=excluded.data_json,updated_at=excluded.updated_at")
+        .bind(user.sub, user.email || null, serialized, at).run();
+      return h.reply(request, { ok: true, updatedAt: new Date(at * 1000).toISOString() });
+    }
+    if (method === "DELETE") {
+      await env.DB.prepare("DELETE FROM program_user_data WHERE user_sub=?").bind(user.sub).run();
+      return h.reply(request, { ok: true });
+    }
+  }
+
+  /* ---------- לייקים ---------- */
+  if (path === "/likes" && method === "GET") {
+    const user = await readSession(request, env);
+    const [counts, mine] = await env.DB.batch([
+      env.DB.prepare("SELECT episode_id AS id, COUNT(*) AS likes FROM program_likes GROUP BY episode_id"),
+      env.DB.prepare("SELECT episode_id AS id FROM program_likes WHERE user_sub=?").bind(user?.sub || ""),
+    ]);
+    const map: Record<string, number> = {};
+    for (const row of counts.results as Array<{ id: string; likes: number }>) map[row.id] = Number(row.likes) || 0;
+    return h.reply(request, { counts: map, mine: user?.sub ? (mine.results as Array<{ id: string }>).map((row) => row.id) : [] });
+  }
+  if (path === "/likes" && method === "POST") {
+    const user = await readSession(request, env);
+    if (!user?.sub) return h.reply(request, { error: "צריך להתחבר כדי לסמן אהבתי." }, 401);
+    if (!(await checkBallotRate(env.DB, `plike:${user.sub}`))) return tooMany();
+    const input = await body<{ episodeId?: string; like?: boolean }>();
+    const episodeId = h.safeId(input.episodeId);
+    if (!episodeId) return h.reply(request, { error: "חסר מזהה תוכנית." }, 400);
+    const liked = input.like !== false;
+    if (liked) {
+      const exists = await env.DB.prepare("SELECT 1 AS one FROM program_episodes WHERE id=?").bind(episodeId).first();
+      if (!exists) return h.reply(request, { error: "התוכנית לא נמצאה." }, 404);
+      await env.DB.prepare("INSERT OR IGNORE INTO program_likes (user_sub,episode_id) VALUES (?,?)").bind(user.sub, episodeId).run();
+    } else {
+      await env.DB.prepare("DELETE FROM program_likes WHERE user_sub=? AND episode_id=?").bind(user.sub, episodeId).run();
+    }
+    const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_likes WHERE episode_id=?").bind(episodeId).first<{ total: number }>();
+    return h.reply(request, { ok: true, liked, count: Number(count?.total || 0) });
   }
 
   /* ---------- הודעות מהמאזינים ---------- */
