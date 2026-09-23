@@ -8,13 +8,14 @@ import { programAiApi, type AiBinding } from "./program-ai";
 import { runTextFixes } from "./program-text-fixes";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string };
-type Ctx = { waitUntil(promise: Promise<unknown>): void };
 const ORIGIN = "https://shmuel-lamed.github.io";
-const MAX_FILE = 50 * 1024 * 1024;
-// העלאה בחלקים (R2 multipart) לקבצים גדולים: הקלטה עד 1GB, עטיפה עד 15MB.
-const MAX_MULTIPART_AUDIO = 1024 * 1024 * 1024;
-const MAX_MULTIPART_COVER = 15 * 1024 * 1024;
+// גבולות ההעלאה — אותם גבולות בהעלאה הרגילה ובהעלאה בחלקים (R2 multipart):
+// הקלטה עד 1GB, עטיפה עד 15MB.
+const UPLOAD_LIMITS = { audio: 1024 * 1024 * 1024, cover: 15 * 1024 * 1024 } as const;
+const TOO_LARGE = { audio: "הקובץ גדול מ־1GB.", cover: "התמונה גדולה מ־15MB." } as const;
 const PART_SIZE = 20 * 1024 * 1024;
+// הזריעה מהקובץ נעשית פעם אחת בחיי המסד, לפי הסימון הזה ב־program_settings
+const SEEDED_KEY = "seeded";
 // Recordings live in shared Google Drive files. Google serves them as plain
 // audio with Range support to servers, but answers 403 to any browser request
 // that carries `Sec-Fetch-Site: cross-site` — so the program site's own player
@@ -117,14 +118,58 @@ async function admin(request: Request, env: Env) {
 const publicUser = (user: { email: string; name: string; picture?: string; isAdmin: boolean }) =>
   ({ email: user.email, name: user.name, picture: user.picture, isAdmin: !!user.isAdmin });
 
-async function catalog(env: Env, includeHidden = false, origin = "") {
-  const existing = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_episodes").first<{ total: number }>();
-  if (!Number(existing?.total)) {
-    const inserts = seed.episodes.map((episode) => env.DB.prepare("INSERT OR IGNORE INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch())")
-      .bind(episode.id, episode.slug, episode.number, episode.date || null, episode.visible === false ? 0 : 1, JSON.stringify(episode)));
-    inserts.push(env.DB.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch())").bind(JSON.stringify(seed.seasons)));
-    await env.DB.batch(inserts);
+/** הסימון שהקטלוג כבר נזרע (או פורסם), כדי שלא ייזרע שוב לעולם. */
+const seededStatement = (env: Env) => env.DB.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES (?,?,unixepoch())")
+  .bind(SEEDED_KEY, JSON.stringify({ at: new Date().toISOString() }));
+
+/**
+ * זריעת הקטלוג מהקובץ — לפי הסימון `seeded`, ולא לפי מספר השורות, כך שמחיקת
+ * כל התוכניות אינה מחזירה את הקטלוג המקורי. מסד שכבר יש בו תוכניות (מלפני
+ * שהיה הסימון) רק מקבל את הסימון, בלי שתוכניות שנמחקו ממנו יחזרו.
+ */
+async function seedOnce(env: Env) {
+  const state = await env.DB.prepare("SELECT (SELECT 1 FROM program_settings WHERE key=?) AS seeded, (SELECT COUNT(*) FROM program_episodes) AS total")
+    .bind(SEEDED_KEY).first<{ seeded: number | null; total: number }>();
+  if (state?.seeded) return;
+  const statements: D1PreparedStatement[] = Number(state?.total) ? [] : seed.episodes.map((episode) => env.DB.prepare("INSERT OR IGNORE INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch())")
+    .bind(episode.id, episode.slug, episode.number, episode.date || null, episode.visible === false ? 0 : 1, JSON.stringify(episode)));
+  if (statements.length) statements.push(env.DB.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch())").bind(JSON.stringify(seed.seasons)));
+  statements.push(seededStatement(env));
+  await env.DB.batch(statements);
+}
+
+/**
+ * האם מזהה קובץ הדרייב שייך לתוכנית בקטלוג. חיפוש זול של המחרוזת בנתוני
+ * התוכניות, ואז בדיקה שהיא מופיעה שם כמזהה שלם ולא כחלק ממזהה ארוך יותר.
+ */
+async function catalogHasRecording(env: Env, id: string) {
+  const rows = (await env.DB.prepare("SELECT data_json FROM program_episodes WHERE instr(data_json,?)>0 LIMIT 20").bind(id).all<{ data_json: string }>()).results;
+  const whole = new RegExp(`(?:^|[^\\w-])${id}(?:[^\\w-]|$)`);
+  return rows.some((row) => whole.test(row.data_json));
+}
+
+/** הכתובת (slug) הראשונה שתופיע פעמיים אחרי הפרסום, או "" כשאין כפילות. */
+function duplicateSlug(current: Array<{ id: string; slug: string }>, removed: Set<string>, incoming: Array<{ id: string; slug: string }>) {
+  const slugs = new Map<string, string>();
+  for (const row of current) if (!removed.has(row.id)) slugs.set(row.id, row.slug);
+  for (const episode of incoming) slugs.set(episode.id, episode.slug);
+  const seen = new Set<string>();
+  for (const slug of slugs.values()) {
+    if (seen.has(slug)) return slug;
+    seen.add(slug);
   }
+  return "";
+}
+
+/** מספר התוכנית: ריק, null או ערך שאינו מספר נשמרים כ־null — לא כ־0. */
+function episodeNumber(value: unknown): number | null {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+async function catalog(env: Env, includeHidden = false, origin = "") {
+  await seedOnce(env);
   await backfillSeedR2Metadata(env);
   await runTextFixes(env);   // תיקוני כתיב חד־פעמיים בשמות ובתיאורים
   const [episodes, settings] = await env.DB.batch([
@@ -150,7 +195,7 @@ async function catalog(env: Env, includeHidden = false, origin = "") {
   };
 }
 
-export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<Response | null> {
+export async function programApi(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/program/")) return null;
   if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }));
@@ -212,6 +257,8 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     // older recordings are being migrated, so playback never goes offline.
     const id = url.pathname.slice("/api/program/stream/".length);
     if (!DRIVE_ID.test(id)) return reply(request, { error: "מזהה הקלטה לא תקין." }, 400);
+    // רק הקלטות של תוכניות בקטלוג — הוורקר אינו מתווך לכל קובץ דרייב שהוא
+    if (!await catalogHasRecording(env, id)) return reply(request, { error: "ההקלטה לא נמצאה." }, 404);
     const stored = await r2AudioResponse(request, env, programAudioKey(id));
     if (stored) return cors(request, stored);
     const upstreamHeaders = new Headers();
@@ -289,7 +336,18 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     if (!publisher) return reply(request, { error: "אין הרשאת ניהול." }, 403);
     let body: { seasons?: unknown[]; episodes?: Array<Record<string, unknown>>; removedIds?: string[]; settings?: Record<string, unknown>; baseVersion?: string | null; force?: boolean; notify?: boolean };
     try { body = await request.json(); } catch { return reply(request, { error: "בקשה לא תקינה." }, 400); }
-    if (!Array.isArray(body.episodes) || !Array.isArray(body.seasons) || body.episodes.length > 2000) return reply(request, { error: "נתוני התוכניות אינם תקינים." }, 400);
+    const invalid = () => reply(request, { error: "נתוני התוכניות אינם תקינים." }, 400);
+    if (!Array.isArray(body.episodes) || !Array.isArray(body.seasons) || body.episodes.length > 2000) return invalid();
+    // כל תוכנית נבדקת לפני שנבנה משפט אחד: אובייקט עם מזהה, כתובת (slug) ושם.
+    // תוכנית פגומה מחזירה 400, ולא שגיאת שרת באמצע בניית הפרסום.
+    const episodes: Array<Record<string, unknown> & { id: string; slug: string }> = [];
+    for (const raw of body.episodes as unknown[]) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return invalid();
+      const episode = raw as Record<string, unknown>;
+      const id = safeId(episode.id || episode.slug), slug = safeId(episode.slug || episode.id);
+      if (!id || !slug || !String(episode.title || "").trim()) return invalid();
+      episodes.push({ ...episode, id, slug });
+    }
     // הגנה מהתנגשות: מי שפותח את העורך מקבל את מזהה הגרסה האחרונה; אם מאז
     // מישהו אחר פרסם, הפרסום נעצר (אלא אם ביקשו במפורש לדרוס).
     if ("baseVersion" in body && body.force !== true) {
@@ -298,42 +356,75 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
         return reply(request, { error: "מישהו אחר פרסם בינתיים. טענו מחדש את הנתונים כדי לא לדרוס את השינויים שלו, או פרסמו בכל זאת.", conflict: true, latest }, 409);
       }
     }
-    // מה היה גלוי לציבור לפני הפרסום — כדי לדעת אילו תוכניות חדשות עכשיו
+    // המצב הנוכחי: הכתובות (לבדיקת כפילות) ומה שגלוי לציבור לפני הפרסום — כדי
+    // לדעת אילו תוכניות חדשות עכשיו
     const beforeNow = israelWallClock();
-    const before = new Set(((await env.DB.prepare("SELECT id,data_json FROM program_episodes WHERE visible=1").all<{ id: string; data_json: string }>()).results).flatMap((row) => {
+    const currentRows = async () => (await env.DB.prepare("SELECT id,slug,visible,data_json FROM program_episodes").all<{ id: string; slug: string; visible: number; data_json: string }>()).results;
+    const current = await currentRows();
+    const before = new Set(current.flatMap((row) => {
+      if (!Number(row.visible)) return [];
       try { return isPublic(JSON.parse(row.data_json), true, beforeNow) ? [row.id] : []; } catch { return []; }
     }));
-    const statements = body.episodes.map((episode) => {
-      const id = safeId(episode.id || episode.slug);
-      const slug = safeId(episode.slug || episode.id);
-      if (!id || !slug || !String(episode.title || "").trim()) throw new Error("invalid episode");
-      const data = { ...episode, id, slug };
-      return env.DB.prepare("INSERT INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch()) ON CONFLICT(id) DO UPDATE SET slug=excluded.slug,number=excluded.number,date=excluded.date,visible=excluded.visible,data_json=excluded.data_json,updated_at=unixepoch()")
-        .bind(id, slug, Number.isFinite(Number(episode.number)) ? Number(episode.number) : null, String(episode.date || "") || null, episode.visible === false ? 0 : 1, JSON.stringify(data));
-    });
+    const removed = [...new Set((Array.isArray(body.removedIds) ? body.removedIds : []).map(safeId).filter(Boolean))].slice(0, 2000);
+    const removedSet = new Set(removed);
+    // תוכנית שנשלחה וגם סומנה למחיקה — נמחקת (כמו קודם)
+    const upserts = episodes.filter((episode) => !removedSet.has(episode.id));
+    const duplicate = duplicateSlug(current, removedSet, upserts);
+    if (duplicate) return reply(request, { error: `כתובת כפולה: ${duplicate}` }, 409);
+    // הסדר חשוב, כי ייחודיות הכתובת נבדקת בכל משפט בנפרד: קודם המחיקות (כתובת
+    // של תוכנית שנמחקה פנויה לתוכנית חדשה), אחר כך כל תוכנית שהכתובת שלה
+    // משתנה מקבלת כתובת זמנית (כך אפשר להחליף כתובות בין שתי תוכניות), ורק
+    // אז הכתיבה עצמה. "~" לעולם אינו חלק מכתובת אמיתית, והמזהה ייחודי.
+    const statements: D1PreparedStatement[] = removed.map((id) => env.DB.prepare("DELETE FROM program_episodes WHERE id=?").bind(id));
+    const slugOf = new Map(current.map((row) => [row.id, row.slug]));
+    const moving = [...new Set(upserts.filter((episode) => slugOf.has(episode.id) && slugOf.get(episode.id) !== episode.slug).map((episode) => episode.id))];
+    for (let i = 0; i < moving.length; i += 50) {
+      const chunk = moving.slice(i, i + 50);
+      statements.push(env.DB.prepare(`UPDATE program_episodes SET slug='~'||id WHERE id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk));
+    }
+    for (const episode of upserts) {
+      statements.push(env.DB.prepare("INSERT INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch()) ON CONFLICT(id) DO UPDATE SET slug=excluded.slug,number=excluded.number,date=excluded.date,visible=excluded.visible,data_json=excluded.data_json,updated_at=unixepoch()")
+        .bind(episode.id, episode.slug, episodeNumber(episode.number), String(episode.date || "") || null, episode.visible === false ? 0 : 1, JSON.stringify(episode)));
+    }
     statements.push(env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(body.seasons)));
-    const removed = [...new Set((body.removedIds || []).map(safeId).filter(Boolean))].slice(0, 2000);
-    for (const id of removed) statements.push(env.DB.prepare("DELETE FROM program_episodes WHERE id=?").bind(id));
+    // אחרי פרסום הקטלוג לעולם אינו נזרע שוב מהקובץ, גם אם כל התוכניות נמחקו
+    statements.push(seededStatement(env));
     // ההודעה בדף הבית ודף העדכונים מתפרסמים יחד עם הקטלוג
     statements.push(...settingsStatements(env, body.settings));
     // כל פרסום נשמר כגרסה — גיבוי אוטומטי שאפשר לחזור אליו מאזור הניהול
     const versionId = crypto.randomUUID();
     statements.push(...versionStatements(env, publisher.email, { seasons: body.seasons, episodes: body.episodes, settings: body.settings }, versionId));
     // תוכניות שהפכו עכשיו לציבוריות נרשמות כ"כבר הודיעו", כדי שהבדיקה
-    // המתוזמנת לא תשלח עליהן התראה מאוחרת; notify שולח עליהן התראה מיד.
-    const fresh = body.episodes
-      .map((episode) => ({ ...episode, id: safeId(episode.id || episode.slug), slug: safeId(episode.slug || episode.id) }))
-      .filter((episode) => episode.visible !== false && isPublic(episode, true, beforeNow) && !before.has(episode.id));
+    // המתוזמנת לא תשלח עליהן התראה מאוחרת; notify מכניס עליהן התראה לתור.
+    const fresh = upserts.filter((episode) => episode.visible !== false && isPublic(episode, true, beforeNow) && !before.has(episode.id));
+    // תיבת "לשלוח התראה" לא סומנה (notify === false): גם התוכניות שעוד אינן
+    // ציבוריות בפרסום הזה (מתוזמנות או מוסתרות) נרשמות כ"כבר הודיעו", כדי
+    // שה־cron לא ישלח עליהן התראה כשמועד הפרסום שלהן יגיע. עם notify === true
+    // (או בלי השדה, מלקוח ישן) לא משתנה דבר — ה־cron יודיע עליהן כרגיל.
+    const silenced = body.notify === false ? upserts.filter((episode) => !isPublic(episode, episode.visible !== false, beforeNow)).map((episode) => episode.id) : [];
     const notified = await readSetting<string[]>(env, NOTIFIED_KEY);
-    if (fresh.length || !Array.isArray(notified)) {
-      statements.push(notifiedStatement(env, [...(Array.isArray(notified) ? notified : before), ...fresh.map((episode) => episode.id)]));
+    if (fresh.length || silenced.length || !Array.isArray(notified)) {
+      statements.push(notifiedStatement(env, [...(Array.isArray(notified) ? notified : before), ...fresh.map((episode) => episode.id), ...silenced]));
     }
     // הטיוטה המשותפת מולאה בפרסום הזה; קישור התצוגה המקדימה כבר אינו נחוץ
     statements.push(env.DB.prepare("DELETE FROM program_settings WHERE key IN ('draft')"));
     try { await env.DB.batch(statements); }
-    catch (error) { console.error("program catalog write error", error); return reply(request, { error: "שמירת התוכניות נכשלה." }, 500); }
-    if (body.notify === true && fresh.length) ctx.waitUntil(notifyEpisodes(env, fresh).catch((error) => console.error("program publish push error", error)));
-    return reply(request, { ok: true, episodes: body.episodes.length, removed: removed.length, versionId, notified: body.notify === true ? fresh.length : 0 });
+    catch (error) {
+      // כתובת כפולה שנוצרה בינתיים (למשל בפרסום מקביל) — 409 עם הכתובת, לא שגיאת שרת
+      if (/UNIQUE constraint failed: program_episodes\.slug/i.test(String((error as Error)?.message ?? error))) {
+        const slug = duplicateSlug(await currentRows().catch(() => []), removedSet, upserts);
+        return reply(request, { error: slug ? `כתובת כפולה: ${slug}` : "כתובת כפולה." }, 409);
+      }
+      console.error("program catalog write error", error);
+      return reply(request, { error: "שמירת התוכניות נכשלה." }, 500);
+    }
+    // ההתראות רק נכנסות לתור; דף הניהול מרוקן אותו בלולאה (/push/drain) וה־cron משלים
+    let queued = 0;
+    if (body.notify === true && fresh.length) {
+      try { await notifyEpisodes(env, fresh); queued = fresh.length; }
+      catch (error) { console.error("program publish push error", error); }
+    }
+    return reply(request, { ok: true, episodes: body.episodes.length, removed: removed.length, versionId, notified: queued });
   }
   if (url.pathname === "/api/program/upload" && request.method === "POST") {
     if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
@@ -341,7 +432,10 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
     const kind = url.searchParams.get("kind") === "cover" ? "cover" : "audio";
     const contentType = (request.headers.get("content-type") || "").split(";")[0].toLowerCase();
     const length = Number(request.headers.get("content-length") || 0);
-    if (!episodeId || !length || length > MAX_FILE || !(kind === "audio" ? AUDIO : IMAGE).has(contentType)) return reply(request, { error: "הקובץ אינו נתמך או גדול מ־50MB." }, 400);
+    if (!episodeId) return reply(request, { error: "חסר מזהה תוכנית." }, 400);
+    if (!(kind === "audio" ? AUDIO : IMAGE).has(contentType)) return reply(request, { error: "סוג הקובץ אינו נתמך." }, 400);
+    if (!Number.isFinite(length) || length <= 0) return reply(request, { error: "הקובץ ריק." }, 400);
+    if (length > UPLOAD_LIMITS[kind]) return reply(request, { error: TOO_LARGE[kind] }, 400);
     const ext = contentType === "audio/mpeg" ? "mp3" : contentType.split("/")[1].replace("jpeg", "jpg").replace("mp4", "m4a");
     const key = `program/${episodeId}/${crypto.randomUUID()}.${ext}`;
     await env.MEDIA.put(key, request.body, { httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" } });
@@ -360,9 +454,10 @@ export async function programApi(request: Request, env: Env, ctx: Ctx): Promise<
       const input = await readBody<{ contentType?: string; size?: number; name?: string }>();
       const contentType = String(input?.contentType || "").split(";")[0].trim().toLowerCase();
       const size = Number(input?.size || 0);
-      const limit = kind === "audio" ? MAX_MULTIPART_AUDIO : MAX_MULTIPART_COVER;
-      if (!episodeId || !(kind === "audio" ? AUDIO : IMAGE).has(contentType)) return reply(request, { error: "סוג הקובץ אינו נתמך." }, 400);
-      if (!Number.isFinite(size) || size <= 0 || size > limit) return reply(request, { error: kind === "audio" ? "הקובץ גדול מ־1GB." : "התמונה גדולה מ־15MB." }, 400);
+      if (!episodeId) return reply(request, { error: "חסר מזהה תוכנית." }, 400);
+      if (!(kind === "audio" ? AUDIO : IMAGE).has(contentType)) return reply(request, { error: "סוג הקובץ אינו נתמך." }, 400);
+      if (!Number.isFinite(size) || size <= 0) return reply(request, { error: "הקובץ ריק." }, 400);
+      if (size > UPLOAD_LIMITS[kind]) return reply(request, { error: TOO_LARGE[kind] }, 400);
       const ext = contentType === "audio/mpeg" ? "mp3" : contentType.split("/")[1].replace("jpeg", "jpg").replace("mp4", "m4a");
       const key = `program/${episodeId}/${crypto.randomUUID()}.${ext}`;
       const upload = await env.MEDIA.createMultipartUpload(key, {

@@ -37,21 +37,55 @@ export type PushMessage = { title: string; body: string; url: string };
 type Payload = PushMessage & { icon: string };
 /** עבודה בתור: הודעה אחת לכל המנויים, עם סמן — ה־endpoint האחרון שכבר טופל. */
 export type PushJob = { id: string; payload: Payload; cursor: string; createdAt: string };
+type Send = { endpoint: string; p256dh: string; auth: string; payload: Payload };
 export const PENDING_KEY = "push-pending";
-/** בתוכנית החינמית של Workers מותרות 50 בקשות יוצאות לכל הפעלה — נשארים מתחת לזה. */
-export const BATCH_SIZE = 40;
+/**
+ * בתוכנית החינמית של Workers מותרות 50 בקשות יוצאות לכל הפעלה. מנה אחת היא
+ * עד 25 שליחות, ועוד כשמונה קריאות ל־D1 ומחיקת מנויים שפג תוקפם — מרווח
+ * בטוח מתחת לגבול.
+ */
+export const BATCH_SIZE = 25;
 const MAX_JOBS = 20;
+/** כמה פעמים מנסים לתפוס מנה, או להוסיף לתור, כשהפעלה אחרת שינתה אותו באמצע. */
+const CLAIM_ATTEMPTS = 3;
+const ENQUEUE_ATTEMPTS = 5;
 
-async function readQueue(env: Env): Promise<PushJob[]> {
-  const queue = await readSetting<PushJob[]>(env, PENDING_KEY);
-  return Array.isArray(queue) ? queue.filter((job) => job && job.payload && typeof job.cursor === "string") : [];
+/** התור כפי שהוא שמור — המחרוזת עצמה (לכתיבה המותנית) והעבודות שבה. */
+async function readQueue(env: Env): Promise<{ raw: string | null; queue: PushJob[] }> {
+  const row = await env.DB.prepare("SELECT value_json FROM program_settings WHERE key=?").bind(PENDING_KEY).first<{ value_json: string }>();
+  let saved: unknown = null;
+  try { saved = row ? JSON.parse(row.value_json) : null; } catch { saved = null; }
+  const queue = Array.isArray(saved) ? (saved as PushJob[]).filter((job) => job && job.payload && typeof job.cursor === "string") : [];
+  return { raw: row ? row.value_json : null, queue };
 }
 
-/** מוסיף עבודות לתור (הודעה אחת לכל עבודה). התור שומר את 20 האחרונות. */
+/**
+ * כתיבה מותנית של התור: נכתבת רק אם הערך השמור הוא עדיין `raw` — מה שנקרא
+ * לפני רגע. אם הפעלה אחרת (לולאת הריקון של דף הניהול, ה־cron, שליחה חדשה)
+ * שינתה את התור בינתיים, לא נכתב כלום ומוחזר false, והקורא קורא שוב.
+ */
+async function swapQueue(env: Env, raw: string | null, next: PushJob[]): Promise<boolean> {
+  const value = JSON.stringify(next);
+  const row = raw === null
+    ? await env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES (?,?,unixepoch()) ON CONFLICT(key) DO NOTHING RETURNING key").bind(PENDING_KEY, value).first()
+    : await env.DB.prepare("UPDATE program_settings SET value_json=?,updated_at=unixepoch() WHERE key=? AND value_json=? RETURNING key").bind(value, PENDING_KEY, raw).first();
+  return !!row;
+}
+
+/**
+ * מוסיף עבודות לתור (הודעה אחת לכל עבודה). התור שומר את 20 האחרונות. גם
+ * כאן הכתיבה מותנית: אם ריקון מקביל קידם סמן בינתיים, קוראים שוב ומוסיפים
+ * על התור המעודכן — כך העבודות החדשות אינן נמחקות בכתיבה שלו, והסמן שלו
+ * אינו נדרס בכתיבה שלנו.
+ */
 export async function enqueuePush(env: Env, messages: PushMessage[]) {
   if (!messages.length) return;
   const jobs = messages.map((message) => ({ id: crypto.randomUUID(), payload: { title: message.title, body: message.body, url: message.url, icon: PUSH_ICON }, cursor: "", createdAt: new Date().toISOString() }));
-  await settingStatement(env, PENDING_KEY, [...await readQueue(env), ...jobs].slice(-MAX_JOBS)).run();
+  for (let attempt = 0; attempt < ENQUEUE_ATTEMPTS; attempt += 1) {
+    const { raw, queue } = await readQueue(env);
+    if (await swapQueue(env, raw, [...queue, ...jobs].slice(-MAX_JOBS))) return;
+  }
+  throw new Error("push queue is busy");
 }
 
 async function remainingFor(env: Env, queue: PushJob[]) {
@@ -63,17 +97,11 @@ async function remainingFor(env: Env, queue: PushJob[]) {
   return remaining;
 }
 
-/**
- * מעבד מנה אחת מהתור: עד `budget` שליחות (ברירת מחדל 40) על פני העבודות
- * לפי הסדר. המנויים עוברים לפי endpoint בסדר קבוע, עם סמן ולא מספר מקום,
- * כך שמחיקת מנוי שפג תוקפו באמצע אינה מדלגת על אחרים. הסמנים נשמרים לפני
- * השליחה, כדי ששתי הפעלות במקביל לא ישלחו את אותה מנה פעמיים.
- */
-export async function drainPush(env: Env, budget = BATCH_SIZE) {
-  const queue = await readQueue(env);
-  const sends: Array<{ endpoint: string; p256dh: string; auth: string; payload: Payload }> = [];
+/** המנה הבאה: עד `limit` שליחות על פני העבודות לפי הסדר, והתור שיישאר אחריהן. */
+async function planBatch(env: Env, queue: PushJob[], limit: number) {
+  const sends: Send[] = [];
   const next: PushJob[] = [];
-  let left = Math.max(0, Math.min(BATCH_SIZE, budget));
+  let left = limit;
   for (const job of queue) {
     if (left <= 0) { next.push(job); continue; }
     const rows = (await env.DB.prepare("SELECT endpoint,p256dh,auth FROM program_push WHERE endpoint > ? ORDER BY endpoint LIMIT ?").bind(job.cursor, left).all<{ endpoint: string; p256dh: string; auth: string }>()).results;
@@ -85,7 +113,28 @@ export async function drainPush(env: Env, budget = BATCH_SIZE) {
       if (more) next.push({ ...job, cursor: rows[rows.length - 1].endpoint });
     }
   }
-  if (queue.length) await settingStatement(env, PENDING_KEY, next).run();
+  return { sends, next };
+}
+
+/**
+ * מעבד מנה אחת מהתור: עד `budget` שליחות (ברירת מחדל 25) על פני העבודות
+ * לפי הסדר. המנויים עוברים לפי endpoint בסדר קבוע, עם סמן ולא מספר מקום,
+ * כך שמחיקת מנוי שפג תוקפו באמצע אינה מדלגת על אחרים. המנה "נתפסת" לפני
+ * השליחה בכתיבה מותנית של הסמנים: רק מי שהתור לא השתנה אצלו מאז שקרא אותו
+ * מצליח, כך ששתי הפעלות במקביל (לולאת הריקון של דף הניהול וה־cron) לעולם
+ * אינן שולחות את אותה מנה פעמיים. מי שלא הצליח קורא שוב ולוקח את המנה הבאה.
+ */
+export async function drainPush(env: Env, budget = BATCH_SIZE) {
+  const limit = Math.max(0, Math.min(BATCH_SIZE, budget));
+  let sends: Send[] = [];
+  let next: PushJob[] = [];
+  for (let attempt = 0; attempt < CLAIM_ATTEMPTS; attempt += 1) {
+    const { raw, queue } = await readQueue(env);
+    next = queue;
+    if (!queue.length || !limit) break;
+    const plan = await planBatch(env, queue, limit);
+    if (await swapQueue(env, raw, plan.next)) { sends = plan.sends; next = plan.next; break; }
+  }
   let sent = 0, failed = 0;
   const gone = new Set<string>();
   if (sends.length) {
@@ -129,11 +178,14 @@ export function episodeMessages(episodes: Episode[]): PushMessage[] {
   return episodes.map(episodeMessage);
 }
 
-/** פרסום עם notify: העבודות נכנסות לתור ומנה ראשונה נשלחת מיד; השאר ב־/push/drain או ב־cron. */
+/**
+ * פרסום עם notify: העבודות רק נכנסות לתור. השליחה עצמה — בלולאת הריקון של
+ * דף הניהול (/push/drain) וב־cron, ולא בתוך בקשת הפרסום, כדי שלא ירוצו שני
+ * ריקונים במקביל על אותה מנה.
+ */
 export async function notifyEpisodes(env: Env, episodes: Episode[]) {
   if (!episodes.length) return;
   await enqueuePush(env, episodeMessages(episodes));
-  await drainPush(env);
 }
 
 export function notifiedStatement(env: Env, ids: Iterable<string>) {
@@ -179,6 +231,16 @@ export async function runScheduledPush(env: Env) {
   return { seeded: 0, queued: due.length, sent: first.sent + second.sent };
 }
 
+/**
+ * שירותי הדחיפה של הדפדפנים: Chrome/Edge/Android, Safari, Windows, Firefox
+ * ו־Samsung. כתובת שמתחילה בנקודה היא סיומת (כל תת־דומיין שלה). כל כתובת
+ * מנוי אחרת נדחית, כדי שהוורקר לא ישמש לשליחת בקשות לכתובות שרירותיות.
+ */
+export const PUSH_HOSTS = ["fcm.googleapis.com", "updates.push.services.mozilla.com", ".push.apple.com", ".notify.windows.com", ".push.samsungosp.com"];
+export const pushHostAllowed = (host: string) => PUSH_HOSTS.some((allowed) => (allowed.startsWith(".") ? host.endsWith(allowed) : host === allowed));
+/** עד כמה מכשירים רשומים להתראות לכל חשבון; מנוי חדש מעבר לזה מחליף את הישן ביותר. */
+export const MAX_SUBSCRIPTIONS_PER_USER = 10;
+
 function validSubscription(raw: unknown) {
   const sub = (raw && typeof raw === "object" ? raw : {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
   const endpoint = String(sub.endpoint || "");
@@ -186,6 +248,7 @@ function validSubscription(raw: unknown) {
   try {
     const url = new URL(endpoint);
     if (url.protocol !== "https:" || endpoint.length > 1000) return null;
+    if (url.port || url.username || url.password || !pushHostAllowed(url.hostname.toLowerCase())) return null;
     const point = b64urlDecode(p256dh), secret = b64urlDecode(auth);
     if (point.length !== 65 || point[0] !== 4 || secret.length !== 16) return null;
   } catch { return null; }
@@ -212,6 +275,11 @@ export async function programPushApi(request: Request, env: Env, h: Helpers): Pr
     const user = await readSession(request, env);
     await env.DB.prepare("INSERT INTO program_push (endpoint,p256dh,auth,user_sub) VALUES (?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh,auth=excluded.auth,user_sub=COALESCE(excluded.user_sub,program_push.user_sub)")
       .bind(sub.endpoint, sub.p256dh, sub.auth, user?.sub ?? null).run();
+    // תקרה לכל חשבון: נשארים המנוי הזה ועוד 9 החדשים ביותר; הישנים יותר נמחקים
+    if (user?.sub) {
+      await env.DB.prepare("DELETE FROM program_push WHERE user_sub=? AND endpoint<>? AND endpoint NOT IN (SELECT endpoint FROM program_push WHERE user_sub=? AND endpoint<>? ORDER BY created_at DESC, rowid DESC LIMIT ?)")
+        .bind(user.sub, sub.endpoint, user.sub, sub.endpoint, MAX_SUBSCRIPTIONS_PER_USER - 1).run();
+    }
     return h.reply(request, { ok: true });
   }
   if (path === "/push/unsubscribe" && method === "POST") {
@@ -227,9 +295,10 @@ export async function programPushApi(request: Request, env: Env, h: Helpers): Pr
     if (!title && !content) return h.reply(request, { error: "ההתראה ריקה." }, 400);
     let target = PROGRAM_SITE;
     try { if (message.url) { const parsed = new URL(String(message.url), PROGRAM_SITE); if (parsed.protocol === "https:") target = parsed.toString(); } } catch { /* נשאר דף הבית */ }
-    // נכנס לתור ומנה ראשונה (עד 40) נשלחת מיד; את השאר שולחים ב־/push/drain
+    // נכנס לתור ומנה ראשונה (עד 25) נשלחת מיד; את השאר שולחים ב־/push/drain
     const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_push").first<{ total: number }>();
-    await enqueuePush(env, [{ title: title || "ראש בראש", body: content, url: target }]);
+    try { await enqueuePush(env, [{ title: title || "ראש בראש", body: content, url: target }]); }
+    catch (error) { console.error("program push enqueue error", error); return h.reply(request, { error: "תור ההתראות עמוס כרגע. נסו שוב בעוד רגע." }, 503); }
     const { sent, failed, removed, remaining } = await drainPush(env);
     return h.reply(request, { queued: true, sent, failed, removed, remaining, total: Number(count?.total || 0) });
   }

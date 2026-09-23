@@ -208,6 +208,24 @@ export function parseTitles(raw: unknown): TitleSuggestions | null {
   return titles.length ? { titles, whatsapp } : null;
 }
 
+/**
+ * הטקסט של כל חלק בתמלול השמור (null — חלק שעוד לא תומלל). אם ההקלטה השתנתה
+ * (מספר חלקים אחר) מתחילים מאפס. תמלול מלפני שנשמר כל חלק בנפרד: הטקסט
+ * המצטבר נחשב לחלק הראשון, והחלקים שאחריו שכבר נעשו — לריקים.
+ */
+export function transcriptParts(row: { text: string; parts_json: string | null; parts_done: number; parts_total: number } | null, partsTotal: number): Array<string | null> {
+  if (!row || Number(row.parts_total) !== partsTotal) return [];
+  if (row.parts_json) {
+    try {
+      const saved = JSON.parse(row.parts_json);
+      if (Array.isArray(saved)) return saved.slice(0, partsTotal).map((value) => (typeof value === "string" ? value : null));
+    } catch { /* פגום — מתחילים מאפס */ }
+    return [];
+  }
+  const done = Math.min(partsTotal, Math.max(0, Math.floor(Number(row.parts_done) || 0)));
+  return Array.from({ length: done }, (_, index) => (index === 0 ? String(row.text || "") : ""));
+}
+
 export async function programAiApi(request: Request, env: Env, h: Helpers): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname.slice("/api/program".length);
@@ -239,14 +257,21 @@ export async function programAiApi(request: Request, env: Env, h: Helpers): Prom
       console.error("program transcribe error", episode.id, part, error);
       return h.reply(request, { error: "התמלול נכשל בשירות הבינה המלאכותית. נסו שוב בעוד רגע." }, 502);
     }
-    if (part === 0) {
-      await env.DB.prepare("INSERT INTO program_transcripts (episode_id,text,parts_done,parts_total,summary_json,updated_at) VALUES (?,?,1,?,NULL,unixepoch()) ON CONFLICT(episode_id) DO UPDATE SET text=excluded.text,parts_done=1,parts_total=excluded.parts_total,summary_json=NULL,updated_at=unixepoch()")
-        .bind(episode.id, chunkText, partsTotal).run();
-    } else {
-      await env.DB.prepare("INSERT INTO program_transcripts (episode_id,text,parts_done,parts_total,updated_at) VALUES (?,?,?,?,unixepoch()) ON CONFLICT(episode_id) DO UPDATE SET text=CASE WHEN program_transcripts.text='' THEN excluded.text WHEN excluded.text='' THEN program_transcripts.text ELSE program_transcripts.text || ' ' || excluded.text END,parts_done=excluded.parts_done,parts_total=excluded.parts_total,updated_at=unixepoch()")
-        .bind(episode.id, chunkText, part + 1, partsTotal).run();
-    }
-    return h.reply(request, { part, partsTotal, done: part + 1 >= partsTotal, text: chunkText });
+    // הטקסט של כל חלק נשמר בנפרד (parts_json), והתמלול המלא נבנה מהחלקים לפי
+    // הסדר. כך חלק שנשלח שוב — למשל ניסיון חוזר אחרי שהחלק הבא כבר נעשה —
+    // מחליף את הטקסט של עצמו ולא נוסף פעמיים, ו־parts_done הוא מספר החלקים
+    // הרצופים מההתחלה שכבר תומללו, כך שהוא לעולם אינו חוזר אחורה בטעות.
+    const row = await env.DB.prepare("SELECT text,parts_json,parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(episode.id)
+      .first<{ text: string; parts_json: string | null; parts_done: number; parts_total: number }>();
+    const parts = transcriptParts(row, partsTotal);
+    parts[part] = chunkText;
+    let partsDone = 0;
+    while (partsDone < partsTotal && typeof parts[partsDone] === "string") partsDone += 1;
+    const text = parts.filter((value): value is string => typeof value === "string" && !!value).join(" ");
+    // חלק 0 פותח תמלול (מחדש), ולכן התיאור שנוצר מהתמלול הקודם נמחק
+    await env.DB.prepare(`INSERT INTO program_transcripts (episode_id,text,parts_json,parts_done,parts_total,summary_json,updated_at) VALUES (?,?,?,?,?,NULL,unixepoch()) ON CONFLICT(episode_id) DO UPDATE SET text=excluded.text,parts_json=excluded.parts_json,parts_done=excluded.parts_done,parts_total=excluded.parts_total,${part === 0 ? "summary_json=NULL," : ""}updated_at=unixepoch()`)
+      .bind(episode.id, text, JSON.stringify(parts.map((value) => (typeof value === "string" ? value : null))), partsDone, partsTotal).run();
+    return h.reply(request, { part, partsTotal, partsDone, done: part + 1 >= partsTotal, text: chunkText });
   }
 
   if (path.startsWith("/ai/transcript/") && request.method === "GET") {

@@ -266,6 +266,8 @@ const COLUMNS = [
   { table: "program_events", column: "pct", definition: "INTEGER" },
   { table: "program_events", column: "ref", definition: "TEXT" },
   { table: "program_events", column: "hour", definition: "INTEGER" },
+  // תמלולים: הטקסט של כל חלק בנפרד (מערך JSON), כדי שחלק שנשלח שוב יחליף את עצמו
+  { table: "program_transcripts", column: "parts_json", definition: "TEXT" },
 ];
 
 // אינדקסים ייחודיים שהוחלפו ב-`drizzle/0001` ו-`drizzle/0002`.

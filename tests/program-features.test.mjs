@@ -294,7 +294,8 @@ test("likes are counted per episode and appear in the stats", async () => {
   const { call, voter, admin } = await setup();
   await publish(call, admin, [episode("ep-1"), episode("ep-2")]);
   assert.equal((await call("/api/program/likes", { method: "POST", body: { episodeId: "ep-1", like: true } })).status, 401);
-  assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: true } })).json(), { ok: true, liked: true, count: 1 });
+  // כמה אהבו — רק מנהלים מקבלים את המספר, גם בתשובה לסימון עצמו
+  assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: true } })).json(), { ok: true, liked: true });
   assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: admin, body: { episodeId: "ep-1", like: true } })).json(), { ok: true, liked: true, count: 2 });
   await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: true } });
   assert.equal((await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "nope", like: true } })).status, 404);
@@ -303,7 +304,7 @@ test("likes are counted per episode and appear in the stats", async () => {
   assert.deepEqual(pub, { counts: {}, mine: [] });
   assert.deepEqual(await (await call("/api/program/likes", { token: voter })).json(), { counts: {}, mine: ["ep-1"] });
   assert.deepEqual((await (await call("/api/program/likes", { token: admin })).json()).counts, { "ep-1": 2 });
-  assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: false } })).json(), { ok: true, liked: false, count: 1 });
+  assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: false } })).json(), { ok: true, liked: false });
   const stats = await (await call("/api/program/stats", { token: admin })).json();
   assert.deepEqual(stats.likes, [{ id: "ep-1", likes: 1 }]);
 });
@@ -348,16 +349,16 @@ test("push subscriptions receive admin messages and publish notifications; dead 
   const alive = await receiverKeys();
   const dead = await receiverKeys();
   const subscribe = (endpoint, keys, token, ip) => call("/api/program/push/subscribe", { method: "POST", token, ip, body: { subscription: { endpoint, keys: { p256dh: keys.subscription.p256dh, auth: keys.subscription.auth } } } });
-  assert.equal((await subscribe("http://push.example.com/a", alive, null, "9.9.9.1")).status, 400, "https only");
-  assert.equal((await subscribe("https://push.example.com/alive", alive, voter, "9.9.9.2")).status, 200);
-  assert.equal((await subscribe("https://push.example.com/dead", dead, null, "9.9.9.3")).status, 200);
-  assert.equal(db.prepare("SELECT user_sub FROM program_push WHERE endpoint='https://push.example.com/alive'").get().user_sub, "sub-voter@example.com");
+  assert.equal((await subscribe("http://fcm.googleapis.com/fcm/send/a", alive, null, "9.9.9.1")).status, 400, "https only");
+  assert.equal((await subscribe("https://fcm.googleapis.com/fcm/send/alive", alive, voter, "9.9.9.2")).status, 200);
+  assert.equal((await subscribe("https://fcm.googleapis.com/fcm/send/dead", dead, null, "9.9.9.3")).status, 200);
+  assert.equal(db.prepare("SELECT user_sub FROM program_push WHERE endpoint='https://fcm.googleapis.com/fcm/send/alive'").get().user_sub, "sub-voter@example.com");
   assert.equal((await call("/api/program/push/count")).status, 403);
   assert.deepEqual(await (await call("/api/program/push/count", { token: admin })).json(), { total: 2 });
 
   const received = [];
   const restore = withFetch(async (url, init) => {
-    if (!url.startsWith("https://push.example.com/")) return null;
+    if (!url.startsWith("https://fcm.googleapis.com/")) return null;
     const headers = new Headers(init.headers);
     assert.match(headers.get("authorization"), new RegExp(`^vapid t=[\\w-]+\\.[\\w-]+\\.[\\w-]+, k=${key.publicKey}$`));
     assert.equal(headers.get("content-encoding"), "aes128gcm");
@@ -373,12 +374,18 @@ test("push subscriptions receive admin messages and publish notifications; dead 
     assert.deepEqual(received[0], { title: "שידור חי", body: "עכשיו באוויר", url: "https://shmuel-lamed.github.io/rosh-berosh-2/", icon: "https://shmuel-lamed.github.io/rosh-berosh-2/assets/img/icon-192.png" });
     assert.deepEqual(await (await call("/api/program/push/count", { token: admin })).json(), { total: 1 });
 
+    // פרסום עם notify רק מכניס לתור; דף הניהול מרוקן אותו בלולאה, כמו drainPush בלקוח
+    const drain = async () => { for (let i = 0; i < 10; i += 1) if (!(await (await call("/api/program/push/drain", { method: "POST", token: admin })).json()).remaining) break; };
     received.length = 0;
     await publish(call, admin, [episode("ep-old")]);
     await settle();
+    await drain();
     assert.equal(received.length, 0, "no notification without notify");
-    await publish(call, admin, [episode("ep-old"), episode("ep-new", { number: 12, title: "חדשה" }), episode("ep-later", { publishAt: FUTURE })], { notify: true });
+    const notifying = await (await publish(call, admin, [episode("ep-old"), episode("ep-new", { number: 12, title: "חדשה" }), episode("ep-later", { publishAt: FUTURE })], { notify: true })).json();
+    assert.equal(notifying.notified, 1);
     await settle();
+    assert.equal(received.length, 0, "the publish request itself sends nothing");
+    await drain();
     assert.equal(received.length, 1, "only the newly public episode, not the old or the scheduled one");
     assert.equal(received[0].body, "תוכנית 12 · חדשה");
     assert.equal(received[0].url, "https://shmuel-lamed.github.io/rosh-berosh-2/episode.html?ep=ep-new");
@@ -386,15 +393,16 @@ test("push subscriptions receive admin messages and publish notifications; dead 
     received.length = 0;
     await publish(call, admin, [1, 2, 3, 4].map((n) => episode(`ep-batch-${n}`)), { notify: true });
     await settle();
+    await drain();
     assert.equal(received.length, 1, "more than three new episodes send one summary");
     assert.equal(received[0].body, "4 תוכניות חדשות באתר");
 
-    assert.deepEqual(await (await call("/api/program/push/unsubscribe", { method: "POST", body: { endpoint: "https://push.example.com/alive" } })).json(), { ok: true });
+    assert.deepEqual(await (await call("/api/program/push/unsubscribe", { method: "POST", body: { endpoint: "https://fcm.googleapis.com/fcm/send/alive" } })).json(), { ok: true });
     assert.deepEqual(await (await call("/api/program/push/count", { token: admin })).json(), { total: 0 });
   } finally { restore(); }
 });
 
-test("push fan-out is batched: at most 40 sends per invocation, the rest through drain and the cron", async () => {
+test("push fan-out is batched: at most 25 sends per invocation, the rest through drain and the cron", async () => {
   const { worker, env, call, admin, db } = await setup();
   const receiver = await receiverKeys();
   const insert = db.prepare("INSERT INTO program_push (endpoint,p256dh,auth) VALUES (?,?,?)");
@@ -407,25 +415,27 @@ test("push fan-out is batched: at most 40 sends per invocation, the rest through
     perCall += 1;
     return new Response(null, { status: url.endsWith("s050") ? 410 : 201 });
   });
-  const measure = async (run) => { perCall = 0; const result = await run(); assert.ok(perCall <= 40, `${perCall} pushes in one invocation`); return result; };
+  const measure = async (run) => { perCall = 0; const result = await run(); assert.ok(perCall <= 25, `${perCall} pushes in one invocation`); return result; };
   try {
     assert.equal((await call("/api/program/push/drain")).status, 404, "POST only");
     assert.equal((await call("/api/program/push/drain", { method: "POST" })).status, 403);
     const first = await measure(async () => (await call("/api/program/push/send", { method: "POST", token: admin, body: { title: "א", body: "ב" } })).json());
-    assert.deepEqual(first, { queued: true, sent: 40, failed: 0, removed: 0, remaining: 55, total: 95 });
+    assert.deepEqual(first, { queued: true, sent: 25, failed: 0, removed: 0, remaining: 70, total: 95 });
     const second = await measure(async () => (await call("/api/program/push/drain", { method: "POST", token: admin })).json());
-    assert.deepEqual(second, { sent: 39, failed: 0, removed: 1, remaining: 15 });
+    assert.deepEqual(second, { sent: 25, failed: 0, removed: 0, remaining: 45 });
     const third = await measure(async () => (await call("/api/program/push/drain", { method: "POST", token: admin })).json());
-    assert.deepEqual(third, { sent: 15, failed: 0, removed: 0, remaining: 0 });
+    assert.deepEqual(third, { sent: 24, failed: 0, removed: 1, remaining: 20 });
+    const fourth = await measure(async () => (await call("/api/program/push/drain", { method: "POST", token: admin })).json());
+    assert.deepEqual(fourth, { sent: 20, failed: 0, removed: 0, remaining: 0 });
     assert.equal(new Set(hits).size, 95, "every subscription exactly once, none skipped by the removal");
     assert.equal(hits.length, 95);
     assert.deepEqual(await (await call("/api/program/push/drain", { method: "POST", token: admin })).json(), { sent: 0, failed: 0, removed: 0, remaining: 0 });
 
-    // שתי הודעות בתור: ה־cron ממשיך לרוקן, 40 בכל ריצה
+    // שתי הודעות בתור: ה־cron ממשיך לרוקן, 25 בכל ריצה
     hits.length = 0;
     await call("/api/program/push/send", { method: "POST", token: admin, body: { title: "1" } });
     await call("/api/program/push/send", { method: "POST", token: admin, body: { title: "2" } });
-    assert.equal(hits.length, 80);
+    assert.equal(hits.length, 50);
     const queue = JSON.parse(db.prepare("SELECT value_json FROM program_settings WHERE key='push-pending'").get().value_json);
     assert.equal(queue.length, 2);
     const cron = () => measure(async () => {
@@ -433,7 +443,7 @@ test("push fan-out is batched: at most 40 sends per invocation, the rest through
       await worker.scheduled({ cron: "*/5 * * * *" }, env, { waitUntil: (promise) => waits.push(promise), passThroughOnException() {} });
       await Promise.all(waits);
     });
-    for (let i = 0; i < 4; i += 1) await cron();
+    for (let i = 0; i < 6; i += 1) await cron();
     assert.equal(hits.length, 94 * 2, "both messages reached all 94 remaining subscriptions");
     assert.deepEqual(JSON.parse(db.prepare("SELECT value_json FROM program_settings WHERE key='push-pending'").get().value_json), []);
   } finally { restore(); }
@@ -442,10 +452,11 @@ test("push fan-out is batched: at most 40 sends per invocation, the rest through
 test("the cron notifies about scheduled episodes once their time comes, and never about old ones", async () => {
   const { worker, env, call, admin, db } = await setup();
   const receiver = await receiverKeys();
-  await call("/api/program/push/subscribe", { method: "POST", ip: "8.8.8.8", body: { subscription: { endpoint: "https://push.example.com/x", keys: { p256dh: receiver.subscription.p256dh, auth: receiver.subscription.auth } } } });
+  const subscribed = await call("/api/program/push/subscribe", { method: "POST", ip: "8.8.8.8", body: { subscription: { endpoint: "https://web.push.apple.com/x", keys: { p256dh: receiver.subscription.p256dh, auth: receiver.subscription.auth } } } });
+  assert.equal(subscribed.status, 200, await subscribed.clone().text());
   const received = [];
   const restore = withFetch(async (url, init) => {
-    if (!url.startsWith("https://push.example.com/")) return null;
+    if (!url.startsWith("https://web.push.apple.com/")) return null;
     received.push(JSON.parse(await decryptPush(new Uint8Array(init.body), receiver)));
     return new Response(null, { status: 201 });
   });
@@ -613,4 +624,173 @@ test("spelling fixes reach episodes already in the database, once, without touch
   put(a.id, { ...row(a.id), [a.field]: a.from });
   await call("/api/program/catalog");
   assert.equal(row(a.id)[a.field], a.from);
+});
+
+test("a malformed episode is refused with 400 before anything is written, and an empty number stays empty", async () => {
+  const { call, admin, db } = await setup();
+  for (const bad of [[null], [episode("ep-ok"), { id: "ep-x", slug: "ep-x", title: "  " }], [episode("ep-ok"), 5], [{ title: "בלי מזהה" }]]) {
+    const response = await publish(call, admin, bad);
+    assert.equal(response.status, 400, JSON.stringify(bad));
+    assert.equal((await response.json()).error, "נתוני התוכניות אינם תקינים.");
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_episodes WHERE id='ep-ok'").get().n, 0, "nothing was written");
+  const write = await publish(call, admin, [episode("ep-n1", { number: null }), episode("ep-n2", { number: "" }), episode("ep-n3", { number: "12" }), episode("ep-n4", { number: "abc" })]);
+  assert.equal(write.status, 200, await write.clone().text());
+  const numbers = Object.fromEntries(db.prepare("SELECT id, number FROM program_episodes WHERE id LIKE 'ep-n%'").all().map((row) => [row.id, row.number]));
+  assert.deepEqual(numbers, { "ep-n1": null, "ep-n2": null, "ep-n3": 12, "ep-n4": null }, "no episode silently becomes number 0");
+});
+
+test("slugs can be swapped between episodes or reused from a removed one; a real duplicate is a 409", async () => {
+  const { call, admin, db } = await setup();
+  await publish(call, admin, [episode("ep-a", { slug: "foo" }), episode("ep-b", { slug: "bar" })]);
+  const slugs = () => Object.fromEntries(db.prepare("SELECT id, slug FROM program_episodes WHERE id IN ('ep-a','ep-b','ep-c','ep-d')").all().map((row) => [row.id, row.slug]));
+  const swap = await publish(call, admin, [episode("ep-a", { slug: "bar" }), episode("ep-b", { slug: "foo" })]);
+  assert.equal(swap.status, 200, await swap.clone().text());
+  assert.deepEqual(slugs(), { "ep-a": "bar", "ep-b": "foo" });
+  // מחיקת תוכנית והעברת הכתובת שלה לתוכנית חדשה, באותו פרסום
+  const reuse = await publish(call, admin, [episode("ep-b", { slug: "foo" }), episode("ep-c", { slug: "bar" })], { removedIds: ["ep-a"] });
+  assert.equal(reuse.status, 200, await reuse.clone().text());
+  assert.deepEqual(slugs(), { "ep-b": "foo", "ep-c": "bar" });
+  const duplicate = await publish(call, admin, [episode("ep-d", { slug: "foo" })]);
+  assert.equal(duplicate.status, 409);
+  assert.deepEqual(await duplicate.json(), { error: "כתובת כפולה: foo" });
+  const twice = await publish(call, admin, [episode("ep-d", { slug: "same" }), episode("ep-e", { slug: "same" })]);
+  assert.equal(twice.status, 409);
+  assert.deepEqual(slugs(), { "ep-b": "foo", "ep-c": "bar" }, "nothing was written");
+});
+
+test("push subscriptions are accepted only from browser push services, and at most 10 per account", async () => {
+  const { call, voter, db } = await setup();
+  const keys = await receiverKeys();
+  const subscribe = (endpoint, ip, token) => call("/api/program/push/subscribe", { method: "POST", ip, token, body: { subscription: { endpoint, keys: { p256dh: keys.subscription.p256dh, auth: keys.subscription.auth } } } });
+  let n = 0;
+  for (const endpoint of ["https://push.example.com/x", "https://evil.example/fcm.googleapis.com/x", "https://fcm.googleapis.com.evil.example/x", "https://notpush.apple.com/x", "https://fcm.googleapis.com:8443/x", "https://user@fcm.googleapis.com/x", "https://127.0.0.1/x"]) {
+    assert.equal((await subscribe(endpoint, `7.7.7.${n++}`)).status, 400, endpoint);
+  }
+  for (const endpoint of ["https://fcm.googleapis.com/fcm/send/a", "https://web.push.apple.com/b", "https://api.push.apple.com/c", "https://wns2-par02p.notify.windows.com/w/?token=d", "https://updates.push.services.mozilla.com/wpush/v2/e", "https://eu.push.samsungosp.com/f"]) {
+    assert.equal((await subscribe(endpoint, `7.7.8.${n++}`)).status, 200, endpoint);
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_push").get().n, 6);
+  for (let i = 0; i < 12; i += 1) assert.equal((await subscribe(`https://fcm.googleapis.com/fcm/send/device-${String(i).padStart(2, "0")}`, `7.7.9.${i}`, voter)).status, 200);
+  const mine = db.prepare("SELECT endpoint FROM program_push WHERE user_sub='sub-voter@example.com'").all().map((row) => row.endpoint);
+  assert.equal(mine.length, 10, "an account keeps its 10 newest devices");
+  assert.ok(mine.includes("https://fcm.googleapis.com/fcm/send/device-11"));
+  assert.ok(!mine.includes("https://fcm.googleapis.com/fcm/send/device-00"), "the oldest one made room");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_push").get().n, 16, "anonymous subscriptions are untouched");
+});
+
+/** D1 שכל קריאה אליו מחכה לסבב הבא של לולאת האירועים, כמו קריאת רשת — כך בקשות במקביל באמת משתלבות זו בזו. */
+function slowD1(inner) {
+  const pause = () => new Promise((resolve) => setImmediate(resolve));
+  const wrap = (statement) => ({
+    inner: statement,
+    bind: (...values) => wrap(statement.bind(...values)),
+    async all() { await pause(); return statement.all(); },
+    async first(column) { await pause(); return statement.first(column); },
+    async run() { await pause(); return statement.run(); },
+  });
+  return { prepare: (sql) => wrap(inner.prepare(sql)), async batch(list) { await pause(); return inner.batch(list.map((item) => item.inner)); } };
+}
+
+test("drains running at the same moment never send the same batch twice", async () => {
+  const { call, admin, db, env } = await setup();
+  env.DB = slowD1(env.DB);
+  const receiver = await receiverKeys();
+  const insert = db.prepare("INSERT INTO program_push (endpoint,p256dh,auth) VALUES (?,?,?)");
+  for (let i = 0; i < 60; i += 1) insert.run(`https://fcm.googleapis.com/fcm/send/c${String(i).padStart(3, "0")}`, receiver.subscription.p256dh, receiver.subscription.auth);
+  db.prepare("INSERT INTO program_settings (key,value_json) VALUES ('push-pending',?)")
+    .run(JSON.stringify([{ id: "job-1", payload: { title: "א", body: "ב", url: "https://shmuel-lamed.github.io/rosh-berosh-2/", icon: "" }, cursor: "", createdAt: new Date().toISOString() }]));
+  const hits = [];
+  const restore = withFetch(async (url) => {
+    if (!url.startsWith("https://fcm.googleapis.com/")) return null;
+    hits.push(url);
+    return new Response(null, { status: 201 });
+  });
+  try {
+    const drain = async () => (await call("/api/program/push/drain", { method: "POST", token: admin })).json();
+    // כמו דף הניהול וה־cron שמרוקנים יחד: כל מנה נתפסת פעם אחת בלבד
+    await Promise.all([drain(), drain(), drain()]);
+    for (let i = 0; i < 5 && (await drain()).remaining; i += 1) { /* משלימים מה שנשאר */ }
+    assert.equal(new Set(hits).size, hits.length, "no subscription got the same message twice");
+    assert.equal(hits.length, 60, "and none was skipped");
+  } finally { restore(); }
+});
+
+test("publishing with notify off keeps the cron from announcing the scheduled episodes in it", async () => {
+  const { worker, env, call, admin, db } = await setup();
+  const receiver = await receiverKeys();
+  await call("/api/program/push/subscribe", { method: "POST", ip: "8.8.4.4", body: { subscription: { endpoint: "https://fcm.googleapis.com/fcm/send/q", keys: { p256dh: receiver.subscription.p256dh, auth: receiver.subscription.auth } } } });
+  const received = [];
+  const restore = withFetch(async (url, init) => {
+    if (!url.startsWith("https://fcm.googleapis.com/")) return null;
+    received.push(JSON.parse(await decryptPush(new Uint8Array(init.body), receiver)));
+    return new Response(null, { status: 201 });
+  });
+  const cron = async () => {
+    const waits = [];
+    await worker.scheduled({ cron: "*/5 * * * *" }, env, { waitUntil: (promise) => waits.push(promise), passThroughOnException() {} });
+    await Promise.all(waits);
+  };
+  try {
+    await cron();
+    await publish(call, admin, [episode("ep-quiet", { publishAt: FUTURE })], { notify: false });
+    await publish(call, admin, [episode("ep-loud", { publishAt: FUTURE })], { notify: true });
+    db.prepare("UPDATE program_episodes SET data_json=json_set(data_json,'$.publishAt',?) WHERE id IN ('ep-quiet','ep-loud')").run(PAST);
+    await cron();
+    assert.deepEqual(received.map((message) => message.body), ["תוכנית ep-loud"], "only the episode published with the box checked is announced");
+  } finally { restore(); }
+});
+
+test("deleting every episode does not bring the original catalog back", async () => {
+  const { call, admin, db } = await setup();
+  const all = db.prepare("SELECT id FROM program_episodes").all().map((row) => row.id);
+  assert.ok(all.length >= 80, "a fresh database is seeded once");
+  const response = await publish(call, admin, [], { removedIds: all });
+  assert.equal(response.status, 200, await response.clone().text());
+  await call("/api/program/catalog");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_episodes").get().n, 0, "no re-seeding after everything was deleted");
+
+  // מסד מלפני הסימון, שכבר יש בו תוכניות: רק מקבל את הסימון, בלי להחזיר את מה שנמחק
+  db.prepare("DELETE FROM program_settings WHERE key='seeded'").run();
+  await publish(call, admin, [episode("ep-only")]);
+  db.prepare("DELETE FROM program_settings WHERE key='seeded'").run();
+  await call("/api/program/catalog");
+  assert.deepEqual(db.prepare("SELECT id FROM program_episodes").all().map((row) => row.id), ["ep-only"]);
+  assert.ok(db.prepare("SELECT 1 AS one FROM program_settings WHERE key='seeded'").get(), "the marker is set");
+});
+
+test("a transcript part sent again replaces its own text instead of being added twice", async () => {
+  const { call, env, admin, media, db } = await setup();
+  await media.put("program-recordings/retry.mp3", new Uint8Array(2 * 1024 * 1024 * 2 + 100), { httpMetadata: { contentType: "audio/mpeg" } });
+  await publish(call, admin, [episode("ep-retry", { r2Key: "program-recordings/retry.mp3" })]);
+  let n = 0;
+  env.AI = { async run() { n += 1; return { text: `ניסיון ${n}` }; } };
+  const part = async (p) => (await call("/api/program/ai/transcribe", { method: "POST", token: admin, body: { episodeId: "ep-retry", part: p } })).json();
+  const transcript = async () => (await call("/api/program/ai/transcript/ep-retry", { token: admin })).json();
+  await part(0);
+  await part(1);
+  const again = await part(0);
+  assert.equal(again.partsDone, 2, "retrying part 0 after part 1 does not move parts_done backwards");
+  await part(1);
+  await part(1);
+  await part(2);
+  assert.deepEqual(await transcript().then((t) => [t.text, t.partsDone, t.partsTotal]), ["ניסיון 3 ניסיון 5 ניסיון 6", 3, 3]);
+
+  // תמלול מלפני שנשמר כל חלק בנפרד: הטקסט המצטבר נשמר, והחלק הבא נוסף אחריו
+  db.prepare("UPDATE program_transcripts SET parts_json=NULL, text='ישן', parts_done=2 WHERE episode_id='ep-retry'").run();
+  await part(2);
+  assert.deepEqual(await transcript().then((t) => [t.text, t.partsDone]), ["ישן ניסיון 7", 3]);
+});
+
+test("uploads say what is wrong, with the same limits in the single and the multipart upload", async () => {
+  const { call, admin } = await setup();
+  const start = (query, body) => call(`/api/program/upload/start?${query}`, { method: "POST", token: admin, body });
+  const single = (query, type, size) => call(`/api/program/upload?${query}`, { method: "POST", token: admin, raw: new Uint8Array(4), headers: { "content-type": type, "content-length": String(size) } });
+  const error = async (response) => [response.status, (await response.json()).error];
+  assert.deepEqual(await error(await start("kind=audio", { contentType: "audio/mpeg", size: 10 })), [400, "חסר מזהה תוכנית."]);
+  assert.deepEqual(await error(await single("kind=audio", "audio/mpeg", 10)), [400, "חסר מזהה תוכנית."]);
+  assert.deepEqual(await error(await single("episode=ep-1&kind=audio", "text/html", 10)), [400, "סוג הקובץ אינו נתמך."]);
+  assert.deepEqual(await error(await single("episode=ep-1&kind=cover", "image/png", 16 * 1024 * 1024)), [400, "התמונה גדולה מ־15MB."]);
+  assert.deepEqual(await error(await start("episode=ep-1&kind=cover", { contentType: "image/png", size: 16 * 1024 * 1024 })), [400, "התמונה גדולה מ־15MB."]);
+  assert.deepEqual(await error(await single("episode=ep-1&kind=audio", "audio/mpeg", 2 * 1024 ** 3)), [400, "הקובץ גדול מ־1GB."]);
 });

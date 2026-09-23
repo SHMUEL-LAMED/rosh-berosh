@@ -6,7 +6,7 @@
 import { configuredAdminEmails, createSession, readAdminEmails, readSession, saveAdminEmails, sessionCookie, type SessionUser } from "./auth";
 import { checkBallotRate, checkRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
-import { israelHour, isPublic } from "./program-schedule.js";
+import { israelHour, isPublic, israelWallClock } from "./program-schedule.js";
 import { loadEpisode } from "./program-audio";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
@@ -28,9 +28,12 @@ export const MOMENT_STEP = 5;
 export const MOMENT_MAX = 200;
 export const MOMENT_RATE = 30;
 export const MOMENT_BUCKET = 30;
+/** אירועי האזנה בדקה לכל כתובת IP — גבוה, כי מאזינים רבים יוצאים לרשת מאותה כתובת (בית, ישיבה, רשת סלולרית). */
+export const EVENT_RATE = 60;
 
 const text = (value: unknown, max = 300) => String(value ?? "").trim().slice(0, max);
-const day = (at = Date.now()) => new Date(at).toISOString().slice(0, 10);
+/** היום בישראל ("YYYY-MM-DD") — לא לפי UTC, שמתחלף בשתיים או בשלוש בלילה בשעון ישראל. */
+const day = (at = Date.now()) => israelWallClock(at).slice(0, 10);
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 async function hash(value: string): Promise<string> {
@@ -274,10 +277,23 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
       return h.reply(request, { draft: draft || null });
     }
     if (method === "PUT") {
-      const { data } = await body<{ data?: { seasons?: unknown[]; episodes?: unknown[] } }>();
+      const { data, ifUpdatedAt } = await body<{ data?: { seasons?: unknown[]; episodes?: unknown[] }; ifUpdatedAt?: unknown }>();
       if (!data || !Array.isArray(data.episodes) || !Array.isArray(data.seasons) || data.episodes.length > 2000) return h.reply(request, { error: "הטיוטה אינה תקינה." }, 400);
       const draft = { data, updatedAt: new Date().toISOString(), by: user.email };
-      await settingStatement(env, "draft", draft).run();
+      // תנאי מוקדם (לא חובה): הלקוח שולח את updatedAt של הטיוטה שעליה עבד. אם
+      // מאז מנהל אחר שמר טיוטה, לא נכתב דבר ומוחזרת הטיוטה השמורה (409), כדי
+      // ששני מכשירים לא ידרסו זה את זה בשקט. בלי השדה — שמירה רגילה, כמו קודם.
+      if (typeof ifUpdatedAt === "string") {
+        type Draft = { data: unknown; updatedAt: string; by: string };
+        const conflict = (current: Draft | null) => h.reply(request, { error: "draft-conflict", draft: current ? { data: current.data, updatedAt: current.updatedAt, by: current.by } : null }, 409);
+        const saved = await readSetting<Draft>(env, "draft");
+        if (saved && ifUpdatedAt !== saved.updatedAt) return conflict(saved);
+        // גם הכתיבה עצמה מותנית, כך ששתי שמירות באותו רגע לא יעברו שתיהן
+        const written = saved
+          ? await env.DB.prepare("UPDATE program_settings SET value_json=?,updated_at=unixepoch() WHERE key='draft' AND json_extract(value_json,'$.updatedAt')=? RETURNING key").bind(JSON.stringify(draft), saved.updatedAt).first()
+          : await env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('draft',?,unixepoch()) ON CONFLICT(key) DO NOTHING RETURNING key").bind(JSON.stringify(draft)).first();
+        if (!written) return conflict(await readSetting<Draft>(env, "draft"));
+      } else await settingStatement(env, "draft", draft).run();
       return h.reply(request, { ok: true, updatedAt: draft.updatedAt, by: draft.by });
     }
     if (method === "DELETE") {
@@ -323,7 +339,7 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
 
   /* ---------- אירועי האזנה (ציבורי, מוגבל בקצב) ---------- */
   if (path === "/events" && method === "POST") {
-    if (!(await checkBallotRate(env.DB, `pevent:${clientIp}`))) return tooMany();
+    if (!(await checkRate(env.DB, `pevent:${clientIp}`, EVENT_RATE))) return tooMany();
     const event = await body<{ kind?: string; episodeId?: string; seconds?: number; device?: string; pct?: number; ref?: string }>();
     const kind = event.kind === "listen" ? "listen" : "play";
     const episodeId = h.safeId(event.episodeId);
@@ -435,6 +451,8 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     } else {
       await env.DB.prepare("DELETE FROM program_likes WHERE user_sub=? AND episode_id=?").bind(user.sub, episodeId).run();
     }
+    // כמה אהבו — רק למנהלים, כמו ב־GET; מאזין מקבל רק את הסימון שלו
+    if (!user.isAdmin) return h.reply(request, { ok: true, liked });
     const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_likes WHERE episode_id=?").bind(episodeId).first<{ total: number }>();
     return h.reply(request, { ok: true, liked, count: Number(count?.total || 0) });
   }
