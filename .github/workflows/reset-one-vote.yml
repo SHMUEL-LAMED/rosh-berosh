@@ -1,0 +1,62 @@
+name: One-time targeted vote reset
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/reset-one-vote.yml]
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Reset exactly one active site ballot
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          config=dist/server/wrangler.json
+          database=site-creator-d1
+          marker=reset-ml1701ml-20260923
+          email=ml1701ml@gmail.com
+          npx wrangler d1 execute "$database" --remote --config "$config" --command "CREATE TABLE IF NOT EXISTS vote_reset_audit (id TEXT PRIMARY KEY NOT NULL, ballot_id TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));"
+          npx wrangler d1 execute "$database" --remote --config "$config" --command "SELECT id FROM vote_reset_audit WHERE id='$marker';" --json > /tmp/vote-reset-audit.json
+          if node -e 'const a=require("/tmp/vote-reset-audit.json");process.exit((a[0]?.results?.length || 0) ? 0 : 1)'; then
+            echo "This exact reset was already completed."
+            exit 0
+          fi
+          sql="SELECT b.id,b.voter_key AS voterKey,b.survey_id AS surveyId FROM ballots b WHERE b.survey_id=(SELECT id FROM surveys WHERE active=1 ORDER BY created_at DESC LIMIT 1) AND b.channel='site' AND (lower(b.voter_email)=lower('$email') OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_sub=b.voter_key AND lower(s.email)=lower('$email'));"
+          npx wrangler d1 execute "$database" --remote --config "$config" --command "$sql" --json > /tmp/vote-reset-target.json
+          node <<'NODE'
+          const fs = require('fs');
+          const rows = JSON.parse(fs.readFileSync('/tmp/vote-reset-target.json', 'utf8'))[0]?.results ?? [];
+          if (rows.length !== 1) throw new Error('Expected exactly one matching active-site ballot, found ' + rows.length + '. Nothing deleted.');
+          const quote = value => "'" + String(value).replaceAll("'", "''") + "'";
+          const { id, voterKey, surveyId } = rows[0];
+          const marker = 'reset-ml1701ml-20260923';
+          const sql = [
+            `DELETE FROM song_votes WHERE ballot_id=${quote(id)};`,
+            `DELETE FROM album_votes WHERE ballot_id=${quote(id)};`,
+            `DELETE FROM artist_votes WHERE ballot_id=${quote(id)};`,
+            `DELETE FROM ballots WHERE id=${quote(id)} AND survey_id=${quote(surveyId)};`,
+            `DELETE FROM site_ballot_progress WHERE survey_id=${quote(surveyId)} AND user_sub=${quote(voterKey)};`,
+            `INSERT INTO vote_reset_audit (id,ballot_id) VALUES (${quote(marker)},${quote(id)});`,
+            `SELECT COUNT(*) AS remaining FROM ballots WHERE id=${quote(id)};`,
+          ].join('\n');
+          fs.writeFileSync('/tmp/vote-reset.sql', sql);
+          console.log('One exact ballot located; preparing its votes and saved progress for reset.');
+          NODE
+          npx wrangler d1 execute "$database" --remote --config "$config" --file /tmp/vote-reset.sql --json > /tmp/vote-reset-result.json
+          node <<'NODE'
+          const rows = JSON.parse(require('fs').readFileSync('/tmp/vote-reset-result.json', 'utf8'));
+          const remaining = rows.at(-1)?.results?.[0]?.remaining;
+          if (Number(remaining) !== 0) throw new Error('Post-reset verification failed: ballot remains.');
+          console.log('Verified: target ballot and saved progress removed. Other ballots were not selected.');
+          NODE
