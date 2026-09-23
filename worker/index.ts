@@ -299,6 +299,9 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
 function mediaResponse(body: ReadableStream | null, status: number, headers: Headers, cacheStatus: "HIT" | "MISS"): Response {
   const out = new Headers(headers);
   out.set("x-rosh-berosh-cache", cacheStatus);
+  // הקבצים ציבוריים ממילא; דף הניהול של אתר התוכניות קורא עטיפה קיימת ב־fetch כדי להקטין אותה ב־canvas
+  out.set("access-control-allow-origin", "*");
+  out.set("access-control-expose-headers", "content-length,content-range,accept-ranges");
   return new Response(body, { status, headers: out });
 }
 

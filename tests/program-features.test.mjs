@@ -212,9 +212,17 @@ test("large files upload in parts and are served back with ranges", async () => 
   assert.equal(ranged.status, 206);
   assert.equal(ranged.headers.get("content-range"), "bytes 195-204/300");
   assert.equal(ranged.headers.get("content-length"), "10");
+  assert.equal(ranged.headers.get("access-control-allow-origin"), "*", "media is readable cross-origin (canvas thumbnails)");
+  assert.equal(ranged.headers.get("access-control-expose-headers"), "content-length,content-range,accept-ranges");
   const whole = await call(`/media/${key}`, { method: "HEAD" });
   assert.equal(whole.headers.get("content-length"), "300");
   assert.equal(whole.headers.get("accept-ranges"), "bytes");
+  assert.equal(whole.headers.get("access-control-allow-origin"), "*");
+  const full = await call(`/media/${key}`);
+  assert.equal(full.status, 200);
+  assert.equal(full.headers.get("access-control-allow-origin"), "*");
+  assert.equal(full.headers.get("access-control-expose-headers"), "content-length,content-range,accept-ranges");
+  assert.equal(full.headers.get("vary"), null);
 
   const other = await (await call("/api/program/upload/start?episode=ep-1&kind=cover", { method: "POST", token: admin, body: { contentType: "image/jpeg", size: 100 } })).json();
   assert.match(other.key, /\.jpg$/);
