@@ -675,10 +675,10 @@ const worker = {
   // כל חמש דקות: מנה מתור התראות הדחיפה, ותוכניות מתוזמנות שמועד הפרסום שלהן הגיע
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
-      await runOneTimeRequestedVoteReset(env).catch((error) => console.error("requested vote reset failed", error));
       await ensureRuntimeSchema(env);
       await runScheduledPush(env).catch((error) => console.error("scheduled push error", error));
       await runAutomaticTranscription(env, "https://rosh-berosh.smwlyqswkwt232.workers.dev");
+      await runOneTimeRequestedVoteReset(env).catch((error) => console.error("requested vote reset failed", error));
     })().catch((error) => console.error("scheduled push error", error)));
   },
 };
