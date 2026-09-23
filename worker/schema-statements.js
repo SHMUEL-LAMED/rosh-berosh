@@ -348,8 +348,11 @@ async function addMissingColumn(db, spec) {
 }
 
 /**
- * מריץ כל משפט בנפרד כדי שכשל אחד לא ימנע את המשפטים שאחריו,
- * ומחזיר את רשימת המשפטים שנכשלו.
+ * מריץ את הסכמה בשלוש קריאות ל־D1 (`batch`): טבלאות, בדיקת העמודות, ואינדקסים.
+ * כל קריאה ל־D1 היא הלוך־חזור של כ־100ms, ועשרות המשפטים ברצף עיכבו כל מופע חדש של
+ * ה־Worker בכ־10 שניות — והקטלוג של אתר התוכניות נפל לעותק השמור. `batch` הוא טרנזקציה
+ * אחת, כך שמשפט שנכשל מבטל את כל הקבוצה: אז היא מורצת שוב משפט־משפט, וכשל אחד עדיין
+ * לא מונע את המשפטים שאחריו. מחזיר את רשימת המשפטים שנכשלו.
  */
 export async function applyRuntimeSchema(db) {
   const failures = [];
@@ -357,10 +360,35 @@ export async function applyRuntimeSchema(db) {
     try { await run(); }
     catch (error) { failures.push({ statement, error }); }
   };
-  for (const statement of TABLES) await step(statement, () => db.prepare(statement).run());
-  for (const spec of COLUMNS) await step(columnStatement(spec), () => addMissingColumn(db, spec));
-  for (const statement of [...DROPPED_INDEXES, ...INDEXES, ...SEEDS]) await step(statement, () => db.prepare(statement).run());
+  const group = async (statements) => {
+    if (await inOneBatch(db, statements)) return;
+    for (const statement of statements) await step(statement, () => db.prepare(statement).run());
+  };
+  await group(TABLES);
+  const columns = await existingColumns(db);
+  for (const spec of COLUMNS) {
+    if (!columns) await step(columnStatement(spec), () => addMissingColumn(db, spec));
+    else if (!columns.get(spec.table)?.has(spec.column)) await step(columnStatement(spec), () => db.prepare(columnStatement(spec)).run());
+  }
+  await group([...DROPPED_INDEXES, ...INDEXES, ...SEEDS]);
   return failures;
+}
+
+/** כל המשפטים בקריאה אחת. false — אין `batch`, או שמשפט נכשל והקבוצה בוטלה. */
+async function inOneBatch(db, statements) {
+  if (typeof db.batch !== "function") return false;
+  try { await db.batch(statements.map((statement) => db.prepare(statement))); return true; }
+  catch { return false; }
+}
+
+/** העמודות הקיימות בכל טבלה של COLUMNS, בקריאה אחת; null — אם אי אפשר לקרוא כך. */
+async function existingColumns(db) {
+  if (typeof db.batch !== "function") return null;
+  const tables = [...new Set(COLUMNS.map((spec) => spec.table))];
+  try {
+    const results = await db.batch(tables.map((table) => db.prepare(`PRAGMA table_info(${table})`)));
+    return new Map(tables.map((table, i) => [table, new Set((results[i]?.results ?? []).map((row) => row.name))]));
+  } catch { return null; }
 }
 
 /** בונה רק את טבלאות הקו הטלפוני, בלי שאר הסכמה. */
