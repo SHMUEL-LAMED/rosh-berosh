@@ -193,6 +193,35 @@ const TABLES = [
     data_json TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+  // אתר התוכניות: נתונים אישיים לכל חשבון (סנכרון בין מכשירים), לייקים,
+  // מנויי התראות דחיפה, ותמלולים וסיכומים שנוצרים בבינה מלאכותית (למנהלים בלבד).
+  `CREATE TABLE IF NOT EXISTS program_user_data (
+    user_sub TEXT PRIMARY KEY,
+    email TEXT,
+    data_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  `CREATE TABLE IF NOT EXISTS program_likes (
+    user_sub TEXT NOT NULL,
+    episode_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (user_sub, episode_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS program_push (
+    endpoint TEXT PRIMARY KEY,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_sub TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  `CREATE TABLE IF NOT EXISTS program_transcripts (
+    episode_id TEXT PRIMARY KEY,
+    text TEXT NOT NULL DEFAULT '',
+    parts_done INTEGER NOT NULL DEFAULT 0,
+    parts_total INTEGER NOT NULL DEFAULT 0,
+    summary_json TEXT,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
 ];
 
 const COLUMNS = [
@@ -209,6 +238,10 @@ const COLUMNS = [
   { table: "ballots", column: "songs_done_at", definition: "INTEGER" },
   { table: "ballots", column: "artists_done_at", definition: "INTEGER" },
   { table: "ballots", column: "sessions", definition: "INTEGER" },
+  // אירועי האזנה: מיקום בתוכנית באחוזים, מקור ההגעה, והשעה בישראל
+  { table: "program_events", column: "pct", definition: "INTEGER" },
+  { table: "program_events", column: "ref", definition: "TEXT" },
+  { table: "program_events", column: "hour", definition: "INTEGER" },
 ];
 
 // אינדקסים ייחודיים שהוחלפו ב-`drizzle/0001` ו-`drizzle/0002`.
@@ -250,6 +283,7 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS program_events_created_idx ON program_events(created_at)",
   "CREATE INDEX IF NOT EXISTS program_messages_created_idx ON program_messages(created_at)",
   "CREATE INDEX IF NOT EXISTS program_versions_created_idx ON program_versions(created_at)",
+  "CREATE INDEX IF NOT EXISTS program_likes_episode_idx ON program_likes(episode_id)",
 ];
 
 const SEEDS = [

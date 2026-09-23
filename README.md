@@ -135,3 +135,19 @@ npm run dev
 הכניסה לאתר התוכניות נפתחת בחלון קטן בכתובת הוורקר, `/api/program/login`. **כל אחד** יכול להתחבר שם עם Google ולקבל סשן לאתר התוכניות (אזור אישי); מי שכבר מחובר לאתר הסקר מקבל את הסשן מיד (`POST /api/program/auth/session`, שמחליף את עוגיית הסשן של אתר הסקר בטוקן ל־30 יום ורץ רק מאותו origin). `user.isAdmin` — שמחושב מחדש מרשימת המנהלים בכל בקשה (`GET /api/program/me`) — הוא מה שפותח שם את אזור הניהול ואת הכתיבה (`POST /api/program/catalog`, `/api/program/upload`).
 
 ההקלטות של התוכניות שמורות בקובצי Google Drive משותפים. גוגל מגיש אותם כאודיו עם Range לשרתים, אבל עונה 403 לכל בקשת דפדפן חוצת־אתרים (`Sec-Fetch-Site: cross-site`), ולכן הנגן של אתר התוכניות מזרים אותם דרך הוורקר: `GET/HEAD /api/program/stream/<מזהה קובץ>` מעביר את כותרת ה־Range לדרייב ומחזיר את האודיו (200/206) עם `content-range`; דפי HTML של גוגל (חסימה, אזהרת וירוסים) לעולם אינם מועברים — במקומם מוחזר 502.
+
+### נתיבים נוספים של אתר התוכניות
+
+- **תוכניות מתוזמנות.** תוכנית עם `publishAt` (שעון ישראל, `"2026-10-01T20:00"`) אינה מופיעה בקטלוג הציבורי, בהורדה ובדף השיתוף עד שהמועד מגיע; מנהלים רואים הכול.
+- **הגנה מהתנגשות בפרסום.** `GET /api/program/catalog` מחזיר למנהלים `versionId` (הגרסה האחרונה). `POST /api/program/catalog` מקבל `baseVersion` — אם מאז פרסם מישהו אחר מוחזר 409 עם `conflict: true` ו־`latest` (אלא אם נשלח `force: true`) — ומחזיר את `versionId` החדש. `notify: true` שולח התראת דחיפה על תוכניות שהפכו עכשיו לציבוריות (עד 3, ומעבר לזה התראה מסכמת אחת).
+- **העלאה בחלקים** (עד 1GB להקלטה, 15MB לעטיפה): `POST /api/program/upload/start?episode=&kind=` → `PUT /api/program/upload/part?key=&uploadId=&part=` (חלקים של 20MB) → `POST /api/program/upload/complete` (או `/abort`). הקובץ מוגש מ־`/media/<key>` עם Range.
+- **הורדה עם שם הקובץ:** `GET/HEAD /api/program/download/<מזהה>` — מ־R2 עם `content-disposition` בשם התוכנית בעברית; אם ההקלטה עוד רק בדרייב — הפניה (302) להורדה מדרייב.
+- **דף שיתוף:** `GET /p/<slug>` — תגי Open Graph לוואטסאפ ופייסבוק והפניה מיידית לדף התוכנית (`?t=<שניות>` נשמר).
+- **נתונים אישיים:** `GET/PUT/DELETE /api/program/userdata` (לכל חשבון מחובר, עד 300KB; הלקוח ממזג). **לייקים:** `GET/POST /api/program/likes`.
+- **התראות דחיפה (Web Push):** `GET /api/program/push/key`, `POST /api/program/push/subscribe`, `POST /api/program/push/unsubscribe`, ולמנהלים `POST /api/program/push/send`, `POST /api/program/push/drain` ו־`GET /api/program/push/count`. מפתחות VAPID נוצרים בשימוש הראשון ונשמרים ב־`program_settings`. **השליחה נעשית במנות:** בתוכנית החינמית של Workers מותרות 50 בקשות יוצאות להפעלה, ולכן כל הודעה נכנסת לתור (`program_settings` → `push-pending`, עד 20 הודעות) ואף הפעלה אינה שולחת יותר מ־40. `send` ופרסום עם `notify` שולחים מנה ראשונה מיד; לקוח הניהול קורא ל־`drain` בלולאה עד ש־`remaining` מגיע ל־0. טריגר cron (כל 5 דקות, `triggers` ב־`vite.config.ts`) שולח בכל ריצה מנה מהתור, ומכניס לתור התראה על תוכנית מתוזמנת כשמועד הפרסום שלה מגיע; בריצה הראשונה הוא רק רושם את התוכניות הקיימות, כך שתוכניות ישנות לעולם אינן מפעילות התראה.
+- **סטטיסטיקות:** אירועי ההאזנה (`POST /api/program/events`) מקבלים גם `pct` ו־`ref`; `/api/program/stats` מחזיר גם `sources`, `hours` ו־`likes`, ו־`GET /api/program/stats/episode/<מזהה>` מחזיר עקומת נטישה (`retention`).
+- **תמלול ותיאור בבינה מלאכותית (מנהלים):** `POST /api/program/ai/transcribe` (חלק אחר חלק, 2MB כל אחד, Whisper של Workers AI), `GET /api/program/ai/transcript/<מזהה>`, `POST /api/program/ai/summarize`. התמלולים אינם חלק מהקטלוג הציבורי.
+
+**שני צעדים ידניים לבעלי החשבון:**
+1. **Workers AI חייב להיות מופעל בחשבון Cloudflare** (הקישור `AI` מוגדר ב־`vite.config.ts`); בלעדיו התמלול והסיכום מחזירים שגיאה, ושאר האתר עובד כרגיל.
+2. **אופציונלי — סיכומים טובים יותר בעברית:** `npx wrangler secret put ANTHROPIC_API_KEY`. כשהמפתח מוגדר הסיכום נעשה ב־Claude (`claude-sonnet-5`), ואחרת ב־Llama של Workers AI.
