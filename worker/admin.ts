@@ -961,16 +961,21 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       const coverKey = `albums/${albumId}/cover-${crypto.randomUUID()}-${safeName(file.name)}`;
       await env.MEDIA.put(coverKey, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId } });
       const coverUrl = mediaUrl(coverKey);
-      await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=?").bind(coverUrl, albumId).run();
-      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='' OR cover_url=?)").bind(coverUrl, albumId, album.coverUrl || "").run();
-      await deleteMediaUrls(env, [album.coverUrl]);
+      // תמונת האלבום היא התמונה של כל השירים שבו, כולל שירים שהביאו עטיפה
+      // משלהם מתוך קובץ השמע. העטיפות הקודמות נמחקות אם אין בהן עוד שימוש.
+      const previousSongCovers = await env.DB.prepare("SELECT DISTINCT cover_url AS coverUrl FROM songs WHERE album_id=? AND cover_url IS NOT NULL AND cover_url<>''").bind(albumId).all<{ coverUrl: string }>();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=?").bind(coverUrl, albumId),
+        env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=?").bind(coverUrl, albumId),
+      ]);
+      await deleteMediaUrls(env, [album.coverUrl, ...previousSongCovers.results.map((row) => row.coverUrl)]);
       return json({ ok: true, url: coverUrl });
     }
     if (!albumId || kind !== "audio") return json({ error: "קובץ או אלבום חסרים." }, 400);
     const uploadId = text(form.get("uploadId"));
     const requestedSurveyId = text(form.get("surveyId"));
     if (uploadId && (!/^[0-9a-f-]{36}$/i.test(uploadId) || requestedSurveyId !== surveyId)) return json({ error: "מזהה ההעלאה אינו תקין או שייך לסקר אחר." }, 400);
-    const album = await env.DB.prepare("SELECT id FROM albums WHERE id=? AND survey_id=?").bind(albumId, surveyId).first();
+    const album = await env.DB.prepare("SELECT id, cover_url AS coverUrl FROM albums WHERE id=? AND survey_id=?").bind(albumId, surveyId).first<{ id: string; coverUrl?: string | null }>();
     if (!album) return json({ error: "האלבום אינו שייך לסקר הפעיל." }, 404);
     if (uploadId) {
       const existingUpload = await env.DB.prepare("SELECT u.song_id AS songId,s.audio_url AS audioUrl,s.cover_url AS coverUrl FROM media_uploads u JOIN songs s ON s.id=u.song_id WHERE u.id=? AND u.survey_id=? AND u.album_id=?")
@@ -986,8 +991,10 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const audioUrl = mediaUrl(key);
     const songId = crypto.randomUUID();
     const title = text(form.get("title")) || file.name.replace(/\.[^.]+$/, "").replace(/^\d+[\s._-]*/, "");
-    let coverUrl: string | null = null;
-    const cover = await extractCoverFromAudio(audioBuffer);
+    // לאלבום שכבר יש לו תמונה השיר מקבל אותה, ואין טעם לשלוף ולשמור עטיפה
+    // נפרדת מתוך הקובץ. רק לאלבום בלי תמונה העטיפה של השיר הופכת לתמונתו.
+    let coverUrl: string | null = album.coverUrl || null;
+    const cover = coverUrl ? null : extractCoverFromAudio(audioBuffer);
     if (cover) {
       const coverKey = `albums/${albumId}/cover-${songId}-${crypto.randomUUID()}.jpg`;
       await env.MEDIA.put(coverKey, cover.data, { httpMetadata: { contentType: cover.mime, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { songId, albumId } });
@@ -1003,7 +1010,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       if (uploadId) statements.push(env.DB.prepare("INSERT INTO media_uploads (id,survey_id,album_id,song_id) VALUES (?,?,?,?)").bind(uploadId, surveyId, albumId, songId));
       await env.DB.batch(statements);
     } catch (error) {
-      const cleanupKeys = [key, keyFromMediaUrl(coverUrl)].filter((value): value is string => !!value);
+      const cleanupKeys = [key, cover ? keyFromMediaUrl(coverUrl) : null].filter((value): value is string => !!value);
       if (cleanupKeys.length) await env.MEDIA.delete(cleanupKeys).catch(() => undefined);
       if (uploadId) {
         const existingUpload = await env.DB.prepare("SELECT u.song_id AS songId,s.audio_url AS audioUrl,s.cover_url AS coverUrl FROM media_uploads u JOIN songs s ON s.id=u.song_id WHERE u.id=?").bind(uploadId).first<{ songId: string; audioUrl?: string; coverUrl?: string }>();
@@ -1011,9 +1018,15 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       }
       throw error;
     }
-    if (coverUrl) {
+    if (cover && coverUrl) {
       await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
-      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
+      // שני שירים שעלו במקביל לאלבום בלי תמונה: רק העטיפה של הראשון נקבעה
+      // לאלבום, וכל השירים מיישרים קו לפיה.
+      const current = await env.DB.prepare("SELECT cover_url AS coverUrl FROM albums WHERE id=?").bind(albumId).first<{ coverUrl?: string | null }>();
+      const albumCover = current?.coverUrl || coverUrl;
+      await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='' OR id=?)").bind(albumCover, albumId, songId).run();
+      if (albumCover !== coverUrl) await deleteMediaUrls(env, [coverUrl]);
+      coverUrl = albumCover;
     }
     return json({ ok: true, id: songId, url: audioUrl, coverUrl });
   }
@@ -1103,10 +1116,14 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
 }
 
 export async function extractSurveyCovers(env: AdminEnv, surveyId: string): Promise<{ total: number; extracted: number }> {
-  const songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.audio_url AS audioUrl FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? AND s.audio_url IS NOT NULL AND s.audio_url<>'' AND (s.cover_url IS NULL OR s.cover_url='')").bind(surveyId).all<{ id: string; albumId: string; audioUrl: string }>();
+  // שיר באלבום שיש לו תמונה מקבל את תמונת האלבום, בלי לפתוח את קובץ השמע.
+  await env.DB.prepare("UPDATE songs SET cover_url=(SELECT a.cover_url FROM albums a WHERE a.id=songs.album_id) WHERE (cover_url IS NULL OR cover_url='') AND album_id IN (SELECT id FROM albums WHERE survey_id=? AND cover_url IS NOT NULL AND cover_url<>'')").bind(surveyId).run();
+  const songs = await env.DB.prepare("SELECT s.id, s.album_id AS albumId, s.audio_url AS audioUrl FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=? AND (a.cover_url IS NULL OR a.cover_url='') AND s.audio_url IS NOT NULL AND s.audio_url<>'' AND (s.cover_url IS NULL OR s.cover_url='') ORDER BY a.position, s.position").bind(surveyId).all<{ id: string; albumId: string; audioUrl: string }>();
   let extracted = 0;
   const albumCovers = new Map<string, string>();
   for (const song of songs.results) {
+    // עטיפה אחת לאלבום: אחרי שנמצאה, היא התמונה של כל שאר השירים בו.
+    if (albumCovers.has(song.albumId)) continue;
     const key = keyFromMediaUrl(song.audioUrl);
     if (!key) continue;
     const obj = await env.MEDIA.get(key);
@@ -1117,13 +1134,14 @@ export async function extractSurveyCovers(env: AdminEnv, surveyId: string): Prom
     const coverKey = `albums/${song.albumId}/cover-${song.id}-${crypto.randomUUID()}.jpg`;
     const coverUrl = mediaUrl(coverKey);
     await env.MEDIA.put(coverKey, cover.data, { httpMetadata: { contentType: cover.mime, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { songId: song.id, albumId: song.albumId } });
-    await env.DB.prepare("UPDATE songs SET cover_url=? WHERE id=?").bind(coverUrl, song.id).run();
-    if (!albumCovers.has(song.albumId)) albumCovers.set(song.albumId, coverUrl);
+    albumCovers.set(song.albumId, coverUrl);
     extracted++;
   }
   for (const [albumId, coverUrl] of albumCovers) {
-    await env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
-    await env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId).run();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE albums SET cover_url=? WHERE id=?").bind(coverUrl, albumId),
+      env.DB.prepare("UPDATE songs SET cover_url=? WHERE album_id=? AND (cover_url IS NULL OR cover_url='')").bind(coverUrl, albumId),
+    ]);
   }
   return { total: songs.results.length, extracted };
 }
