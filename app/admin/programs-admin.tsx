@@ -3,152 +3,26 @@
 /* ניהול אתר התוכניות — חלק רגיל של דף הניהול, באותו עיצוב ובאותה כניסה.
    הכול עובד על טיוטה שנשמרת אוטומטית בשרת (/api/program/draft), ו"פרסום"
    מעביר אותה לאתר התוכניות (/api/program/catalog). ארבעה חלקים: תוכניות,
-   הודעה ועדכונים, מאזינים, פרסום. */
+   הודעה ועדכונים, מאזינים, פרסום. הטיפוסים והעזרים ב־programs-core, הבינה
+   המלאכותית ב־programs-ai, המאזינים ב־programs-listeners, העבודות ב־programs-jobs. */
 
-import type { ChangeEvent, ReactNode } from "react";
+import type { ChangeEvent, DragEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./programs-admin.css";
+import {
+  api, drainPush, drawCover, driveId, errorText, fileKind, fmtDate, fmtDuration, hasRealDescription, label, makeThumb, measureDuration, n2, normCatalog, normEpisode, pack,
+  PROGRAM_SITE, scheduled, setCover, shrinkImage, slugify, splitList, streamUrl, today, uploadFile, when,
+  type ApiError, type Banner, type Catalog, type Comment, type Contacts, type Episode, type Message, type Season, type Stats, type SurveyRow, type Update, type Version,
+} from "./programs-core";
+import { FilePick, Section, Status, Switch } from "./programs-ui";
+import { AiCard, aiRun, ProofreadCard, summaryPatch } from "./programs-ai";
+import { CommentsCard, commentsError, DeepStats, PushCard } from "./programs-listeners";
+import { runJob, stopJob, useJob } from "./programs-jobs";
 
 export type ProgramSection = "programs" | "site" | "listeners" | "publish";
-const PROGRAM_SITE = "https://shmuel-lamed.github.io/rosh-berosh-2/";
-
-type Link = { label: string; url: string };
-type Episode = {
-  id: string; slug: string; number: number | null; season: string; title: string; date: string; description: string;
-  cover: string; audio: string; duration: number; tags: string[]; guests: string[]; links: Link[];
-  featured: boolean; visible: boolean; publishAt: string; surveyId: string; [key: string]: unknown;
-};
-type Season = { id: string; title: string; year: number | null; note: string };
-type Banner = { enabled: boolean; text: string; link: string; linkLabel: string; until: string; sites: { program: boolean; survey: boolean } };
-type Update = { id: string; date: string; title: string; text: string; link: string; pinned: boolean };
-type Catalog = { seasons: Season[]; episodes: Episode[]; settings: { banner: Banner; updates: Update[] } };
-type SurveyRow = { id: string; name: string; active: boolean; open: boolean };
-type Version = { id: string; by: string; episodes: number; createdAt: number };
-type Message = { id: string; name: string; email: string; text: string; episodeId: string | null; readAt: number | null; createdAt: number };
-type Stats = { days: Array<{ day: string; plays: number; listeners: number }>; episodes: Array<{ id: string; plays: number }>; recent: Array<{ id: string; plays: number }>; totals: { plays?: number; seconds?: number }; week: { plays?: number; listeners?: number }; devices: Record<string, number> };
-
-/* ---------- עזרים ---------- */
-
-const str = (value: unknown) => (value == null ? "" : String(value));
-const list = (value: unknown) => (Array.isArray(value) ? value.map(String).filter(Boolean) : []);
-const today = () => new Date().toISOString().slice(0, 10);
-const label = (episode: Episode) => episode.title.trim() || "תוכנית בלי שם";
-const n2 = (value: unknown) => Number(value || 0).toLocaleString("he-IL");
-const splitList = (value: string) => value.split(/[,،]/).map((item) => item.trim()).filter(Boolean);
-const when = (value: number | string) => new Intl.DateTimeFormat("he-IL", { dateStyle: "medium", timeStyle: "short" }).format(new Date(typeof value === "number" ? value * 1000 : value));
-const fmtDate = (iso: string) => { if (!iso) return ""; const date = new Date(`${iso.slice(0, 10)}T12:00:00`); return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short", year: "numeric" }).format(date); };
-const fmtDuration = (seconds: number) => { if (!seconds) return ""; const h = Math.floor(seconds / 3600), m = Math.round((seconds % 3600) / 60); return h ? `${h === 1 ? "שעה" : h === 2 ? "שעתיים" : `${h} שעות`}${m ? ` ו־${m} דקות` : ""}` : `${m} דקות`; };
-const slugify = (value: string) => value.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "episode";
-const scheduled = (episode: Episode) => !!episode.publishAt && new Date(episode.publishAt) > new Date();
-
-function normEpisode(raw: Record<string, unknown>, index: number): Episode {
-  const links = Array.isArray(raw.links) ? (raw.links as Array<Record<string, unknown>>).filter((l) => l && l.url).map((l) => ({ label: str(l.label || l.url), url: str(l.url) })) : [];
-  return {
-    ...raw,
-    id: str(raw.id || raw.slug || `ep-${index}`), slug: str(raw.slug || raw.id || `ep-${index}`),
-    number: raw.number == null || raw.number === "" ? null : Number(raw.number), season: str(raw.season), title: str(raw.title),
-    date: str(raw.date).slice(0, 10), description: str(raw.description), cover: str(raw.cover), audio: str(raw.audio), duration: Number(raw.duration) || 0,
-    tags: list(raw.tags), guests: list(raw.guests), links, featured: !!raw.featured, visible: raw.visible !== false,
-    publishAt: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str(raw.publishAt)) ? str(raw.publishAt).slice(0, 16) : "", surveyId: str(raw.surveyId),
-  };
-}
-function normCatalog(raw: Record<string, unknown> | null | undefined): Catalog {
-  const seasons = (Array.isArray(raw?.seasons) ? raw.seasons as Array<Record<string, unknown>> : []).map((s, i) => ({ id: str(s.id || `s${i + 1}`), title: str(s.title || `עונה ${i + 1}`), year: s.year ? Number(s.year) : null, note: str(s.note) }));
-  const episodes = (Array.isArray(raw?.episodes) ? raw.episodes as Array<Record<string, unknown>> : []).map(normEpisode);
-  const settings = (raw?.settings && typeof raw.settings === "object" ? raw.settings : {}) as Record<string, unknown>;
-  const b = (settings.banner && typeof settings.banner === "object" ? settings.banner : {}) as Record<string, unknown>;
-  const sites = (b.sites && typeof b.sites === "object" ? b.sites : {}) as Record<string, unknown>;
-  const banner: Banner = { enabled: !!b.enabled, text: str(b.text), link: str(b.link), linkLabel: str(b.linkLabel), until: str(b.until).slice(0, 10), sites: { program: sites.program !== false, survey: sites.survey === true } };
-  const updates = (Array.isArray(settings.updates) ? settings.updates as Array<Record<string, unknown>> : []).map((u, i) => ({ id: str(u.id || `u${i}`), date: str(u.date).slice(0, 10), title: str(u.title), text: str(u.text), link: str(u.link), pinned: !!u.pinned }));
-  return { seasons, episodes, settings: { banner, updates } };
-}
-/** מה שנשמר ומתפרסם — בלי שדות מחושבים, כדי שההשוואה תהיה נקייה */
-const pack = (episode: Episode) => JSON.stringify(normEpisode(episode, 0));
-
-function driveId(episode: Episode): string | null {
-  for (const value of [episode.audio, ...episode.links.map((l) => l.url)]) {
-    try { const u = new URL(value); if (u.protocol === "https:" && u.hostname === "drive.google.com") { const id = u.pathname.match(/^\/file\/d\/([\w-]+)/)?.[1] || u.searchParams.get("id"); if (id && /^[\w-]+$/.test(id)) return id; } }
-    catch { /* not a URL */ }
-  }
-  return null;
-}
-/** מה הנגן מנגן: הזרמה דרך השרת לקובצי דרייב, אחרת הקובץ עצמו */
-function streamUrl(episode: Episode): string {
-  const id = driveId(episode);
-  if (id) return `/api/program/stream/${encodeURIComponent(id)}`;
-  try { const u = new URL(episode.audio); return u.protocol === "https:" || u.protocol === "http:" ? episode.audio : ""; } catch { return ""; }
-}
-
-async function api<T = Record<string, unknown>>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, { cache: "no-store", ...init, headers: { "content-type": "application/json", ...(init.headers || {}) } });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error((body as { error?: string }).error || `הפעולה נכשלה (${response.status}).`), { status: response.status });
-  return body as T;
-}
-async function upload(file: File, episodeId: string, kind: "audio" | "cover", progress: (pct: number) => void): Promise<string> {
-  const types: Record<string, string> = kind === "audio"
-    ? { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac", aac: "audio/aac" }
-    : { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
-  const type = types[file.name.split(".").pop()?.toLowerCase() || ""] || (Object.values(types).includes(file.type) ? file.type : "");
-  if (!type) throw new Error("סוג הקובץ אינו נתמך.");
-  if (!file.size || file.size > 50 * 1024 * 1024) throw new Error("אפשר להעלות עד 50MB לקובץ. לקובץ גדול יותר הדביקו קישור.");
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/program/upload?episode=${encodeURIComponent(episodeId)}&kind=${kind}`);
-    xhr.setRequestHeader("content-type", type);
-    xhr.upload.onprogress = (event) => { if (event.lengthComputable) progress(Math.round((event.loaded / event.total) * 100)); };
-    xhr.onerror = () => reject(new Error("החיבור נקטע. נסו שוב."));
-    xhr.onload = () => { let body: { url?: string; error?: string } = {}; try { body = JSON.parse(xhr.responseText); } catch { /* */ } if (xhr.status >= 200 && xhr.status < 300 && body.url) resolve(body.url); else reject(new Error(body.error || `ההעלאה נכשלה (${xhr.status}).`)); };
-    progress(0); xhr.send(file);
-  });
-}
-
-/** תמונה גדולה מוקטנת לפני ההעלאה, כדי שהאתר ייטען מהר גם בטלפון */
-async function shrinkImage(file: File): Promise<File> {
-  if (file.size < 700 * 1024) return file;
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas"); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
-    const x = canvas.getContext("2d"); if (!x) return file;
-    x.fillStyle = "#0b0d18"; x.fillRect(0, 0, canvas.width, canvas.height); x.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
-    return blob && blob.size < file.size ? new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
-  } catch { return file; }
-}
-
-/* ---------- תמונה אוטומטית בסגנון האתר ---------- */
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, max: number) {
-  const out: string[] = []; let line = "";
-  for (const word of text.split(/\s+/).filter(Boolean)) { const next = line ? `${line} ${word}` : word; if (ctx.measureText(next).width > max && line) { out.push(line); line = word; } else line = next; }
-  if (line) out.push(line);
-  return out;
-}
-async function drawCover(episode: Episode, attempt: number): Promise<Blob> {
-  const W = 1200, H = 828, canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H;
-  const x = canvas.getContext("2d"); if (!x) throw new Error("הדפדפן לא תומך בציור תמונה.");
-  const seed = [...`${episode.id}${episode.title}${attempt}`].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-  const h1 = seed % 360, h2 = (h1 + 40 + (seed % 80)) % 360, h3 = (h1 + 200) % 360;
-  const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, `hsl(${h1} 60% 14%)`); g.addColorStop(0.55, `hsl(${h2} 55% 22%)`); g.addColorStop(1, `hsl(${h3} 60% 12%)`);
-  x.fillStyle = g; x.fillRect(0, 0, W, H);
-  for (let i = 0; i < 3; i++) { const cx = (W * ((seed >> (i * 3)) % 100)) / 100, cy = (H * ((seed >> (i * 5)) % 100)) / 100, r = x.createRadialGradient(cx, cy, 0, cx, cy, 520); r.addColorStop(0, `hsl(${[h1, h2, h3][i]} 90% 65% / .35)`); r.addColorStop(1, "transparent"); x.fillStyle = r; x.fillRect(0, 0, W, H); }
-  const cx = 260, cy = H / 2 + 40;
-  for (let r = 300; r > 40; r -= 6) { x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.strokeStyle = r % 12 ? "rgba(0,0,0,.35)" : "rgba(255,255,255,.08)"; x.lineWidth = 3; x.stroke(); }
-  x.beginPath(); x.arc(cx, cy, 78, 0, Math.PI * 2); x.fillStyle = `hsl(${h1} 85% 62%)`; x.fill();
-  for (let i = 0; i < 40; i++) { const bh = 30 + ((seed * (i + 3)) % 140); x.fillStyle = `hsl(${(h1 + i * 4) % 360} 90% 65% / .55)`; x.fillRect(W - 80 - i * 22, H - 60 - bh, 12, bh); }
-  x.direction = "rtl"; x.textAlign = "right";
-  x.fillStyle = "#f0c65a"; x.font = "800 30px Heebo, Arial, sans-serif"; x.fillText(`ראש בראש${episode.number != null ? `  ·  תוכנית ${episode.number}` : ""}`, W - 70, 110);
-  x.fillStyle = "#fff"; x.shadowColor = "rgba(0,0,0,.5)"; x.shadowBlur = 24;
-  const title = label(episode); let size = title.length > 34 ? 84 : title.length > 22 ? 104 : 128;
-  x.font = `800 ${size}px Heebo, Arial, sans-serif`;
-  let lines = wrapText(x, title, W - 560); if (lines.length > 2) { size = 80; x.font = `800 ${size}px Heebo, Arial, sans-serif`; lines = wrapText(x, title, W - 560); }
-  lines.slice(0, 3).forEach((line, i) => x.fillText(line, W - 70, 250 + i * size));
-  x.shadowBlur = 0; x.fillStyle = "rgba(255,255,255,.85)"; x.font = "700 30px Heebo, Arial, sans-serif";
-  wrapText(x, episode.description.split(/[.\n!?]/)[0].trim().slice(0, 90), W - 560).slice(0, 2).forEach((line, i) => x.fillText(line, W - 70, H - 150 + i * 42));
-  x.fillStyle = "#f0c65a"; x.font = "800 26px Heebo, Arial, sans-serif"; x.fillText(fmtDate(episode.date), W - 70, H - 60);
-  return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("יצירת התמונה נכשלה."))), "image/jpeg", 0.9));
-}
+type Mutate = (fn: (current: Catalog) => Catalog) => void;
+type PatchEpisode = (id: string, fields: Partial<Episode> | ((episode: Episode) => Partial<Episode>)) => void;
+type Common = { data: Catalog; change(next: Catalog): void; mutate: Mutate; patchEpisode: PatchEpisode; onMessage(message: string): void };
 
 /* ---------- הרכיב ---------- */
 
@@ -159,28 +33,39 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   const [sync, setSync] = useState<"" | "saving" | "saved" | "error">("");
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [reload, setReload] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dataRef = useRef<Catalog | null>(null);
+  // הגרסה שבאתר כשהתחילו לערוך — נשלחת בפרסום (baseVersion) כהגנה מדריסה בין מנהלים
+  const base = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    Promise.all([api<Record<string, unknown>>("/api/program/catalog"), api<{ draft: { data: Record<string, unknown> } | null }>("/api/program/draft").catch(() => ({ draft: null })), api<{ surveys: SurveyRow[] }>("/api/program/surveys").catch(() => ({ surveys: [] }))])
+    Promise.all([api<Record<string, unknown> & { versionId?: string | null }>("/api/program/catalog"), api<{ draft: { data: Record<string, unknown> & { baseVersion?: string | null } } | null }>("/api/program/draft").catch(() => ({ draft: null })), api<{ surveys: SurveyRow[] }>("/api/program/surveys").catch(() => ({ surveys: [] }))])
       .then(([published, { draft }, list]) => {
         if (!active) return;
         const pub = normCatalog(published);
-        setOrigin(pub); setData(draft?.data ? normCatalog(draft.data) : pub); setSurveys(list.surveys || []); setLoadError("");
+        base.current = draft?.data && draft.data.baseVersion !== undefined ? draft.data.baseVersion ?? null : published.versionId ?? null;
+        const next = draft?.data ? normCatalog(draft.data) : pub;
+        dataRef.current = next;
+        setOrigin(pub); setData(next); setSurveys(list.surveys || []); setLoadError("");
       })
-      .catch((error) => { if (active) setLoadError(error instanceof Error ? error.message : "טעינת אתר התוכניות נכשלה."); });
+      .catch((error) => { if (active) setLoadError(errorText(error, "טעינת אתר התוכניות נכשלה.")); });
     return () => { active = false; };
   }, [reload]);
 
-  /** כל שינוי נשמר אוטומטית בטיוטה בשרת */
-  const change = useCallback((next: Catalog) => {
-    setData(next); setSync("saving");
+  /** כל שינוי נשמר אוטומטית בטיוטה בשרת. השינוי מחושב מהמצב העדכני ביותר, כך שגם עבודות ברקע לא דורסות עריכה */
+  const mutate = useCallback<Mutate>((fn) => {
+    const current = dataRef.current; if (!current) return;
+    const next = fn(current); if (next === current) return;
+    dataRef.current = next; setData(next); setSync("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      api("/api/program/draft", { method: "PUT", body: JSON.stringify({ data: next }) }).then(() => setSync("saved")).catch(() => setSync("error"));
+      api("/api/program/draft", { method: "PUT", body: JSON.stringify({ data: { ...next, baseVersion: base.current } }) }).then(() => setSync("saved")).catch(() => setSync("error"));
     }, 900);
   }, []);
+  const change = useCallback((next: Catalog) => mutate(() => next), [mutate]);
+  const patchEpisode = useCallback<PatchEpisode>((id, fields) => mutate((current) => ({ ...current, episodes: current.episodes.map((e) => (e.id === id ? { ...e, ...(typeof fields === "function" ? fields(e) : fields) } : e)) })), [mutate]);
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
   const changes = useMemo(() => {
@@ -194,33 +79,28 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
     return { added, changed, removed, seasons, settings, any: !!(added || changed || removed.length || seasons || settings) };
   }, [origin, data]);
 
+  /** פתיחת תוכנית מחלק אחר (למשל מבדיקת האיות): בוחרים אותה ועוברים ללשונית התוכניות */
+  const open = useCallback((id: string | null) => { if (id) setSelected(id); window.location.hash = id ? "#prog-programs" : "#prog-site"; }, []);
+
   if (!section) return null;
   if (loadError) return <section className="admin-panel"><h2>אתר התוכניות</h2><p className="panel-help">{loadError}</p><button type="button" className="prog-btn" onClick={() => { setLoadError(""); setReload((v) => v + 1); }}>ניסיון חוזר</button></section>;
   if (!data || !origin) return <section className="admin-panel"><p className="panel-help">טוענים את אתר התוכניות…</p></section>;
 
   const status = !changes?.any ? { cls: "ok", text: "הכול מפורסם באתר התוכניות" } : { cls: "draft", text: `יש שינויים שעדיין לא פורסמו · ${sync === "saving" ? "שומרים…" : sync === "error" ? "השמירה נכשלה, ננסה שוב בשינוי הבא" : "נשמרו בטיוטה"}` };
   const statusBar = <div className={`prog-status ${status.cls}`}><span className="dot" />{status.text}{changes?.any && section !== "publish" && <a href="#prog-publish" className="prog-status-link">לפרסום ←</a>}</div>;
-  const common = { data, change, onMessage };
+  const common: Common = { data, change, mutate, patchEpisode, onMessage };
   return <div className="prog-admin">
     {statusBar}
-    {section === "programs" && <ProgramsSection {...common} surveys={surveys} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} />}
+    {section === "programs" && <ProgramsSection {...common} surveys={surveys} selected={selected} onSelect={setSelected} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} />}
     {section === "site" && <SiteSection {...common} />}
     {section === "listeners" && <ListenersSection data={data} onMessage={onMessage} />}
-    {section === "publish" && <PublishSection {...common} origin={origin} changes={changes} onPublished={(published) => { setOrigin(published); setData(published); setSync(""); }} onDiscard={() => setReload((v) => v + 1)} />}
+    {section === "publish" && <PublishSection {...common} origin={origin} changes={changes} base={base} onOpen={open} onPublished={(published, versionId) => { base.current = versionId; dataRef.current = published; setOrigin(published); setData(published); setSync(""); }} onDiscard={() => setReload((v) => v + 1)} />}
   </div>;
 }
 
-type Common = { data: Catalog; change(next: Catalog): void; onMessage(message: string): void };
-/** מתג הפעלה/כיבוי שנראה כמו מתג */
-const Switch = ({ on, onClick, children }: { on: boolean; onClick(): void; children: ReactNode }) => <button type="button" role="switch" aria-checked={on} className={`prog-switch${on ? " on" : ""}`} onClick={onClick}><i aria-hidden="true" /><span>{children}</span></button>;
-/** בחירת קובץ בעברית, במקום הכפתור האנגלי של הדפדפן */
-const FilePick = ({ accept, onChange, children }: { accept: string; onChange(event: ChangeEvent<HTMLInputElement>): void; children: ReactNode }) => <label className="prog-file"><input type="file" accept={accept} onChange={onChange} /><span>{children}</span></label>;
-const Section = ({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) => <section className="admin-panel prog-panel"><header className="prog-panel-head"><h2>{title}</h2>{aside}</header>{children}</section>;
-
 /* ======================= 1. תוכניות ======================= */
 
-function ProgramsSection({ data, change, onMessage, surveys, live }: Common & { surveys: SurveyRow[]; live: Set<string> }) {
-  const [selected, setSelected] = useState<string | null>(null);
+function ProgramsSection({ data, change, patchEpisode, onMessage, surveys, live, selected, onSelect }: Common & { surveys: SurveyRow[]; live: Set<string>; selected: string | null; onSelect(id: string | null): void }) {
   const [query, setQuery] = useState(""), [filter, setFilter] = useState("all");
   const [bulk, setBulk] = useState(false), [picked, setPicked] = useState<Set<string>>(new Set());
   const sorted = useMemo(() => data.episodes.slice().sort((a, b) => b.date.localeCompare(a.date) || (b.number || 0) - (a.number || 0)), [data.episodes]);
@@ -235,20 +115,19 @@ function ProgramsSection({ data, change, onMessage, surveys, live }: Common & { 
   });
   const current = data.episodes.find((e) => e.id === selected) || null;
   const setEpisodes = (episodes: Episode[]) => change({ ...data, episodes });
-  const patch = (id: string, fields: Partial<Episode>) => setEpisodes(data.episodes.map((e) => (e.id === id ? { ...e, ...fields } : e)));
   const uniqueSlug = (base: string, self: string) => { const root = slugify(base); let slug = root, n = 2; while (data.episodes.some((e) => e.slug === slug && e.id !== self)) slug = `${root}-${n++}`; return slug; };
 
   const create = () => {
     const id = `ep-${Date.now().toString(36)}`, number = data.episodes.reduce((m, e) => Math.max(m, e.number || 0), 0) + 1;
     const episode = normEpisode({ id, slug: uniqueSlug(today(), id), number, season: data.seasons[0]?.id || "", date: today(), visible: true }, 0);
-    setEpisodes([episode, ...data.episodes]); setQuery(""); setFilter("all"); setBulk(false); setSelected(id);
+    setEpisodes([episode, ...data.episodes]); setQuery(""); setFilter("all"); setBulk(false); onSelect(id);
   };
   const duplicate = (episode: Episode) => {
     const id = `ep-${Date.now().toString(36)}`;
     setEpisodes([{ ...episode, id, slug: uniqueSlug(`${episode.slug}-2`, id), number: episode.number != null ? episode.number + 1 : null, featured: false, title: `${episode.title} (עותק)` }, ...data.episodes]);
-    setSelected(id); onMessage("התוכנית שוכפלה. זה העותק — ערכו אותו.");
+    onSelect(id); onMessage("התוכנית שוכפלה. זה העותק — ערכו אותו.");
   };
-  const removeIds = (ids: string[]) => { setEpisodes(data.episodes.filter((e) => !ids.includes(e.id))); if (selected && ids.includes(selected)) setSelected(null); setPicked(new Set()); onMessage(ids.length === 1 ? "התוכנית נמחקה מהטיוטה. עד הפרסום היא עדיין באתר." : `${ids.length} תוכניות נמחקו מהטיוטה.`); };
+  const removeIds = (ids: string[]) => { setEpisodes(data.episodes.filter((e) => !ids.includes(e.id))); if (selected && ids.includes(selected)) onSelect(null); setPicked(new Set()); onMessage(ids.length === 1 ? "התוכנית נמחקה מהטיוטה. עד הפרסום היא עדיין באתר." : `${ids.length} תוכניות נמחקו מהטיוטה.`); };
   const bulkSet = (fields: Partial<Episode>, message: string) => { setEpisodes(data.episodes.map((e) => (picked.has(e.id) ? { ...e, ...fields } : e))); onMessage(message); };
 
   return <div className="prog-workspace">
@@ -273,7 +152,7 @@ function ProgramsSection({ data, change, onMessage, surveys, live }: Common & { 
       <div className="prog-items" role="listbox" aria-label="תוכניות">
         {shown.map((e) => {
           const on = bulk ? picked.has(e.id) : selected === e.id;
-          return <button key={e.id} type="button" role="option" aria-selected={on} className={`prog-item${on ? " selected" : ""}${e.visible ? "" : " muted"}`} onClick={() => { if (bulk) { const next = new Set(picked); if (next.has(e.id)) next.delete(e.id); else next.add(e.id); setPicked(next); } else setSelected(e.id); }}>
+          return <button key={e.id} type="button" role="option" aria-selected={on} className={`prog-item${on ? " selected" : ""}${e.visible ? "" : " muted"}`} onClick={() => { if (bulk) { const next = new Set(picked); if (next.has(e.id)) next.delete(e.id); else next.add(e.id); setPicked(next); } else onSelect(e.id); }}>
             <i>{bulk ? (picked.has(e.id) ? "✓" : "") : e.number ?? "♫"}</i>
             <span><b>{label(e)}</b><small>{fmtDate(e.date) || "בלי תאריך"} · <em className={!e.visible ? "st-hidden" : scheduled(e) ? "st-scheduled" : "st-live"}>{!e.visible ? "מוסתרת" : scheduled(e) ? "מתוזמנת" : "מוצגת"}</em>{e.featured ? " · ★" : ""}{streamUrl(e) ? "" : " · בלי הקלטה"}</small></span>
           </button>;
@@ -282,29 +161,51 @@ function ProgramsSection({ data, change, onMessage, surveys, live }: Common & { 
       </div>
     </aside>
     <div className="prog-editor">
-      {current ? <Editor key={current.id} episode={current} live={live.has(current.id)} data={data} surveys={surveys} onPatch={(fields) => patch(current.id, fields)} onFeatured={(on) => setEpisodes(data.episodes.map((e) => ({ ...e, featured: on && e.id === current.id })))} onDuplicate={() => duplicate(current)} onDelete={() => { if (confirm(`למחוק את "${label(current)}"?`)) removeIds([current.id]); }} onSeasons={(seasons) => change({ ...data, seasons })} uniqueSlug={uniqueSlug} onMessage={onMessage} />
+      {current ? <Editor key={current.id} episode={current} live={live.has(current.id)} data={data} surveys={surveys} onPatch={(fields) => patchEpisode(current.id, fields)} onFeatured={(on) => setEpisodes(data.episodes.map((e) => ({ ...e, featured: on && e.id === current.id })))} onDuplicate={() => duplicate(current)} onDelete={() => { if (confirm(`למחוק את "${label(current)}"?`)) removeIds([current.id]); }} onSeasons={(seasons) => change({ ...data, seasons })} uniqueSlug={uniqueSlug} onMessage={onMessage} />
         : <section className="admin-panel prog-empty"><b>♫</b><h2>בחרו תוכנית מהרשימה</h2><p className="panel-help">או לחצו „+ תוכנית חדשה”. כל שינוי נשמר מיד; כשמסיימים לוחצים „פרסום התוכניות” בתפריט.</p></section>}
     </div>
   </div>;
 }
 
 function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate, onDelete, onSeasons, uniqueSlug, onMessage }: { episode: Episode; live: boolean; data: Catalog; surveys: SurveyRow[]; onPatch(fields: Partial<Episode>): void; onFeatured(on: boolean): void; onDuplicate(): void; onDelete(): void; onSeasons(seasons: Season[]): void; uniqueSlug(base: string, self: string): string; onMessage(message: string): void }) {
-  const [audioStatus, setAudioStatus] = useState(""), [coverStatus, setCoverStatus] = useState("");
+  const [audioStatus, setAudioStatus] = useState(""), [coverStatus, setCoverStatus] = useState(""), [busy, setBusy] = useState<"" | "audio" | "cover">("");
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const historyRef = useRef<HTMLDivElement>(null);
   const [attempt, setAttempt] = useState(0), [history, setHistory] = useState<Array<{ version: Version; found: Episode | null }> | null>(null);
   const stream = streamUrl(episode);
-  const onUpload = (kind: "audio" | "cover") => async (event: ChangeEvent<HTMLInputElement>) => {
-    const input = event.currentTarget, picked = input.files?.[0]; if (!picked) return;
-    const file = kind === "cover" ? await shrinkImage(picked) : picked;
+
+  /** העלאת קובץ לתוכנית — מכפתור הבחירה או מגרירה. הקלטה עד 1GB (בחלקים), תמונה עם גרסה קטנה לכרטיסים */
+  const uploadOne = async (kind: "audio" | "cover", picked: File) => {
     const setStatus = kind === "audio" ? setAudioStatus : setCoverStatus;
-    try { const url = await upload(file, episode.id, kind, (pct) => setStatus(`מעלים את ${file.name} — ${pct}%`)); onPatch(kind === "audio" ? { audio: url, duration: 0 } : { cover: url }); setStatus(""); onMessage("הקובץ הועלה. כשתפרסמו, הוא יופיע באתר."); }
-    catch (error) { setStatus(error instanceof Error ? error.message : "ההעלאה נכשלה."); }
-    input.value = "";
+    setBusy(kind); setStatus("מתחילים להעלות…");
+    try {
+      const progress = (pct: number) => setStatus(`מעלים את ${picked.name} — ${pct}%`);
+      if (kind === "cover") onPatch(await setCover(episode, await shrinkImage(picked), progress));
+      else onPatch({ audio: await uploadFile(picked, episode.id, "audio", progress), duration: 0 });
+      setStatus(""); onMessage("הקובץ הועלה. כשתפרסמו, הוא יופיע באתר.");
+    } catch (error) { setStatus(errorText(error, "ההעלאה נכשלה.")); }
+    setBusy("");
+  };
+  const onUpload = (kind: "audio" | "cover") => async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget, picked = input.files?.[0]; input.value = ""; if (!picked) return;
+    await uploadOne(kind, picked);
+  };
+  const hasFiles = (event: DragEvent) => !!event.dataTransfer?.types?.includes("Files");
+  const onDrop = async (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault(); dragDepth.current = 0; setDragging(false);
+    for (const file of Array.from(event.dataTransfer.files)) {
+      const kind = fileKind(file);
+      if (!kind) { onMessage(`"${file.name}" אינו קובץ שמע או תמונה.`); continue; }
+      await uploadOne(kind, file);
+    }
   };
   const autoCover = async () => {
-    setCoverStatus("מציירים…");
-    try { const blob = await drawCover(episode, attempt); const url = await upload(new File([blob], `cover-${episode.slug}.jpg`, { type: "image/jpeg" }), episode.id, "cover", (pct) => setCoverStatus(`מעלים — ${pct}%`)); setAttempt(attempt + 1); onPatch({ cover: url }); setCoverStatus(""); onMessage("התמונה נוצרה. לא אהבתם? לחצו שוב לגרסה אחרת."); }
-    catch (error) { setCoverStatus(error instanceof Error ? error.message : "יצירת התמונה נכשלה."); }
+    setBusy("cover"); setCoverStatus("מציירים…");
+    try { const blob = await drawCover(episode, attempt); onPatch(await setCover(episode, blob, (pct) => setCoverStatus(`מעלים — ${pct}%`))); setAttempt(attempt + 1); setCoverStatus(""); onMessage("התמונה נוצרה. לא אהבתם? לחצו שוב לגרסה אחרת."); }
+    catch (error) { setCoverStatus(errorText(error, "יצירת התמונה נכשלה.")); }
+    setBusy("");
   };
   const share = async () => {
     const url = `${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(episode.slug)}`;
@@ -323,7 +224,7 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
         if (key !== previous) rows.push({ version, found }); previous = key;
       }
       setHistory(rows);
-    } catch (error) { setHistory(null); onMessage(error instanceof Error ? error.message : "טעינת הגרסאות נכשלה."); }
+    } catch (error) { setHistory(null); onMessage(errorText(error, "טעינת הגרסאות נכשלה.")); }
   };
   const newSeason = () => {
     const title = prompt("איך לקרוא לעונה החדשה? (למשל: עונת 2027)"); if (!title) return;
@@ -331,7 +232,12 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
     onSeasons([...data.seasons, { id, title: title.trim(), year: year ? Number(year) : null, note: "" }]); onPatch({ season: id });
   };
 
-  return <>
+  return <div className={`prog-drop${dragging ? " ready" : ""}`}
+    onDragEnter={(e) => { if (!hasFiles(e)) return; dragDepth.current++; setDragging(true); }}
+    onDragLeave={() => { if (--dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false); } }}
+    onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+    onDrop={onDrop}>
+    {dragging && <div className="prog-drop-hint" aria-hidden="true">שחררו כאן — הקלטה או תמונה לתוכנית „{label(episode)}”</div>}
     <Section title={label(episode)} aside={<div className="row-actions">
       {live ? <a href={`${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(episode.slug)}`} target="_blank" rel="noopener">צפייה באתר ↗</a> : <button type="button" onClick={() => onMessage("התוכנית עוד לא באתר. היא תופיע אחרי „פרסום התוכניות”.")}>צפייה באתר ↗</button>}
       <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={() => (history ? setHistory(null) : loadHistory())}>{history ? "הסתרת הגרסאות" : "גרסאות קודמות"}</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
@@ -343,12 +249,13 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
         <label><span>עונה</span><select value={episode.season} onChange={(e) => (e.target.value === "__new" ? newSeason() : onPatch({ season: e.target.value }))}><option value="">בלי עונה</option>{data.seasons.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}<option value="__new">+ עונה חדשה…</option></select></label>
         <label><span>אורחים</span><input value={episode.guests.join(", ")} placeholder="שמות, מופרדים בפסיק" onChange={(e) => onPatch({ guests: splitList(e.target.value) })} /></label>
         <label className="wide"><span>על התוכנית</span><textarea value={episode.description} placeholder="כמה משפטים על מה שהיה בתוכנית." onChange={(e) => onPatch({ description: e.target.value })} /></label>
-        <label><span>מקושרת למצעד (לא חובה)</span><select value={episode.surveyId} onChange={(e) => onPatch({ surveyId: e.target.value })}><option value="">בלי מצעד</option>{surveys.map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? " · הפעיל" : ""}{s.open ? " · ההצבעה פתוחה" : ""}</option>)}</select><small>דף התוכנית יציג קישור להצבעה כשהמצעד פתוח.</small></label>
+        <label><span>מקושרת למצעד (לא חובה)</span><select value={episode.surveyId} onChange={(e) => onPatch({ surveyId: e.target.value })}><option value="">בלי מצעד</option>{surveys.map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? " · הפעיל" : ""}{s.open ? " · ההצבעה פתוחה" : ""}</option>)}{episode.surveyId && !surveys.some((s) => s.id === episode.surveyId) && <option value={episode.surveyId}>מצעד שנמחק</option>}</select><small>דף התוכנית יציג קישור להצבעה כשהמצעד פתוח.</small></label>
         <label><span>פרסום מתוזמן (לא חובה)</span><input type="datetime-local" value={episode.publishAt} onChange={(e) => onPatch({ publishAt: e.target.value })} /><small>{episode.publishAt ? (scheduled(episode) ? `תופיע באתר ב־${when(episode.publishAt)}.` : "המועד עבר — מוצגת כרגיל.") : "ריק = מופיעה מיד אחרי הפרסום."}</small></label>
       </div>
       <div className="prog-switches">
         <Switch on={episode.visible} onClick={() => onPatch({ visible: !episode.visible })}>{episode.visible ? "מוצגת באתר" : "מוסתרת מהאתר"}</Switch>
         <Switch on={episode.featured} onClick={() => onFeatured(!episode.featured)}>המומלצת בדף הבית</Switch>
+        {episode.publishAt && <button type="button" onClick={() => onPatch({ publishAt: "" })}>ביטול התזמון</button>}
       </div>
       {history && <div className="prog-history" ref={historyRef}>
         <h3>גרסאות קודמות של התוכנית</h3>
@@ -358,10 +265,10 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
     </Section>
 
     <Section title="ההקלטה" aside={episode.duration ? <strong className="prog-badge">{fmtDuration(episode.duration)}</strong> : undefined}>
-      <p className={`prog-note ${stream ? "ok" : ""}`}>{stream ? "✓ יש הקלטה לתוכנית הזו. המאזינים שומעים אותה בנגן של האתר." : "עדיין אין הקלטה. העלו קובץ או הדביקו קישור."}</p>
+      <p className={`prog-note ${stream ? "ok" : ""}`}>{stream ? "✓ יש הקלטה לתוכנית הזו. המאזינים שומעים אותה בנגן של האתר." : "עדיין אין הקלטה. העלו קובץ, גררו אותו לכאן או הדביקו קישור."}</p>
       {stream && <audio className="prog-audio" controls preload="metadata" src={stream} onLoadedMetadata={(e) => { const d = e.currentTarget.duration; if (!episode.duration && Number.isFinite(d)) onPatch({ duration: Math.round(d) }); }} />}
       <div className="prog-form">
-        <div className="prog-field"><span>{stream ? "החלפת ההקלטה" : "העלאת ההקלטה"}</span><FilePick accept=".mp3,.m4a,.wav,.ogg,.flac,.aac" onChange={onUpload("audio")}>⬆ בחירת קובץ הקלטה מהמחשב</FilePick><small>{audioStatus || "קובץ שמע עד 50MB. לקובץ גדול יותר — הדביקו קישור."}</small></div>
+        <div className="prog-field"><span>{stream ? "החלפת ההקלטה" : "העלאת ההקלטה"}</span><FilePick accept=".mp3,.m4a,.wav,.ogg,.flac,.aac" disabled={busy === "audio"} onChange={onUpload("audio")}>{busy === "audio" ? "מעלים…" : "⬆ בחירת קובץ הקלטה מהמחשב"}</FilePick><small>{audioStatus || "קובץ שמע (MP3 וכו') עד 1GB — גם תוכנית של שעתיים. אפשר גם לגרור את הקובץ לכאן."}</small></div>
         <label><span>או קישור להקלטה</span><input dir="ltr" value={episode.audio} placeholder="https://…" onChange={(e) => onPatch({ audio: e.target.value, duration: 0 })} /><small>קישור שיתוף לקובץ בדרייב מספיק.</small></label>
       </div>
     </Section>
@@ -371,10 +278,10 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {episode.cover ? <img src={episode.cover} alt="" /> : <div className="prog-cover-empty">♫<small>בלי תמונה האתר מציג עטיפה צבעונית משלו</small></div>}
         <div className="prog-form single">
-          <div className="prog-field"><span>יצירת תמונה אוטומטית</span><button type="button" className="prog-primary" onClick={autoCover}>{episode.cover ? "יצירת תמונה חדשה" : "ליצור תמונה עכשיו"}</button><small>{coverStatus || "עטיפה בסגנון האתר עם שם התוכנית, המספר ומשפט מהתיאור."}</small></div>
-          <div className="prog-field"><span>או תמונה משלכם</span><FilePick accept=".jpg,.jpeg,.png,.webp" onChange={onUpload("cover")}>⬆ בחירת תמונה מהמחשב</FilePick></div>
-          <label><span>או קישור לתמונה</span><input dir="ltr" value={episode.cover} placeholder="https://…" onChange={(e) => onPatch({ cover: e.target.value })} /></label>
-          {episode.cover && <button type="button" className="danger" onClick={() => onPatch({ cover: "" })}>הסרת התמונה</button>}
+          <div className="prog-field"><span>יצירת תמונה אוטומטית</span><button type="button" className="prog-primary" disabled={busy === "cover"} onClick={autoCover}>{episode.cover ? "יצירת תמונה חדשה" : "ליצור תמונה עכשיו"}</button><small>{coverStatus || "עטיפה בסגנון האתר עם שם התוכנית, המספר ומשפט מהתיאור."}</small></div>
+          <div className="prog-field"><span>או תמונה משלכם</span><FilePick accept=".jpg,.jpeg,.png,.webp" disabled={busy === "cover"} onChange={onUpload("cover")}>{busy === "cover" ? "מעלים…" : "⬆ בחירת תמונה מהמחשב"}</FilePick><small>או גררו תמונה לכאן. נשמרת גם גרסה קטנה לכרטיסים.</small></div>
+          <label><span>או קישור לתמונה</span><input dir="ltr" value={episode.cover} placeholder="https://…" onChange={(e) => onPatch({ cover: e.target.value, thumb: "" })} /></label>
+          {episode.cover && <button type="button" className="danger" onClick={() => onPatch({ cover: "", thumb: "" })}>הסרת התמונה</button>}
         </div>
       </div>
     </Section>
@@ -390,15 +297,18 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
         </div>
       </div>
     </details>
-  </>;
+
+    {stream && <AiCard episode={episode} onPatch={onPatch} onMessage={onMessage} />}
+  </div>;
 }
 
 /* ======================= 2. הודעה ועדכונים ======================= */
 
 function SiteSection({ data, change, onMessage }: Common) {
-  const banner = data.settings.banner, updates = data.settings.updates;
+  const banner = data.settings.banner, updates = data.settings.updates, contacts = data.settings.contacts;
   const setBanner = (fields: Partial<Banner>) => change({ ...data, settings: { ...data.settings, banner: { ...banner, ...fields } } });
   const setUpdates = (next: Update[]) => change({ ...data, settings: { ...data.settings, updates: next } });
+  const setContacts = (fields: Partial<Contacts>) => change({ ...data, settings: { ...data.settings, contacts: { ...contacts, ...fields } } });
   const counts = data.episodes.reduce<Record<string, number>>((acc, e) => { acc[e.season] = (acc[e.season] || 0) + 1; return acc; }, {});
   const setSeason = (i: number, fields: Partial<Season>) => change({ ...data, seasons: data.seasons.map((s, j) => (j === i ? { ...s, ...fields } : s)) });
   return <>
@@ -425,6 +335,18 @@ function SiteSection({ data, change, onMessage }: Common) {
       </article>)}{!updates.length && <p className="panel-help">עדיין אין עדכונים.</p>}</div>
     </Section>
 
+    <Section title="פרטי קשר">
+      <p className="panel-help">מה שמופיע בדף הבית של אתר התוכניות בכרטיסים „גם בטלפון” ו„הקול שלכם”. שדה ריק לא מוצג. מתפרסם יחד עם התוכניות.</p>
+      <div className="prog-form">
+        <label><span>טלפון ראשי</span><input dir="ltr" inputMode="tel" maxLength={30} value={contacts.phone} onChange={(e) => setContacts({ phone: e.target.value })} /></label>
+        <label><span>טלפון נוסף</span><input dir="ltr" inputMode="tel" maxLength={30} value={contacts.phone2} onChange={(e) => setContacts({ phone2: e.target.value })} /></label>
+        <label className="wide"><span>מה יש בקו (השלוחות)</span><textarea maxLength={500} value={contacts.phoneNote} onChange={(e) => setContacts({ phoneNote: e.target.value })} /></label>
+        <label className="wide"><span>איך מדברים עם המגישים</span><textarea maxLength={500} value={contacts.hostsNote} onChange={(e) => setContacts({ hostsNote: e.target.value })} /></label>
+        <label><span>מייל (לתפוצה ולצ׳אט)</span><input dir="ltr" type="email" maxLength={120} value={contacts.email} onChange={(e) => setContacts({ email: e.target.value })} /></label>
+        <label><span>הערה להצטרפות לצ׳אט</span><input maxLength={500} value={contacts.chatNote} onChange={(e) => setContacts({ chatNote: e.target.value })} /></label>
+      </div>
+    </Section>
+
     <Section title="עונות" aside={<strong className="prog-badge">{data.seasons.length}</strong>}>
       <p className="panel-help">עונה היא קבוצה של תוכניות — לפי שנה, תקופה או מגישים. בארכיון אפשר לסנן לפי עונה. מחיקת עונה לא מוחקת תוכניות.</p>
       <div className="prog-seasons">{data.seasons.map((s, i) => <div key={s.id}><input value={s.title} placeholder="שם העונה" onChange={(e) => setSeason(i, { title: e.target.value })} /><input type="number" value={s.year ?? ""} placeholder="שנה" onChange={(e) => setSeason(i, { year: e.target.value ? Number(e.target.value) : null })} /><input value={s.note} placeholder="הערה" onChange={(e) => setSeason(i, { note: e.target.value })} /><small>{counts[s.id] || 0} תוכניות</small><button type="button" className="danger" onClick={() => { if (confirm(`למחוק את העונה "${s.title}"?`)) change({ ...data, seasons: data.seasons.filter((_, j) => j !== i), episodes: data.episodes.map((e) => (e.season === s.id ? { ...e, season: "" } : e)) }); }}>✕</button></div>)}</div>
@@ -435,18 +357,25 @@ function SiteSection({ data, change, onMessage }: Common) {
 
 /* ======================= 3. מאזינים ======================= */
 
+type CommentsState = { comments: Comment[]; pending: number; error: string };
+
 function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(message: string): void }) {
   const [stats, setStats] = useState<Stats | null>(null), [messages, setMessages] = useState<{ messages: Message[]; unread: number } | null>(null), [subs, setSubs] = useState<{ active: number; fromProgram: number } | null>(null);
+  const [comments, setComments] = useState<CommentsState | null>(null), [pushCount, setPushCount] = useState<number | null>(null);
   const [error, setError] = useState(""), [tick, setTick] = useState(0);
   useEffect(() => {
     let active = true;
-    Promise.all([api<Stats>("/api/program/stats"), api<{ messages: Message[]; unread: number }>("/api/program/messages"), api<{ active: number; fromProgram: number }>("/api/program/subscribers/count").catch(() => null)])
-      .then(([s, m, c]) => { if (active) { setStats(s); setMessages(m); setSubs(c); setError(""); } })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "הטעינה נכשלה."); });
+    Promise.all([
+      api<Stats>("/api/program/stats"), api<{ messages: Message[]; unread: number }>("/api/program/messages"), api<{ active: number; fromProgram: number }>("/api/program/subscribers/count").catch(() => null),
+      api<{ comments: CommentsState["comments"]; pending: number }>("/api/program/comments/all?status=all").then((r) => ({ ...r, error: "" })).catch((cause) => ({ comments: [], pending: 0, error: commentsError(cause) })),
+      api<{ total: number }>("/api/program/push/count").then((r) => Number(r.total) || 0).catch(() => null),
+    ])
+      .then(([s, m, c, cm, p]) => { if (active) { setStats(s); setMessages(m); setSubs(c); setComments(cm); setPushCount(p); setError(""); } })
+      .catch((cause) => { if (active) setError(errorText(cause, "הטעינה נכשלה.")); });
     return () => { active = false; };
   }, [tick]);
   const name = (id: string | null) => { const e = data.episodes.find((x) => x.id === id); return e ? label(e) : "תוכנית שנמחקה"; };
-  const act = async (path: string, init: RequestInit) => { try { await api(path, init); setTick((v) => v + 1); } catch (cause) { onMessage(cause instanceof Error ? cause.message : "הפעולה נכשלה."); } };
+  const act = async (path: string, init: RequestInit) => { try { await api(path, init); setTick((v) => v + 1); } catch (cause) { onMessage(errorText(cause, "הפעולה נכשלה.")); } };
   if (error) return <Section title="מאזינים"><p className="panel-help">{error}</p></Section>;
   if (!stats || !messages) return <Section title="מאזינים"><p className="panel-help">טוענים…</p></Section>;
   const max = Math.max(1, ...stats.days.map((d) => Number(d.plays) || 0));
@@ -460,6 +389,7 @@ function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(messag
         <div><h3>הכי נשמעות מאז ומעולם</h3><ol className="prog-top">{stats.episodes.slice(0, 10).map((r) => <li key={r.id}><span>{name(r.id)}</span><b>{n2(r.plays)}</b></li>)}</ol></div>
       </div>
       <p className="panel-help">מכשירים החודש: טלפון {n2(stats.devices.phone)} · מחשב {n2(stats.devices.desktop)}. הספירה אנונימית.</p>
+      <DeepStats stats={stats} data={data} />
     </Section>
     <Section title="הודעות מהמאזינים" aside={messages.unread ? <strong className="prog-badge warn">{messages.unread} חדשות</strong> : undefined}>
       {messages.messages.length ? <div className="prog-messages">{messages.messages.map((m) => <article key={m.id} className={m.readAt ? "" : "unread"}>
@@ -468,6 +398,8 @@ function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(messag
         <div className="row-actions"><button type="button" onClick={() => act("/api/program/messages/read", { method: "POST", body: JSON.stringify({ id: m.id, read: !m.readAt }) })}>{m.readAt ? "סימון כלא נקרא" : "✓ נקרא"}</button>{m.email && <a href={`mailto:${m.email}?subject=${encodeURIComponent("תשובה מראש בראש")}`}>תשובה במייל</a>}<button type="button" className="danger" onClick={() => { if (confirm("למחוק את ההודעה?")) act("/api/program/messages", { method: "DELETE", body: JSON.stringify({ id: m.id }) }); }}>מחיקה</button></div>
       </article>)}</div> : <p className="panel-help">עדיין לא הגיעו הודעות. המאזינים כותבים דרך „כתבו לנו” באתר התוכניות.</p>}
     </Section>
+    <CommentsCard data={data} comments={comments} onChange={setComments} onMessage={onMessage} />
+    <PushCard data={data} count={pushCount} onCount={setPushCount} onMessage={onMessage} />
     {subs && <Section title="רשימת התפוצה"><p className="panel-help">{n2(subs.active)} נרשמים פעילים, מהם {n2(subs.fromProgram)} דרך אתר התוכניות. הרשימה המלאה בלשונית „רשימת תפוצה”.</p></Section>}
   </>;
 }
@@ -475,45 +407,66 @@ function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(messag
 /* ======================= 4. פרסום ======================= */
 
 type Changes = { added: number; changed: number; removed: Episode[]; seasons: boolean; settings: boolean; any: boolean } | null;
+type Conflict = { who: string };
+/** קבוצות בבדיקת התקינות: שם, והעבודה שמתקנת את כולן בלחיצה אחת */
+const HEALTH_GROUPS: Array<{ key: string; title: string; hint: string; test(e: Episode): boolean; fix?: string; fixLabel?: string; confirm?(n: number): string }> = [
+  { key: "noaudio", title: "תוכניות בלי הקלטה", hint: "המאזינים לא יוכלו לשמוע אותן", test: (e) => !streamUrl(e) },
+  { key: "noduration", title: "תוכניות בלי אורך", hint: "האורך נקרא מהקובץ עצמו", test: (e) => !!streamUrl(e) && !e.duration, fix: "fill-durations", fixLabel: "מילוי האורך לכולן" },
+  { key: "nocover", title: "תוכניות בלי תמונה", hint: "האתר מציג להן עטיפה צבעונית; אפשר ליצור תמונה בלחיצה", test: (e) => !e.cover, fix: "covers-all", fixLabel: "יצירת תמונה לכולן", confirm: (n) => `ליצור תמונה אוטומטית ל־${n} תוכניות בלי תמונה?` },
+  { key: "nothumb", title: "תוכניות בלי תמונה קטנה לכרטיסים", hint: "הארכיון ודף הבית ייטענו מהר יותר עם גרסה של 640 פיקסלים", test: (e) => !!e.cover && !e.thumb, fix: "thumbs-all", fixLabel: "יצירת תמונות קטנות" },
+  { key: "nodesc", title: "תוכניות בלי תיאור אמיתי", hint: "ה־AI מתמלל את ההקלטה וכותב תיאור וסיכום", test: (e) => !!streamUrl(e) && !hasRealDescription(e), fix: "ai-all", fixLabel: "תיאור אוטומטי מהתמלול", confirm: () => "לתמלל ולכתוב תיאור וסיכום לכל התוכניות בלי תיאור אמיתי? זה לוקח כמה דקות לכל תוכנית, ואפשר לעצור באמצע." },
+  { key: "nodate", title: "תוכניות בלי תאריך", hint: "הן יופיעו בסוף הארכיון", test: (e) => !e.date },
+  { key: "schedhidden", title: "מתוזמנות אבל מוסתרות", hint: "המועד עבר, אבל התוכנית עדיין מוסתרת", test: (e) => !!e.publishAt && !scheduled(e) && !e.visible },
+];
 
-function PublishSection({ data, change, onMessage, origin, changes, onPublished, onDiscard }: Common & { origin: Catalog; changes: Changes; onPublished(published: Catalog): void; onDiscard(): void }) {
+function HealthGroup({ group, items, onFix }: { group: typeof HEALTH_GROUPS[number]; items: Episode[]; onFix(): void }) {
+  const job = useJob(group.fix || "");
+  return <details><summary><b>{items.length}</b><span>{group.title}</span><small>{group.hint}</small>
+    {group.fix && (job?.running ? <span className="prog-job"><Status text={job.text} /><button type="button" onClick={(e) => { e.preventDefault(); stopJob(group.fix!); }}>עצירה</button></span> : <button type="button" className="prog-btn" onClick={(e) => { e.preventDefault(); onFix(); }}>{group.fixLabel}</button>)}
+  </summary><ul className="prog-problems">{items.slice(0, 120).map((e) => <li key={e.id}>{label(e)}</li>)}{items.length > 120 && <li>ועוד {items.length - 120}…</li>}</ul></details>;
+}
+
+function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin, changes, base, onOpen, onPublished, onDiscard }: Common & { origin: Catalog; changes: Changes; base: { current: string | null }; onOpen(id: string | null): void; onPublished(published: Catalog, versionId: string | null): void; onDiscard(): void }) {
   const [busy, setBusy] = useState(false), [versions, setVersions] = useState<Version[] | null>(null), [preview, setPreview] = useState("");
+  const [notify, setNotify] = useState(true), [conflict, setConflict] = useState<Conflict | null>(null);
   const [checks, setChecks] = useState<Record<string, { running: boolean; done: number; total: number; problems: Array<{ id: string; text: string }> }>>({});
   const [migrate, setMigrate] = useState<{ running: boolean; done: number; total: number; moved: number; had: number; failed: string[] } | null>(null);
   const stopMigrate = useRef(false), fileInput = useRef<HTMLInputElement>(null);
 
   const health = useMemo(() => {
-    const must: Array<{ id: string; text: string }> = [], should: Array<{ id: string; text: string }> = [], dup: string[] = [];
-    const byNumber = new Map<number, Episode[]>(), byDrive = new Map<string, Episode[]>();
+    const must: Array<{ id: string; text: string }> = [], dup: string[] = [];
+    const byNumber = new Map<number, Episode[]>(), byTitle = new Map<string, Episode[]>(), byDrive = new Map<string, Episode[]>();
     for (const e of data.episodes) {
-      if (!e.title.trim()) must.push({ id: e.id, text: `תוכנית בלי שם${e.number != null ? ` (תוכנית ${e.number})` : ""}` });
-      if (!streamUrl(e)) should.push({ id: e.id, text: `"${label(e)}" בלי הקלטה` });
-      if (!e.cover) should.push({ id: e.id, text: `"${label(e)}" בלי תמונה` });
-      if (!e.date) should.push({ id: e.id, text: `"${label(e)}" בלי תאריך` });
+      if (!e.title.trim()) must.push({ id: e.id, text: `תוכנית בלי שם${e.number != null ? ` (תוכנית ${e.number})` : ""}${e.date ? ` מתאריך ${fmtDate(e.date)}` : ""}` });
       if (e.number != null) byNumber.set(e.number, [...(byNumber.get(e.number) || []), e]);
+      const t = e.title.trim().toLowerCase(); if (t) byTitle.set(t, [...(byTitle.get(t) || []), e]);
       const d = driveId(e); if (d) byDrive.set(d, [...(byDrive.get(d) || []), e]);
     }
     for (const [n, l] of byNumber) if (l.length > 1) dup.push(`${l.length} תוכניות עם המספר ${n}: ${l.map(label).join(", ")}`);
+    for (const [, l] of byTitle) if (l.length > 1) dup.push(`${l.length} תוכניות בשם "${label(l[0])}"`);
     for (const [, l] of byDrive) if (l.length > 1) dup.push(`אותה הקלטה ב־${l.length} תוכניות: ${l.map(label).join(", ")}`);
-    const groups = [
-      { key: "audio", title: "תוכניות בלי הקלטה", hint: "המאזינים לא יוכלו לשמוע אותן", items: data.episodes.filter((e) => !streamUrl(e)) },
-      { key: "date", title: "תוכניות בלי תאריך", hint: "הן יופיעו בסוף הארכיון", items: data.episodes.filter((e) => !e.date) },
-      { key: "cover", title: "תוכניות בלי תמונה", hint: "האתר מציג להן עטיפה צבעונית; אפשר ליצור תמונה בלחיצה", items: data.episodes.filter((e) => !e.cover) },
-    ].filter((g) => g.items.length);
-    return { must, should, dup, groups };
+    const groups = HEALTH_GROUPS.map((g) => ({ group: g, items: data.episodes.filter(g.test) })).filter((g) => g.items.length);
+    return { must, dup, groups };
   }, [data.episodes]);
 
-  const publish = async () => {
+  /* ---------- פרסום: עם הגנה מדריסה (baseVersion), התראה למאזינים, ושליחת ההתראות במנות ---------- */
+  const publish = async (force = false) => {
     if (health.must.length) return onMessage(health.must[0].text);
-    setBusy(true); onMessage("מפרסמים…");
+    setBusy(true); setConflict(null); onMessage("מפרסמים…");
     try {
       const removedIds = origin.episodes.filter((o) => !data.episodes.some((e) => e.id === o.id)).map((o) => o.id);
-      await api("/api/program/catalog", { method: "POST", body: JSON.stringify({ seasons: data.seasons, episodes: data.episodes.map((e) => normEpisode(e, 0)), removedIds, settings: data.settings }) });
-      onPublished(normCatalog(JSON.parse(JSON.stringify(data)))); setVersions(null); onMessage("פורסם! אתר התוכניות מציג עכשיו את הגרסה החדשה.");
-    } catch (error) { onMessage(error instanceof Error ? error.message : "הפרסום נכשל."); }
-    finally { setBusy(false); }
+      const r = await api<{ versionId?: string; notified?: number }>("/api/program/catalog", { method: "POST", body: JSON.stringify({ seasons: data.seasons, episodes: data.episodes.map((e) => normEpisode(e, 0)), removedIds, settings: data.settings, baseVersion: base.current ?? null, force, notify }) });
+      onPublished(normCatalog(JSON.parse(JSON.stringify(data))), r.versionId ?? null); setVersions(null); onMessage("פורסם! אתר התוכניות מציג עכשיו את הגרסה החדשה.");
+      if (notify && r.notified) drainPush().then((n) => { if (n) onMessage(n === 1 ? "נשלחה התראה למכשיר אחד." : `נשלחה התראה ל־${n} מכשירים.`); });
+    } catch (error) {
+      const e = error as ApiError;
+      if (e.conflict) {
+        // מנהל אחר פרסם אחרי שהתחלתם לערוך — לא דורסים בלי לשאול
+        setConflict({ who: e.latest?.by ? ` (${e.latest.by}${e.latest.createdAt ? `, ${when(e.latest.createdAt)}` : ""})` : "" });
+      } else onMessage(`הפרסום לא הצליח: ${errorText(error, "")}`);
+    } finally { setBusy(false); }
   };
-  const discard = async () => { if (!confirm("לבטל את כל השינויים שלא פורסמו?")) return; try { await api("/api/program/draft", { method: "DELETE" }); onDiscard(); onMessage("השינויים בוטלו."); } catch (error) { onMessage(error instanceof Error ? error.message : "הביטול נכשל."); } };
+  const discard = async () => { if (!confirm("לבטל את כל השינויים שלא פורסמו?")) return; try { await api("/api/program/draft", { method: "DELETE" }); onDiscard(); onMessage("השינויים בוטלו."); } catch (error) { onMessage(errorText(error, "הביטול נכשל.")); } };
   const runCheck = async (kind: "audio" | "media") => {
     const items = kind === "audio" ? data.episodes.filter((e) => streamUrl(e)).map((e) => ({ e, url: streamUrl(e), what: "ההקלטה", img: false }))
       : data.episodes.flatMap((e) => [...(e.cover ? [{ e, url: e.cover, what: "התמונה", img: true }] : []), ...e.links.filter((l) => !/drive\.google|docs\.google/.test(l.url)).map((l) => ({ e, url: l.url, what: `הקישור "${l.label}"`, img: false }))]);
@@ -528,13 +481,13 @@ function PublishSection({ data, change, onMessage, origin, changes, onPublished,
     await Promise.all([worker(), worker(), worker()]);
     setChecks((c) => ({ ...c, [kind]: { ...state, running: false, problems: [...state.problems] } }));
   };
-  const loadVersions = async () => { try { setVersions((await api<{ versions: Version[] }>("/api/program/versions")).versions); } catch (error) { onMessage(error instanceof Error ? error.message : "הטעינה נכשלה."); } };
+  const loadVersions = async () => { try { setVersions((await api<{ versions: Version[] }>("/api/program/versions")).versions); } catch (error) { onMessage(errorText(error, "הטעינה נכשלה.")); } };
   const restoreVersion = async (version: Version) => {
     if (!confirm(`לשחזר את הגרסה מ־${when(version.createdAt)}? כל מה שבטיוטה יוחלף. אחר כך מפרסמים.`)) return;
     try { const { data: snapshot } = await api<{ data: Record<string, unknown> }>(`/api/program/versions/${version.id}`); const restored = normCatalog(snapshot); change(snapshot.settings ? restored : { ...restored, settings: data.settings }); onMessage("הגרסה שוחזרה לטיוטה. בדקו ופרסמו."); }
-    catch (error) { onMessage(error instanceof Error ? error.message : "השחזור נכשל."); }
+    catch (error) { onMessage(errorText(error, "השחזור נכשל.")); }
   };
-  const makePreview = async () => { try { await api("/api/program/draft", { method: "PUT", body: JSON.stringify({ data }) }); const { preview: p } = await api<{ preview: { token: string } }>("/api/program/preview", { method: "POST" }); setPreview(`${PROGRAM_SITE}index.html?preview=${p.token}`); } catch (error) { onMessage(error instanceof Error ? error.message : "יצירת הקישור נכשלה."); } };
+  const makePreview = async () => { try { await api("/api/program/draft", { method: "PUT", body: JSON.stringify({ data: { ...data, baseVersion: base.current } }) }); const { preview: p } = await api<{ preview: { token: string } }>("/api/program/preview", { method: "POST" }); setPreview(`${PROGRAM_SITE}index.html?preview=${p.token}`); } catch (error) { onMessage(errorText(error, "יצירת הקישור נכשלה.")); } };
   const backup = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, updated: today(), seasons: data.seasons, episodes: data.episodes, settings: data.settings }, null, 2)], { type: "application/json" })); a.download = `rosh-berosh-programs-${today()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
   const restoreFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (!file) return;
@@ -549,10 +502,20 @@ function PublishSection({ data, change, onMessage, origin, changes, onPublished,
     for (const e of episodes) {
       if (stopMigrate.current) break;
       try { const r = await api<{ status: string }>("/api/program/import-drive", { method: "POST", body: JSON.stringify({ episodeId: e.id, driveId: driveId(e), expectedSize: Number(e.sourceFileBytes) || 0 }) }); if (r.status === "existing") state.had++; else state.moved++; }
-      catch (error) { state.failed.push(`${label(e)}: ${error instanceof Error ? error.message : "נכשל"}`); }
+      catch (error) { state.failed.push(`${label(e)}: ${errorText(error, "נכשל")}`); }
       state.done++; setMigrate({ ...state, failed: [...state.failed] });
     }
     setMigrate({ ...state, running: false, failed: [...state.failed] });
+  };
+
+  /* ---------- עבודות על הרבה תוכניות: כל תוצאה נכנסת לטיוטה, ולאתר רק בפרסום ---------- */
+  const runFix = (fix: string, items: Episode[]) => {
+    const group = HEALTH_GROUPS.find((g) => g.fix === fix);
+    if (group?.confirm && !confirm(group.confirm(items.length))) return;
+    if (fix === "fill-durations") runJob(fix, items, async (e) => { const duration = await measureDuration(streamUrl(e)); patchEpisode(e.id, { duration }); }, { concurrency: 3, what: "אורכים" }, onMessage);
+    else if (fix === "covers-all") runJob(fix, items, async (e) => { patchEpisode(e.id, await setCover(e, await drawCover(e, 0))); }, { concurrency: 2, what: "תמונות" }, onMessage);
+    else if (fix === "thumbs-all") runJob(fix, items, async (e) => { const thumb = await uploadFile(new File([await makeThumb(e.cover)], `cover-${e.slug || e.id}-small.jpg`, { type: "image/jpeg" }), e.id, "cover"); patchEpisode(e.id, { thumb }); }, { concurrency: 2, what: "תמונות קטנות" }, onMessage);
+    else if (fix === "ai-all") runJob(fix, items, async (e) => { const summary = await aiRun(e.id); patchEpisode(e.id, (current) => summaryPatch(current, summary)); }, { what: "תיאורים" }, onMessage);
   };
 
   const list: string[] = [];
@@ -560,22 +523,31 @@ function PublishSection({ data, change, onMessage, origin, changes, onPublished,
   if (changes?.changed) list.push(changes.changed === 1 ? "תוכנית אחת עודכנה" : `${changes.changed} תוכניות עודכנו`);
   if (changes?.removed.length) list.push(changes.removed.length === 1 ? `תוכנית אחת תימחק מהאתר (${label(changes.removed[0])})` : `${changes.removed.length} תוכניות יימחקו מהאתר`);
   if (changes?.seasons) list.push("העונות השתנו");
-  if (changes?.settings) list.push("ההודעה או העדכונים השתנו");
+  if (changes?.settings) list.push("ההודעה, העדכונים או פרטי הקשר השתנו");
   const check = (kind: "audio" | "media", title: string, hint: string) => { const r = checks[kind]; return <article><div><span><b>{title}</b><small>{r ? (r.running ? `בודקים… ${r.done}/${r.total}` : r.problems.length ? `${r.problems.length} בעיות:` : `✓ הכול תקין (${r.total} נבדקו)`) : hint}</small>{r && !r.running && !!r.problems.length && <ul className="prog-problems">{r.problems.map((p, i) => <li key={i}>{p.text}</li>)}</ul>}</span></div><button type="button" className="prog-btn" disabled={r?.running} onClick={() => runCheck(kind)}>{r?.running ? "בודקים…" : r ? "↻ בדיקה חוזרת" : "▶ להתחיל בדיקה"}</button></article>; };
 
   return <>
     <Section title={changes?.any ? "יש שינויים שמחכים לפרסום" : "הכול מפורסם"}>
       <p className="panel-help">{changes?.any ? "עד הפרסום, השינויים נראים רק כאן (ולמי שקיבל קישור תצוגה מקדימה)." : "אתר התוכניות מציג בדיוק את מה שיש כאן."}</p>
       {!!list.length && <ul className="prog-changes">{list.map((x) => <li key={x}>{x}</li>)}</ul>}
-      {!!health.must.length && <div className="prog-must"><b>לפני שמפרסמים, צריך לתקן:</b><ul>{health.must.map((p) => <li key={p.id}>{p.text}</li>)}</ul></div>}
-      <div className="row-actions">{changes?.any ? <><button type="button" className="prog-primary big" disabled={!!health.must.length || busy} onClick={publish}>{busy ? "מפרסמים…" : "פרסום לאתר התוכניות ←"}</button><button type="button" onClick={discard}>ביטול כל השינויים</button></> : <span className="prog-done">✓ אין שינויים שמחכים לפרסום</span>}</div>
+      {!!health.must.length && <div className="prog-must"><b>לפני שמפרסמים, צריך לתקן:</b><ul>{health.must.map((p) => <li key={p.id}><button type="button" className="prog-link" onClick={() => onOpen(p.id)}>{p.text}</button></li>)}</ul></div>}
+      <div className="row-actions">{changes?.any ? <><button type="button" className="prog-primary big" disabled={!!health.must.length || busy} onClick={() => publish(false)}>{busy ? "מפרסמים…" : "פרסום לאתר התוכניות ←"}</button><button type="button" onClick={discard}>ביטול כל השינויים</button></> : <span className="prog-done">✓ אין שינויים שמחכים לפרסום</span>}</div>
+      {!!changes?.added && <label className="prog-check"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> לשלוח התראה לטלפון של המאזינים על התוכניות החדשות</label>}
+      {conflict && <div className="prog-conflict" role="alertdialog" aria-labelledby="prog-conflict-title">
+        <h3 id="prog-conflict-title">מנהל אחר פרסם בינתיים</h3>
+        <p>מאז שהתחלתם לערוך, מישהו אחר פרסם גרסה חדשה לאתר{conflict.who}. אם תפרסמו עכשיו, השינויים שלו יימחקו ויוחלפו בטיוטה שלכם.</p>
+        <p>מומלץ: לפתוח את „גרסאות קודמות” למטה, לראות מה השתנה, ולהעתיק לטיוטה רק את מה שצריך.</p>
+        <div className="row-actions"><button type="button" onClick={() => setConflict(null)}>ביטול — לא לפרסם</button><button type="button" className="danger" disabled={busy} onClick={() => publish(true)}>לפרסם בכל זאת ולדרוס</button></div>
+      </div>}
     </Section>
 
     <Section title="בדיקת תקינות" aside={<strong className="prog-badge">{health.groups.length + health.dup.length ? `${health.groups.length + health.dup.length} נושאים` : "✓ תקין"}</strong>}>
       {health.dup.length > 0 && <div className="prog-must soft"><b>כפילויות:</b><ul>{health.dup.map((d) => <li key={d}>{d}</li>)}</ul></div>}
-      {health.groups.length ? <><div className="prog-groups">{health.groups.map((g) => <details key={g.key}><summary><b>{g.items.length}</b><span>{g.title}</span><small>{g.hint}</small></summary><ul className="prog-problems">{g.items.map((e) => <li key={e.id}>{label(e)}</li>)}</ul></details>)}</div><p className="panel-help">אלה הצעות בלבד — הן לא חוסמות פרסום. לחיצה על שורה מציגה את התוכניות.</p></> : <p className="panel-help">✓ לכל התוכניות יש שם, תאריך, הקלטה ותמונה.</p>}
+      {health.groups.length ? <><div className="prog-groups">{health.groups.map(({ group, items }) => <HealthGroup key={group.key} group={group} items={items} onFix={() => runFix(group.fix!, items)} />)}</div><p className="panel-help">אלה הצעות בלבד — הן לא חוסמות פרסום. לחיצה על שורה מציגה את התוכניות; הכפתור לצדה מתקן את כולן בבת אחת (ברקע, ואפשר לעצור).</p></> : <p className="panel-help">✓ לכל התוכניות יש שם, תאריך, תיאור, הקלטה, אורך ותמונה, ואין כפילויות.</p>}
       <div className="admin-list">{check("audio", "בדיקת ההקלטות", "עובר על כל ההקלטות ומוודא שהן נטענות בנגן.")}{check("media", "בדיקת תמונות וקישורים", "מוודא שהתמונות נטענות ושהקישורים עונים.")}</div>
     </Section>
+
+    <ProofreadCard data={data} origin={origin} mutate={mutate} onMessage={onMessage} onOpen={onOpen} />
 
     <Section title="גרסאות קודמות" aside={<button type="button" className="prog-btn" onClick={loadVersions}>{versions ? "↻ רענון" : "הצגת הגרסאות"}</button>}>
       <p className="panel-help">כל פרסום נשמר אוטומטית. שחזור מחזיר גרסה לטיוטה, ואז מפרסמים. גם הגיבוי של לשונית „ארכיון וגיבויים” כולל את אתר התוכניות.</p>
@@ -593,4 +565,3 @@ function PublishSection({ data, change, onMessage, origin, changes, onPublished,
     </details>
   </>;
 }
-

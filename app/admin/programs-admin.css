@@ -104,3 +104,41 @@
 .prog-badge.ok{background:#e8f7f2;color:#137861}.prog-badge.off{background:#f1efe9;color:#7d7450}
 .prog-admin .admin-list article{gap:16px}.prog-admin .admin-list article>div{flex:1;min-width:0}
 @media(max-width:700px){.prog-groups ul{columns:1}.prog-admin .admin-list article{flex-wrap:wrap}}
+
+/* ---------- מצב, שגיאות ותוצאות של פעולות ארוכות (העלאה, תמלול, עבודות) ---------- */
+.prog-progress{display:inline-flex;align-items:center;gap:8px;margin:0;color:#806515;font-weight:750}
+.prog-progress i{width:14px;height:14px;border:2px solid #d7bc71;border-top-color:#806515;border-radius:50%;animation:prog-spin .8s linear infinite}
+@keyframes prog-spin{to{transform:rotate(360deg)}}
+.prog-error{display:block;margin:0;padding:10px 14px;border:1px solid #eab4ca;border-radius:12px;background:#fff6f9;color:#bc3d72;font-weight:750;white-space:pre-line}
+.prog-hint{color:var(--muted);font-size:12px}
+.prog-pre{white-space:pre-line;line-height:1.7}
+.prog-link{padding:0!important;border:0!important;min-height:0!important;box-shadow:none!important;background:none!important;color:#2b3a7a!important;font-weight:800;text-decoration:underline;cursor:pointer}
+.prog-select{width:100%;height:42px;padding:0 12px;border:1px solid #dcd4b8;border-radius:11px;background:#fff;color:var(--text);font:inherit}
+
+/* ---------- AI: תיאור, סיכום, הצעות לשם, תמלול והגהה ---------- */
+.prog-ai-result{display:grid;gap:8px;padding:14px 16px;border:1px solid #d7bc71;border-radius:14px;background:#fcf8ec}.prog-ai-result p{margin:0;line-height:1.7}
+.prog-chips{display:flex;flex-wrap:wrap;gap:8px}
+.prog-chip{padding:8px 14px;border:1px solid #cdb97a;border-radius:99px;background:#fff;color:#5c4a12;font:inherit;font-size:14px;font-weight:750;cursor:pointer}.prog-chip:hover{background:#f7edcf}.prog-chip.static{cursor:default;background:#fff0f5;border-color:#eab4ca;color:#bc3d72}
+.prog-transcript{border:1px solid #e4d8c4;border-radius:12px;background:#fcfaf6}.prog-transcript summary{padding:12px 14px;font-weight:800;color:#806515;cursor:pointer}.prog-transcript .prog-pre{max-height:360px;overflow:auto;padding:0 14px 14px;color:#4b4234;font-size:14px}
+.prog-proof{margin:0;padding:0;list-style:none;display:grid;gap:10px}.prog-proof li{display:grid;gap:8px;padding:12px 14px;border:1px solid #eee7f0;border-radius:13px;background:#fbfafc}
+.prog-proof-changes{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}.prog-proof-changes del{color:#bc3d72;background:#fff0f5;text-decoration:line-through;padding:0 4px;border-radius:4px}.prog-proof-changes ins{color:#137861;background:#e8f7f2;text-decoration:none;padding:0 4px;border-radius:4px}
+
+/* ---------- גרירת קובץ לטופס התוכנית ---------- */
+.prog-drop{position:relative;display:grid;gap:16px;min-width:0;border-radius:20px}
+.prog-drop.ready{outline:3px dashed #b89530;outline-offset:6px}
+.prog-drop-hint{position:sticky;top:12px;z-index:2;padding:14px 18px;border-radius:14px;background:#2b3a7a;color:#fff;font-weight:800;text-align:center;box-shadow:0 10px 30px rgba(43,58,122,.3);pointer-events:none}
+.prog-file.busy{opacity:.6;cursor:default}
+
+/* ---------- פרסום: התנגשות בין מנהלים, עבודות ברקע ---------- */
+.prog-conflict{display:grid;gap:8px;padding:16px 18px;border:2px solid #eab4ca;border-radius:14px;background:#fff6f9}.prog-conflict h3{margin:0;color:#bc3d72}.prog-conflict p{margin:0;line-height:1.7;color:#4b4234}
+.prog-job{display:inline-flex;align-items:center;gap:10px}
+.prog-groups summary .prog-btn,.prog-groups summary .prog-job{margin-inline-start:auto}
+.prog-groups summary .prog-btn+*,.prog-groups summary::after{margin-inline-start:0}
+
+/* ---------- מאזינים: מקורות, שעות, שימור, רגעים, תגובות ---------- */
+.prog-hbars{display:grid;gap:6px}.prog-hbars>div{display:grid;grid-template-columns:150px 1fr 50px;align-items:center;gap:10px;font-size:14px}.prog-hbars i{display:block;height:14px;min-width:3px;border-radius:7px;background:linear-gradient(90deg,#b89530,#d9b85c)}.prog-hbars b{color:#137861;text-align:left;direction:ltr}
+.prog-bars.pink i{background:linear-gradient(180deg,#e58cb1,#bc3d72)}
+.prog-segmented{display:flex;flex-wrap:wrap;gap:6px}.prog-segmented button[aria-pressed=true]{border-color:#b89530!important;background:#f2e8cc!important;color:#5c4a12!important}
+.prog-reply{width:100%;min-height:70px;padding:9px 12px;border:1px solid #dcd4b8;border-radius:11px;background:#fff;color:var(--text);font:inherit;line-height:1.6;resize:vertical}
+.prog-messages .prog-field{margin:0 0 10px}
+@media(max-width:700px){.prog-hbars>div{grid-template-columns:100px 1fr 44px}}
