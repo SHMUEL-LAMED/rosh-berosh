@@ -417,7 +417,8 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     ]);
     const map: Record<string, number> = {};
     for (const row of counts.results as Array<{ id: string; likes: number }>) map[row.id] = Number(row.likes) || 0;
-    return h.reply(request, { counts: map, mine: user?.sub ? (mine.results as Array<{ id: string }>).map((row) => row.id) : [] });
+    // כמה אהבו כל תוכנית — רק למנהלים. מאזין רואה רק מה הוא עצמו סימן.
+    return h.reply(request, { counts: user?.isAdmin ? map : {}, mine: user?.sub ? (mine.results as Array<{ id: string }>).map((row) => row.id) : [] });
   }
   if (path === "/likes" && method === "POST") {
     const user = await readSession(request, env);

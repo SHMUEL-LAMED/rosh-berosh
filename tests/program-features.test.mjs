@@ -298,9 +298,11 @@ test("likes are counted per episode and appear in the stats", async () => {
   assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: admin, body: { episodeId: "ep-1", like: true } })).json(), { ok: true, liked: true, count: 2 });
   await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: true } });
   assert.equal((await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "nope", like: true } })).status, 404);
+  // כמה אהבו — רק מנהלים רואים; מאזין רואה רק את הסימונים שלו
   const pub = await (await call("/api/program/likes")).json();
-  assert.deepEqual(pub, { counts: { "ep-1": 2 }, mine: [] });
-  assert.deepEqual((await (await call("/api/program/likes", { token: voter })).json()).mine, ["ep-1"]);
+  assert.deepEqual(pub, { counts: {}, mine: [] });
+  assert.deepEqual(await (await call("/api/program/likes", { token: voter })).json(), { counts: {}, mine: ["ep-1"] });
+  assert.deepEqual((await (await call("/api/program/likes", { token: admin })).json()).counts, { "ep-1": 2 });
   assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: false } })).json(), { ok: true, liked: false, count: 1 });
   const stats = await (await call("/api/program/stats", { token: admin })).json();
   assert.deepEqual(stats.likes, [{ id: "ep-1", likes: 1 }]);
