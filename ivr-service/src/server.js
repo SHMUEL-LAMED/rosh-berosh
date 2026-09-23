@@ -1207,6 +1207,36 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
     }
   }
 
+  // Do not submit until the caller explicitly confirms. Reviewing returns to
+  // this menu, so an interrupted call can resume with the saved draft.
+  let review = [];
+  while (true) {
+    const answer = await call.read(
+      [...review, ...prompt(prompts, "system:confirm_vote", "לאישור ההצבעה הקישו 1 לבדיקת הבחירות הקישו 2")],
+      "tap",
+      { min_digits: 1, max_digits: 1, digits_allowed: ["1", "2"], sec_wait: SEC_WAIT, typing_playback_mode: "No" },
+    );
+    if (answer === "1") break;
+    if (answer !== "2") continue;
+    review = [];
+    if (rules.albumsEnabled) {
+      review.push(text("האלבומים שבחרתם"));
+      for (const album of selectedAlbums) {
+        review.push(...itemPrompt(prompts, "album", album, "אלבום"));
+        if (rules.songsEnabled) {
+          for (const songId of songIdsByAlbum[album.id] || []) {
+            const song = (catalog.songs || []).find((item) => item.id === songId && item.albumId === album.id);
+            if (song) review.push(...itemPrompt(prompts, "song", song, "שיר"));
+          }
+        }
+      }
+    }
+    if (rules.artistsEnabled) {
+      review.push(text("הזמרים שבחרתם"));
+      for (const artist of selectedArtists) review.push(...itemPrompt(prompts, "artist", artist, "זמר"));
+    }
+  }
+
   if (preview) {
     call.id_list_message(lines("התצוגה המקדימה הסתיימה", "שום הצבעה או התקדמות לא נשמרו", "חוזרים לתפריט הניהול"), { prependToNextAction: true });
     return "תפריט מצב ותוצאות";
