@@ -388,7 +388,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   // run the legacy full runtime-schema reconciliation here: on a cold isolate it
   // issues dozens of D1 statements and makes Yemot time out before the caller
   // reaches the menu. Production schema changes use deployment migrations.
-  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/subscribers") await ensureRuntimeSchema(env);
+  // Reading an existing session must not wait for the full schema bootstrap.
+  // The login route still creates the session table before writing to it.
+  if ((url.pathname.startsWith("/api/auth/") && url.pathname !== "/api/auth/me" && url.pathname !== "/api/auth/config") || url.pathname.startsWith("/api/admin/") || url.pathname === "/api/subscribers") await ensureRuntimeSchema(env);
 
   if (url.pathname === "/api/auth/config" && request.method === "GET") return json({ clientId: GOOGLE_CLIENT_ID });
   if (url.pathname === "/api/auth/google" && request.method === "POST") {
