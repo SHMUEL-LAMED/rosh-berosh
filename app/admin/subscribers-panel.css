@@ -9,4 +9,12 @@
 .subscriber-table th{padding:10px;border-bottom:1px solid rgba(184,149,48,.3);text-align:right;color:var(--muted);font-size:11px;font-weight:700;white-space:nowrap}
 .subscriber-table td{padding:11px 10px;border-bottom:1px solid rgba(0,0,0,.06)}
 .subscriber-email{font-family:ui-monospace,Menlo,Consolas,monospace;text-align:right}
-@media(max-width:580px){.subscriber-toolbar button{flex:1}}
+.subscriber-add{display:grid;gap:10px;margin:0 0 20px;padding:14px 16px;border:1px solid rgba(184,149,48,.35);border-radius:14px;background:rgba(184,149,48,.05)}
+.subscriber-add h3{margin:0;font-size:16px}
+.subscriber-add .panel-help{margin:0}
+.subscriber-add textarea{width:100%;min-height:120px;padding:10px 12px;border:1px solid rgba(184,149,48,.4);border-radius:11px;background:transparent;color:var(--text);font:13px/1.6 ui-monospace,Menlo,Consolas,monospace;resize:vertical}
+.subscriber-add .subscriber-toolbar{margin:0}
+.subscriber-file{display:inline-flex;align-items:center;height:45px;padding:0 16px;border:1px dashed rgba(184,149,48,.6);border-radius:11px;color:var(--text);cursor:pointer}
+.subscriber-toolbar button.subscriber-primary{border:0;color:#fff;font-weight:800;background:linear-gradient(105deg,#2b3a7a,#b89530)}
+.subscriber-result{margin:0;padding:9px 12px;border-radius:10px;background:#e8f7f2;color:#137861;font-weight:700;font-size:13px}
+@media(max-width:580px){.subscriber-toolbar button,.subscriber-file{flex:1;justify-content:center}}

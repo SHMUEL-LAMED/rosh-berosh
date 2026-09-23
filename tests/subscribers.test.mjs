@@ -93,11 +93,12 @@ test("מסך ההתחברות אינו מבקש כתובת ידנית לרשימ
   assert.doesNotMatch(source("app/auth-ui.tsx"), /type="email"/);
 });
 
-// הפאנל נועד להצגה ולייצוא בלבד: בלי חיפוש, הוספה ידנית או ייבוא מהממשק.
-test("פאנל הניהול מציג רשימה ומוריד לאקסל בלבד", () => {
+// הפאנל מציג, מוריד לאקסל ומוסיף כתובות (הדבקה או קובץ) דרך הייבוא — בלי מחיקה מהממשק.
+test("פאנל הניהול: רשימה, הורדה לאקסל והוספת כתובות בייבוא", () => {
   const panel = source("app/admin/subscribers-panel.tsx");
   assert.match(panel, /downloadSubscribersXlsx/);
-  assert.doesNotMatch(panel, /subscribers\/import/);
+  assert.match(panel, /fetch\("\/api\/admin\/subscribers\/import", \{ method: "POST"/);
+  assert.match(panel, /xlsxToText/, "Excel files can be uploaded");
+  assert.match(panel, /הוסיפו רק אנשים שביקשו לקבל את המיילים/);
   assert.doesNotMatch(panel, /method: "DELETE"/);
-  assert.doesNotMatch(panel, /method: "POST"/);
 });
