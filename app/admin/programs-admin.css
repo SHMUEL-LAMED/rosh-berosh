@@ -142,3 +142,4 @@
 .prog-reply{width:100%;min-height:70px;padding:9px 12px;border:1px solid #dcd4b8;border-radius:11px;background:#fff;color:var(--text);font:inherit;line-height:1.6;resize:vertical}
 .prog-messages .prog-field{margin:0 0 10px}
 @media(max-width:700px){.prog-hbars>div{grid-template-columns:100px 1fr 44px}}
+.prog-mail-offer{display:grid;gap:10px;margin-top:14px;padding:14px 16px;border:1px solid #cdb97a;border-radius:14px;background:linear-gradient(180deg,#fffaf0,#fbf3dc)}.prog-mail-offer p{margin:0;line-height:1.6;color:#4b4234}.prog-mail-offer b{color:#5c4a12}

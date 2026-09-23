@@ -8,7 +8,7 @@ import { useState } from "react";
 import { api, drainPush, errorText, fmtTime, label, n2, scheduled, streamUrl, when, PROGRAM_SITE, type ApiError, type Catalog, type Comment, type EpisodeStats, type Moments, type Stats } from "./programs-core";
 import { Bars, HBars, Section } from "./programs-ui";
 
-const SOURCE_NAMES: Record<string, string> = { whatsapp: "וואטסאפ", google: "גוגל", facebook: "פייסבוק", direct: "ישיר (קישור או כתובת)", internal: "מתוך האתר", other: "אחר" };
+const SOURCE_NAMES: Record<string, string> = { email: "מייל (רשימת התפוצה)", whatsapp: "וואטסאפ", google: "גוגל", facebook: "פייסבוק", direct: "ישיר (קישור או כתובת)", internal: "מתוך האתר", other: "אחר" };
 const byDate = (a: { date: string; number: number | null }, b: { date: string; number: number | null }) => b.date.localeCompare(a.date) || (b.number || 0) - (a.number || 0);
 
 type EpisodeDeep = { stats: EpisodeStats | null; moments: Moments | null; error: string };
