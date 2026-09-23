@@ -359,7 +359,7 @@ test("push subscriptions receive admin messages and publish notifications; dead 
   });
   try {
     const sent = await (await call("/api/program/push/send", { method: "POST", token: admin, body: { title: "שידור חי", body: "עכשיו באוויר", url: "https://shmuel-lamed.github.io/rosh-berosh-2/" } })).json();
-    assert.deepEqual(sent, { sent: 1, failed: 0, removed: 1, total: 2 });
+    assert.deepEqual(sent, { queued: true, sent: 1, failed: 0, removed: 1, remaining: 0, total: 2 });
     assert.deepEqual(received[0], { title: "שידור חי", body: "עכשיו באוויר", url: "https://shmuel-lamed.github.io/rosh-berosh-2/", icon: "https://shmuel-lamed.github.io/rosh-berosh-2/assets/img/icon-192.png" });
     assert.deepEqual(await (await call("/api/program/push/count", { token: admin })).json(), { total: 1 });
 
@@ -384,6 +384,51 @@ test("push subscriptions receive admin messages and publish notifications; dead 
   } finally { restore(); }
 });
 
+test("push fan-out is batched: at most 40 sends per invocation, the rest through drain and the cron", async () => {
+  const { worker, env, call, admin, db } = await setup();
+  const receiver = await receiverKeys();
+  const insert = db.prepare("INSERT INTO program_push (endpoint,p256dh,auth) VALUES (?,?,?)");
+  for (let i = 0; i < 95; i += 1) insert.run(`https://push.example.com/s${String(i).padStart(3, "0")}`, receiver.subscription.p256dh, receiver.subscription.auth);
+  const hits = [];
+  let perCall = 0;
+  const restore = withFetch(async (url) => {
+    if (!url.startsWith("https://push.example.com/")) return null;
+    hits.push(url);
+    perCall += 1;
+    return new Response(null, { status: url.endsWith("s050") ? 410 : 201 });
+  });
+  const measure = async (run) => { perCall = 0; const result = await run(); assert.ok(perCall <= 40, `${perCall} pushes in one invocation`); return result; };
+  try {
+    assert.equal((await call("/api/program/push/drain")).status, 404, "POST only");
+    assert.equal((await call("/api/program/push/drain", { method: "POST" })).status, 403);
+    const first = await measure(async () => (await call("/api/program/push/send", { method: "POST", token: admin, body: { title: "א", body: "ב" } })).json());
+    assert.deepEqual(first, { queued: true, sent: 40, failed: 0, removed: 0, remaining: 55, total: 95 });
+    const second = await measure(async () => (await call("/api/program/push/drain", { method: "POST", token: admin })).json());
+    assert.deepEqual(second, { sent: 39, failed: 0, removed: 1, remaining: 15 });
+    const third = await measure(async () => (await call("/api/program/push/drain", { method: "POST", token: admin })).json());
+    assert.deepEqual(third, { sent: 15, failed: 0, removed: 0, remaining: 0 });
+    assert.equal(new Set(hits).size, 95, "every subscription exactly once, none skipped by the removal");
+    assert.equal(hits.length, 95);
+    assert.deepEqual(await (await call("/api/program/push/drain", { method: "POST", token: admin })).json(), { sent: 0, failed: 0, removed: 0, remaining: 0 });
+
+    // שתי הודעות בתור: ה־cron ממשיך לרוקן, 40 בכל ריצה
+    hits.length = 0;
+    await call("/api/program/push/send", { method: "POST", token: admin, body: { title: "1" } });
+    await call("/api/program/push/send", { method: "POST", token: admin, body: { title: "2" } });
+    assert.equal(hits.length, 80);
+    const queue = JSON.parse(db.prepare("SELECT value_json FROM program_settings WHERE key='push-pending'").get().value_json);
+    assert.equal(queue.length, 2);
+    const cron = () => measure(async () => {
+      const waits = [];
+      await worker.scheduled({ cron: "*/5 * * * *" }, env, { waitUntil: (promise) => waits.push(promise), passThroughOnException() {} });
+      await Promise.all(waits);
+    });
+    for (let i = 0; i < 4; i += 1) await cron();
+    assert.equal(hits.length, 94 * 2, "both messages reached all 94 remaining subscriptions");
+    assert.deepEqual(JSON.parse(db.prepare("SELECT value_json FROM program_settings WHERE key='push-pending'").get().value_json), []);
+  } finally { restore(); }
+});
+
 test("the cron notifies about scheduled episodes once their time comes, and never about old ones", async () => {
   const { worker, env, call, admin, db } = await setup();
   const receiver = await receiverKeys();
@@ -396,7 +441,7 @@ test("the cron notifies about scheduled episodes once their time comes, and neve
   });
   const cron = async () => {
     const waits = [];
-    await worker.scheduled({ cron: "*/15 * * * *" }, env, { waitUntil: (promise) => waits.push(promise), passThroughOnException() {} });
+    await worker.scheduled({ cron: "*/5 * * * *" }, env, { waitUntil: (promise) => waits.push(promise), passThroughOnException() {} });
     await Promise.all(waits);
   };
   try {

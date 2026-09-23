@@ -582,7 +582,7 @@ const worker = {
       throw error;
     }
   },
-  // כל רבע שעה: התראת דחיפה על תוכניות מתוזמנות שמועד הפרסום שלהן הגיע
+  // כל חמש דקות: מנה מתור התראות הדחיפה, ותוכניות מתוזמנות שמועד הפרסום שלהן הגיע
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
       await ensureRuntimeSchema(env);
