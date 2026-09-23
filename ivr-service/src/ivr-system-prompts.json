@@ -18,6 +18,7 @@
   { "key": "system:not_ready", "label": "רשימות המצעד עדיין אינן מוכנות" },
   { "key": "system:error", "label": "אירעה שגיאה" },
   { "key": "system:success", "label": "ההצבעה נקלטה בהצלחה" },
+  { "key": "system:confirm_vote", "label": "אישור הצבעה — 1 לאישור, 2 לבדיקת הבחירות" },
   { "key": "system:confirm_transfer", "label": "אישור מעבר לקו הראשי — 1 להעברה, 2 לחזרה" },
   { "key": "system:transferring", "label": "מעבירים אתכם לקו הראשי" }
 ]
