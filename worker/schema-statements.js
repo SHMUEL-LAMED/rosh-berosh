@@ -222,6 +222,30 @@ const TABLES = [
     summary_json TEXT,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+  // תגובות המאזינים לתוכניות: ממתינות לאישור מנהל, ויכולות להיות קשורות לרגע בתוכנית.
+  `CREATE TABLE IF NOT EXISTS program_comments (
+    id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL,
+    user_sub TEXT,
+    name TEXT,
+    text TEXT NOT NULL,
+    at_seconds INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    reply TEXT,
+    reply_by TEXT,
+    replied_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  // "הרגעים הכי חמים": רגעים בתוכנית שמאזין מחובר סימן ב־♥ (בכפולות של 5 שניות).
+  // כל מאזין רואה רק את שלו; הסיכום לפי רגעים — למנהלים בלבד.
+  `CREATE TABLE IF NOT EXISTS program_moments (
+    user_sub TEXT NOT NULL,
+    episode_id TEXT NOT NULL,
+    at_seconds INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (user_sub, episode_id, at_seconds)
+  )`,
 ];
 
 const COLUMNS = [
@@ -284,6 +308,8 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS program_messages_created_idx ON program_messages(created_at)",
   "CREATE INDEX IF NOT EXISTS program_versions_created_idx ON program_versions(created_at)",
   "CREATE INDEX IF NOT EXISTS program_likes_episode_idx ON program_likes(episode_id)",
+  "CREATE INDEX IF NOT EXISTS program_comments_episode_idx ON program_comments(episode_id,status,created_at)",
+  "CREATE INDEX IF NOT EXISTS program_moments_episode_idx ON program_moments(episode_id)",
 ];
 
 const SEEDS = [

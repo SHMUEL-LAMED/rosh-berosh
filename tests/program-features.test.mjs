@@ -212,9 +212,17 @@ test("large files upload in parts and are served back with ranges", async () => 
   assert.equal(ranged.status, 206);
   assert.equal(ranged.headers.get("content-range"), "bytes 195-204/300");
   assert.equal(ranged.headers.get("content-length"), "10");
+  assert.equal(ranged.headers.get("access-control-allow-origin"), "*", "media is readable cross-origin (canvas thumbnails)");
+  assert.equal(ranged.headers.get("access-control-expose-headers"), "content-length,content-range,accept-ranges");
   const whole = await call(`/media/${key}`, { method: "HEAD" });
   assert.equal(whole.headers.get("content-length"), "300");
   assert.equal(whole.headers.get("accept-ranges"), "bytes");
+  assert.equal(whole.headers.get("access-control-allow-origin"), "*");
+  const full = await call(`/media/${key}`);
+  assert.equal(full.status, 200);
+  assert.equal(full.headers.get("access-control-allow-origin"), "*");
+  assert.equal(full.headers.get("access-control-expose-headers"), "content-length,content-range,accept-ranges");
+  assert.equal(full.headers.get("vary"), null);
 
   const other = await (await call("/api/program/upload/start?episode=ep-1&kind=cover", { method: "POST", token: admin, body: { contentType: "image/jpeg", size: 100 } })).json();
   assert.match(other.key, /\.jpg$/);
@@ -290,9 +298,11 @@ test("likes are counted per episode and appear in the stats", async () => {
   assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: admin, body: { episodeId: "ep-1", like: true } })).json(), { ok: true, liked: true, count: 2 });
   await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: true } });
   assert.equal((await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "nope", like: true } })).status, 404);
+  // כמה אהבו — רק מנהלים רואים; מאזין רואה רק את הסימונים שלו
   const pub = await (await call("/api/program/likes")).json();
-  assert.deepEqual(pub, { counts: { "ep-1": 2 }, mine: [] });
-  assert.deepEqual((await (await call("/api/program/likes", { token: voter })).json()).mine, ["ep-1"]);
+  assert.deepEqual(pub, { counts: {}, mine: [] });
+  assert.deepEqual(await (await call("/api/program/likes", { token: voter })).json(), { counts: {}, mine: ["ep-1"] });
+  assert.deepEqual((await (await call("/api/program/likes", { token: admin })).json()).counts, { "ep-1": 2 });
   assert.deepEqual(await (await call("/api/program/likes", { method: "POST", token: voter, body: { episodeId: "ep-1", like: false } })).json(), { ok: true, liked: false, count: 1 });
   const stats = await (await call("/api/program/stats", { token: admin })).json();
   assert.deepEqual(stats.likes, [{ id: "ep-1", likes: 1 }]);
