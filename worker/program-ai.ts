@@ -393,11 +393,24 @@ export async function programAiApi(request: Request, env: Env, h: Helpers): Prom
     if (!useClaude && !env.AI) return h.reply(request, { error: "שירות הבינה המלאכותית אינו מחובר לוורקר." }, 503);
     const content = `הפריטים להגהה:\n\n${JSON.stringify(items)}`;
     let fixes: Array<{ key: string; fixed: string }> | null = null;
+    let claudeError: unknown;
     try {
-      fixes = parseProofread(useClaude ? await askClaude(env, PROOFREAD_SYSTEM, content, 32000) : await askWorkersAi(env, PROOFREAD_SYSTEM, content, 4096));
+      if (useClaude) {
+        try { fixes = parseProofread(await askClaude(env, PROOFREAD_SYSTEM, content, 8192)); }
+        catch (error) { claudeError = error; console.error("program proofread Claude error", error); }
+      }
+      if (!fixes && env.AI) fixes = parseProofread(await askWorkersAi(env, PROOFREAD_SYSTEM, content, 4096));
     } catch (error) {
-      console.error("program proofread error", error);
-      return h.reply(request, { error: "ההגהה נכשלה בשירות הבינה המלאכותית. נסו שוב בעוד רגע." }, 502);
+      console.error("program proofread Workers AI error", error);
+      return h.reply(request, { error: "בדיקת האיכות נכשלה גם בשירות הגיבוי. נסו שוב בעוד רגע." }, 502);
+    }
+    if (claudeError && !fixes && !env.AI) {
+      const reason = String(claudeError instanceof Error ? claudeError.message : claudeError);
+      const message = /anthropic 401|anthropic 403/.test(reason) ? "מפתח Claude אינו תקין או שאין לו הרשאה. יש לבדוק את הגדרת ANTHROPIC_API_KEY."
+        : /anthropic 402/.test(reason) ? "נגמרה המכסה בחשבון Claude. יש לבדוק את החשבון או לחבר את Workers AI."
+        : /anthropic 429/.test(reason) ? "Claude הגביל את מספר הבקשות. נסו שוב בעוד כמה דקות."
+        : "שירות Claude אינו זמין כרגע. נסו שוב בעוד רגע.";
+      return h.reply(request, { error: message }, 502);
     }
     if (!fixes) return h.reply(request, { error: "שירות הבינה המלאכותית החזיר תשובה שאי אפשר לקרוא. נסו שוב." }, 502);
     return h.reply(request, { results: proofreadResults(items, fixes) });
