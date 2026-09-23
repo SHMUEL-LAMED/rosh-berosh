@@ -11,7 +11,9 @@ import { normalizePhone } from "./phone";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 import { readIvrCatalog } from "./ivr-catalog.js";
-import { programApi } from "./program-api";
+import { programApi, programSharePage } from "./program-api";
+import { runScheduledPush } from "./program-push";
+import type { AiBinding } from "./program-ai";
 import { placeholders } from "./sql.js";
 
 interface Env {
@@ -22,6 +24,9 @@ interface Env {
   YEMOT_API_BASE?: string;
   IVR_SECRET?: string;
   ADMIN_EMAILS?: string;
+  // Workers AI (תמלול וסיכום של תוכניות) ומפתח Claude אופציונלי לסיכומים
+  AI?: AiBinding;
+  ANTHROPIC_API_KEY?: string;
   IMAGES: { input(stream: ReadableStream): { transform(options: Record<string, unknown>): { output(options: { format: string; quality: number }): Promise<{ response(): Response }> } } };
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
@@ -349,7 +354,7 @@ async function serveMedia(request: Request, env: Env, ctx: ExecutionContext, pat
     const r = object.range as { offset: number; length: number };
     headers.set("content-range", `bytes ${r.offset}-${r.offset + r.length - 1}/${object.size}`);
     headers.set("content-length", String(r.length));
-  }
+  } else headers.set("content-length", String(object.size));
   const status = rangeHeader && "range" in object ? 206 : 200;
   if (request.method === "HEAD") return mediaResponse(null, status, headers, "MISS");
   if (cacheable && status === 200) {
@@ -366,6 +371,11 @@ async function serveMedia(request: Request, env: Env, ctx: ExecutionContext, pat
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, ctx, url.pathname);
+  // דף שיתוף לתוכנית (תגי Open Graph לוואטסאפ/פייסבוק, והפניה מיידית לאתר התוכניות)
+  if (url.pathname.startsWith("/p/") && (request.method === "GET" || request.method === "HEAD")) {
+    await ensureRuntimeSchema(env);
+    return programSharePage(request, env);
+  }
   if (url.pathname.startsWith("/api/program/")) {
     await ensureRuntimeSchema(env);
     const response = await programApi(request, env, ctx);
@@ -627,6 +637,13 @@ const worker = {
       if (pathname.startsWith("/api/")) return json({ error: "שגיאה בשרת." }, 500);
       throw error;
     }
+  },
+  // כל חמש דקות: מנה מתור התראות הדחיפה, ותוכניות מתוזמנות שמועד הפרסום שלהן הגיע
+  async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil((async () => {
+      await ensureRuntimeSchema(env);
+      await runScheduledPush(env);
+    })().catch((error) => console.error("scheduled push error", error)));
   },
 };
 
