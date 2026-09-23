@@ -578,6 +578,39 @@ test("new recordings transcribe in the scheduled job without a manager click", a
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs WHERE episode_id='auto'").get().n, 0, "publishing the same recording does not restart transcription");
 });
 
+test("the one-time vote reset looks up ballots once, in one pass, and never repeats from the cron", async () => {
+  const run = async (seed) => {
+    const { worker, db, env, ctx, settle } = await setup();
+    seed(db);
+    const lookups = [];
+    const prepare = env.DB.prepare;
+    env.DB.prepare = (sql) => { if (/FROM ballots b WHERE/.test(sql)) lookups.push(sql); return prepare(sql); };
+    for (let i = 0; i < 3; i += 1) { await worker.scheduled({}, env, ctx); await settle(); }
+    return { db, lookups };
+  };
+  const later = Math.floor(Date.now() / 1000) + 3600;
+
+  // Two ballots belong to the voter (one through a site session, one through a program profile):
+  // nothing is deleted, and the lookup is not repeated every minute.
+  const two = await run((db) => {
+    db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,expires_at) VALUES ('h-ml','sub-ml','ML1701ML@gmail.com','m',?)").run(later);
+    db.prepare("INSERT INTO program_user_data (user_sub,email,data_json) VALUES ('sub-ml2','ml1701ml@gmail.com','{}')").run();
+    for (const [id, key] of [["b-1", "sub-ml"], ["b-2", "sub-ml2"], ["b-3", "someone-else"]]) db.prepare("INSERT INTO ballots (id,voter_key) VALUES (?,?)").run(id, key);
+  });
+  assert.equal(two.lookups.length, 1, "three cron runs, one ballot lookup");
+  assert.doesNotMatch(two.lookups[0], /EXISTS/, "no per-ballot subquery");
+  assert.equal(two.db.prepare("SELECT COUNT(*) AS n FROM ballots").get().n, 3);
+
+  // Exactly one ballot: it is reset once, and later runs stop at the marker.
+  const one = await run((db) => {
+    db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,expires_at) VALUES ('h-ml','sub-ml','ml1701ml@gmail.com','m',?)").run(later);
+    for (const [id, key] of [["b-1", "sub-ml"], ["b-3", "someone-else"]]) db.prepare("INSERT INTO ballots (id,voter_key) VALUES (?,?)").run(id, key);
+  });
+  assert.equal(one.lookups.length, 1);
+  assert.deepEqual(one.db.prepare("SELECT id FROM ballots ORDER BY id").all().map((row) => row.id), ["b-3"]);
+  assert.ok(one.db.prepare("SELECT 1 FROM program_settings WHERE key='one-time-vote-reset-ml1701ml-20260923'").get());
+});
+
 test("the share page gives crawlers Open Graph tags and sends people to the episode", async () => {
   const { call, admin } = await setup();
   await publish(call, admin, [
