@@ -310,8 +310,12 @@ async function serveMedia(request: Request, env: Env, ctx: ExecutionContext, pat
   const privateObject = key.startsWith("settings/") || key.startsWith("poll-archives/") || key.startsWith("ivr-progress/") || (ivrPromptObject && !ivrPromptAudio);
   if (!key || key.includes("..") || privateObject) return new Response("Not Found", { status: 404 });
   const rangeHeader = request.headers.get("range");
-  const cache = (globalThis.caches as EdgeCacheStorage | undefined)?.default;
+  // בכתובת workers.dev מטמון הקצה אינו פועל כלל (Cloudflare מתעלמת שם מכל
+  // פעולת Cache API), ובלי הבדיקה הזו כל האזנה הייתה גוררת קריאה מלאה נוספת
+  // מ-R2 ברקע לשווא. שם הקבצים מוגשים ישר מ-R2 כמו קודם; בדומיין מחובר
+  // המטמון פעיל.
   const cacheUrl = new URL(request.url);
+  const cache = cacheUrl.hostname.endsWith(".workers.dev") ? undefined : (globalThis.caches as EdgeCacheStorage | undefined)?.default;
   cacheUrl.search = "";
   cacheUrl.hash = "";
   const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });

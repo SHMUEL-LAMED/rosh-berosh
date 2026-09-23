@@ -386,4 +386,6 @@ test("public media is kept in the edge cache and ranges are served from it", () 
   assert.match(serve, /headers: \{ range: rangeHeader \}/);
   assert.match(serve, /new FixedLengthStream\(object\.size\)/);
   assert.match(serve, /MEDIA_EDGE_CACHE_MAX_BYTES/);
+  // ב-workers.dev המטמון אינו פועל, ואסור שיגרור שם קריאה כפולה מ-R2.
+  assert.match(serve, /hostname\.endsWith\("\.workers\.dev"\) \? undefined/);
 });
