@@ -75,8 +75,8 @@ async function runOneTimeRequestedVoteReset(env: Env): Promise<void> {
   if (await env.DB.prepare("SELECT key FROM program_settings WHERE key=?").bind(REQUESTED_VOTE_RESET_ID).first()) return;
   await env.DB.prepare("INSERT INTO program_settings (key,value_json) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()")
     .bind(`${REQUESTED_VOTE_RESET_ID}-attempt`, JSON.stringify({ at: Math.floor(Date.now() / 1000) })).run();
-  const rows = await env.DB.prepare("SELECT b.id, b.voter_key AS voterKey, b.survey_id AS surveyId FROM ballots b WHERE b.survey_id=(SELECT id FROM surveys WHERE active=1 ORDER BY created_at DESC LIMIT 1) AND b.channel='site' AND (lower(b.voter_email)=? OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_sub=b.voter_key AND lower(s.email)=?))")
-    .bind("ml1701ml@gmail.com", "ml1701ml@gmail.com").all<{ id: string; voterKey: string; surveyId: string }>();
+  const rows = await env.DB.prepare("SELECT b.id, b.voter_key AS voterKey, b.survey_id AS surveyId FROM ballots b WHERE b.channel='site' AND (lower(b.voter_email)=? OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_sub=b.voter_key AND lower(s.email)=?) OR EXISTS (SELECT 1 FROM program_user_data u WHERE u.user_sub=b.voter_key AND lower(u.email)=?))")
+    .bind("ml1701ml@gmail.com", "ml1701ml@gmail.com", "ml1701ml@gmail.com").all<{ id: string; voterKey: string; surveyId: string }>();
   if (rows.results.length !== 1) { console.error("requested vote reset requires exactly one matching ballot; found", rows.results.length); return; }
   const { id, voterKey, surveyId } = rows.results[0];
   // D1 batch is transactional: an audit conflict or failed deletion rolls back the whole reset.
@@ -397,8 +397,8 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     try {
       const complete = !!(await env.DB.prepare("SELECT key FROM program_settings WHERE key=?").bind(REQUESTED_VOTE_RESET_ID).first());
       const attempt = await env.DB.prepare("SELECT updated_at AS at FROM program_settings WHERE key=?").bind(`${REQUESTED_VOTE_RESET_ID}-attempt`).first<{ at: number }>();
-      const matches = await env.DB.prepare("SELECT COUNT(*) AS total FROM ballots b WHERE b.survey_id=(SELECT id FROM surveys WHERE active=1 ORDER BY created_at DESC LIMIT 1) AND b.channel='site' AND (lower(b.voter_email)=? OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_sub=b.voter_key AND lower(s.email)=?))")
-        .bind("ml1701ml@gmail.com", "ml1701ml@gmail.com").first<{ total: number }>();
+      const matches = await env.DB.prepare("SELECT COUNT(*) AS total FROM ballots b WHERE b.channel='site' AND (lower(b.voter_email)=? OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_sub=b.voter_key AND lower(s.email)=?) OR EXISTS (SELECT 1 FROM program_user_data u WHERE u.user_sub=b.voter_key AND lower(u.email)=?))")
+        .bind("ml1701ml@gmail.com", "ml1701ml@gmail.com", "ml1701ml@gmail.com").first<{ total: number }>();
       return json({ complete, lastAttempt: attempt?.at || null, matches: matches?.total ?? null });
     } catch { return json({ complete: false, diagnostic: "unavailable" }); }
   }
