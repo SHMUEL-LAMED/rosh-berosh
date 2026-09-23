@@ -222,6 +222,14 @@ const TABLES = [
     summary_json TEXT,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+  `CREATE TABLE IF NOT EXISTS program_transcription_jobs (
+    episode_id TEXT PRIMARY KEY,
+    audio_key TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_at INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
   // תגובות המאזינים לתוכניות: ממתינות לאישור מנהל, ויכולות להיות קשורות לרגע בתוכנית.
   `CREATE TABLE IF NOT EXISTS program_comments (
     id TEXT PRIMARY KEY,

@@ -14,6 +14,7 @@ type Helpers = {
 };
 
 export const TRANSCRIBE_CHUNK = 2 * 1024 * 1024;
+const DAILY_AUTO_PARTS = 60;
 export const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
 export const LLAMA_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 export const CLAUDE_MODEL = "claude-sonnet-5";
@@ -26,6 +27,83 @@ function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(binary);
+}
+
+/** Shared by the manager button and the scheduled job. Never mark an empty AI answer as a completed part. */
+export async function transcribeProgramPart(env: Env, episodeId: string, part: number, origin: string, expectedAudioKey?: string) {
+  if (!env.AI) throw new Error("שירות Workers AI אינו מחובר.");
+  const episode = await loadEpisode(env, episodeId);
+  if (!episode) throw new Error("התוכנית לא נמצאה.");
+  const audio = await locateAudio(env, episode.data, origin);
+  if (!audio?.size) throw new Error("ההקלטה אינה שמורה ב־R2.");
+  if (expectedAudioKey && audio.key !== expectedAudioKey) throw new Error("ההקלטה הוחלפה בזמן התמלול.");
+  const partsTotal = Math.ceil(audio.size / TRANSCRIBE_CHUNK);
+  if (part < 0 || part >= partsTotal) throw new Error("חלק ההקלטה אינו תקין.");
+  const object = await env.MEDIA.get(audio.key, { range: { offset: part * TRANSCRIBE_CHUNK, length: Math.min(TRANSCRIBE_CHUNK, audio.size - part * TRANSCRIBE_CHUNK) } });
+  if (!object) throw new Error("ההקלטה אינה זמינה.");
+  const result = await env.AI.run(WHISPER_MODEL, { audio: toBase64(new Uint8Array(await object.arrayBuffer())), language: "he" }) as { text?: string };
+  const chunkText = String(result?.text ?? "").trim();
+  if (!chunkText) throw new Error("שירות התמלול החזיר חלק ריק.");
+  const row = await env.DB.prepare("SELECT text,parts_json,parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(episode.id)
+    .first<{ text: string; parts_json: string | null; parts_done: number; parts_total: number }>();
+  if (expectedAudioKey && part > 0 && (Number(row?.parts_done) !== part || Number(row?.parts_total) !== partsTotal))
+    throw new Error("התקדמות התמלול השתנתה; החלק לא נשמר.");
+  const parts = transcriptParts(row, partsTotal);
+  parts[part] = chunkText;
+  let partsDone = 0;
+  while (partsDone < partsTotal && typeof parts[partsDone] === "string") partsDone += 1;
+  const text = parts.filter((value): value is string => typeof value === "string" && !!value).join(" ");
+  await env.DB.prepare(`INSERT INTO program_transcripts (episode_id,text,parts_json,parts_done,parts_total,summary_json,updated_at) VALUES (?,?,?,?,?,NULL,unixepoch()) ON CONFLICT(episode_id) DO UPDATE SET text=excluded.text,parts_json=excluded.parts_json,parts_done=excluded.parts_done,parts_total=excluded.parts_total,${part === 0 ? "summary_json=NULL," : ""}updated_at=unixepoch()`)
+    .bind(episode.id, text, JSON.stringify(parts.map((value) => (typeof value === "string" ? value : null))), partsDone, partsTotal).run();
+  return { part, partsDone, partsTotal, done: partsDone >= partsTotal, text: chunkText, audioKey: audio.key };
+}
+
+/** One part per scheduled invocation. A failed part is retried; a finished recording leaves the queue. */
+export async function runAutomaticTranscription(env: Env, origin: string): Promise<void> {
+  if (!env.AI) return;
+  const marker = await env.DB.prepare("SELECT 1 FROM program_settings WHERE key='program-auto-transcription-initialized'").first();
+  if (!marker) {
+    // Start with the newest existing recording; old archives are not queued en masse.
+    const latest = await env.DB.prepare("SELECT id,data_json FROM program_episodes WHERE visible=1 ORDER BY date DESC,number DESC LIMIT 1").first<{ id: string; data_json: string }>();
+    if (latest) {
+      const data = JSON.parse(latest.data_json) as { r2Key?: string };
+      const transcript = await env.DB.prepare("SELECT parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(latest.id).first<{ parts_done: number; parts_total: number }>();
+      if (data.r2Key && (!transcript?.parts_total || transcript.parts_done < transcript.parts_total)) {
+        await env.DB.prepare("INSERT OR IGNORE INTO program_transcription_jobs (episode_id,audio_key) VALUES (?,?)").bind(latest.id, data.r2Key).run();
+      }
+    }
+    await env.DB.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES ('program-auto-transcription-initialized','true',unixepoch())").run();
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const usage = await env.DB.prepare("SELECT value_json FROM program_settings WHERE key='program-auto-transcription-usage'").first<{ value_json: string }>();
+  let count = 0;
+  try { const value = JSON.parse(usage?.value_json || "null"); if (value?.day === today) count = Number(value.count) || 0; } catch { /* reset malformed counter */ }
+  if (count >= DAILY_AUTO_PARTS) return;
+  const job = await env.DB.prepare("SELECT episode_id,audio_key,attempts FROM program_transcription_jobs WHERE next_at<=unixepoch() ORDER BY updated_at,episode_id LIMIT 1")
+    .first<{ episode_id: string; audio_key: string; attempts: number }>();
+  if (!job) return;
+  const claim = await env.DB.prepare("UPDATE program_transcription_jobs SET next_at=unixepoch()+300,updated_at=unixepoch() WHERE episode_id=? AND next_at<=unixepoch() RETURNING episode_id")
+    .bind(job.episode_id).first();
+  if (!claim) return;
+  try {
+    const progress = await env.DB.prepare("SELECT parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(job.episode_id).first<{ parts_done: number; parts_total: number }>();
+    if (progress?.parts_total && progress.parts_done >= progress.parts_total) {
+      await env.DB.prepare("DELETE FROM program_transcription_jobs WHERE episode_id=? AND audio_key=?").bind(job.episode_id, job.audio_key).run();
+      return;
+    }
+    const part = Number(progress?.parts_done) || 0;
+    const result = await transcribeProgramPart(env, job.episode_id, part, origin, job.audio_key);
+    await env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('program-auto-transcription-usage',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()")
+      .bind(JSON.stringify({ day: today, count: count + 1 })).run();
+    if (result.done) await env.DB.prepare("DELETE FROM program_transcription_jobs WHERE episode_id=? AND audio_key=?").bind(job.episode_id, job.audio_key).run();
+    else await env.DB.prepare("UPDATE program_transcription_jobs SET attempts=0,last_error=NULL,next_at=0,updated_at=unixepoch() WHERE episode_id=? AND audio_key=?")
+      .bind(job.episode_id, job.audio_key).run();
+  } catch (error) {
+    const attempts = job.attempts + 1;
+    console.error("automatic program transcription failed", job.episode_id, error);
+    await env.DB.prepare("UPDATE program_transcription_jobs SET attempts=?,last_error=?,next_at=unixepoch()+?,updated_at=unixepoch() WHERE episode_id=? AND audio_key=?")
+      .bind(attempts, String(error instanceof Error ? error.message : error).slice(0, 300), attempts >= 5 ? 86400 : Math.min(3600, 300 * 2 ** attempts), job.episode_id, job.audio_key).run();
+  }
 }
 
 export const SUMMARY_SYSTEM = `אתה עורך תוכן של "ראש בראש" — תוכנית רדיו חרדית של מוזיקה ואקטואליה. תקבל תמלול אוטומטי (ייתכנו בו שגיאות זיהוי) של תוכנית אחת.
@@ -238,50 +316,27 @@ export async function programAiApi(request: Request, env: Env, h: Helpers): Prom
     const episodeId = h.safeId(input.episodeId);
     const part = Math.floor(Number(input.part ?? 0));
     if (!episodeId || !Number.isFinite(part) || part < 0) return h.reply(request, { error: "פרטי התמלול אינם תקינים." }, 400);
-    if (!env.AI) return h.reply(request, { error: "שירות הבינה המלאכותית (Workers AI) אינו מחובר לוורקר." }, 503);
-    const episode = await loadEpisode(env, episodeId);
-    if (!episode) return h.reply(request, { error: "התוכנית לא נמצאה." }, 404);
-    const audio = await locateAudio(env, episode.data, url.origin);
-    if (!audio || !audio.size) return h.reply(request, { error: "ההקלטה של התוכנית אינה שמורה ב־R2, ולכן אי אפשר לתמלל אותה." }, 404);
-    const partsTotal = Math.ceil(audio.size / TRANSCRIBE_CHUNK);
-    if (part >= partsTotal) return h.reply(request, { error: "החלק המבוקש מעבר לסוף ההקלטה." }, 400);
-    const offset = part * TRANSCRIBE_CHUNK;
-    const object = await env.MEDIA.get(audio.key, { range: { offset, length: Math.min(TRANSCRIBE_CHUNK, audio.size - offset) } });
-    if (!object) return h.reply(request, { error: "ההקלטה אינה זמינה כרגע." }, 404);
-    const bytes = new Uint8Array(await object.arrayBuffer());
-    let chunkText = "";
     try {
-      const result = await env.AI.run(WHISPER_MODEL, { audio: toBase64(bytes), language: "he" }) as { text?: string };
-      chunkText = String(result?.text ?? "").trim();
+      const result = await transcribeProgramPart(env, episodeId, part, url.origin);
+      return h.reply(request, result);
     } catch (error) {
-      console.error("program transcribe error", episode.id, part, error);
-      return h.reply(request, { error: "התמלול נכשל בשירות הבינה המלאכותית. נסו שוב בעוד רגע." }, 502);
+      console.error("program transcribe error", episodeId, part, error);
+      const message = error instanceof Error && /חלק ריק|אינה שמורה|אינו מחובר|התקדמות/.test(error.message)
+        ? error.message : "התמלול נכשל בשירות הבינה המלאכותית. נסו שוב בעוד רגע.";
+      return h.reply(request, { error: message }, 502);
     }
-    // הטקסט של כל חלק נשמר בנפרד (parts_json), והתמלול המלא נבנה מהחלקים לפי
-    // הסדר. כך חלק שנשלח שוב — למשל ניסיון חוזר אחרי שהחלק הבא כבר נעשה —
-    // מחליף את הטקסט של עצמו ולא נוסף פעמיים, ו־parts_done הוא מספר החלקים
-    // הרצופים מההתחלה שכבר תומללו, כך שהוא לעולם אינו חוזר אחורה בטעות.
-    const row = await env.DB.prepare("SELECT text,parts_json,parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(episode.id)
-      .first<{ text: string; parts_json: string | null; parts_done: number; parts_total: number }>();
-    const parts = transcriptParts(row, partsTotal);
-    parts[part] = chunkText;
-    let partsDone = 0;
-    while (partsDone < partsTotal && typeof parts[partsDone] === "string") partsDone += 1;
-    const text = parts.filter((value): value is string => typeof value === "string" && !!value).join(" ");
-    // חלק 0 פותח תמלול (מחדש), ולכן התיאור שנוצר מהתמלול הקודם נמחק
-    await env.DB.prepare(`INSERT INTO program_transcripts (episode_id,text,parts_json,parts_done,parts_total,summary_json,updated_at) VALUES (?,?,?,?,?,NULL,unixepoch()) ON CONFLICT(episode_id) DO UPDATE SET text=excluded.text,parts_json=excluded.parts_json,parts_done=excluded.parts_done,parts_total=excluded.parts_total,${part === 0 ? "summary_json=NULL," : ""}updated_at=unixepoch()`)
-      .bind(episode.id, text, JSON.stringify(parts.map((value) => (typeof value === "string" ? value : null))), partsDone, partsTotal).run();
-    return h.reply(request, { part, partsTotal, partsDone, done: part + 1 >= partsTotal, text: chunkText });
   }
 
   if (path.startsWith("/ai/transcript/") && request.method === "GET") {
     const episodeId = h.safeId(decodeURIComponent(path.slice("/ai/transcript/".length)));
     const row = await env.DB.prepare("SELECT text,parts_done,parts_total,summary_json,updated_at FROM program_transcripts WHERE episode_id=?").bind(episodeId)
       .first<{ text: string; parts_done: number; parts_total: number; summary_json: string | null; updated_at: number }>();
-    if (!row) return h.reply(request, { text: "", partsDone: 0, partsTotal: 0, summary: null, updatedAt: null });
+    const job = await env.DB.prepare("SELECT attempts,last_error,next_at FROM program_transcription_jobs WHERE episode_id=?").bind(episodeId)
+      .first<{ attempts: number; last_error: string | null; next_at: number }>();
+    if (!row) return h.reply(request, { text: "", partsDone: 0, partsTotal: 0, summary: null, updatedAt: null, automatic: job ? { attempts: job.attempts, error: job.last_error, nextAt: job.next_at } : null });
     let summary = null;
     try { summary = row.summary_json ? JSON.parse(row.summary_json) : null; } catch { summary = null; }
-    return h.reply(request, { text: row.text, partsDone: Number(row.parts_done), partsTotal: Number(row.parts_total), summary, updatedAt: new Date(Number(row.updated_at) * 1000).toISOString() });
+    return h.reply(request, { text: row.text, partsDone: Number(row.parts_done), partsTotal: Number(row.parts_total), summary, updatedAt: new Date(Number(row.updated_at) * 1000).toISOString(), automatic: job ? { attempts: job.attempts, error: job.last_error, nextAt: job.next_at } : null });
   }
 
   /** התמלול המלא של התוכנית, או null כשהוא עוד לא הושלם. */

@@ -361,6 +361,9 @@ export async function programApi(request: Request, env: Env): Promise<Response |
     const beforeNow = israelWallClock();
     const currentRows = async () => (await env.DB.prepare("SELECT id,slug,visible,data_json FROM program_episodes").all<{ id: string; slug: string; visible: number; data_json: string }>()).results;
     const current = await currentRows();
+    const previousAudio = new Map(current.map((row) => {
+      try { return [row.id, audioKeysOf(JSON.parse(row.data_json), url.origin)[0] || ""]; } catch { return [row.id, ""]; }
+    }));
     const before = new Set(current.flatMap((row) => {
       if (!Number(row.visible)) return [];
       try { return isPublic(JSON.parse(row.data_json), true, beforeNow) ? [row.id] : []; } catch { return []; }
@@ -389,6 +392,17 @@ export async function programApi(request: Request, env: Env): Promise<Response |
     statements.push(env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(body.seasons)));
     // אחרי פרסום הקטלוג לעולם אינו נזרע שוב מהקובץ, גם אם כל התוכניות נמחקו
     statements.push(seededStatement(env));
+    for (const id of removed) {
+      statements.push(env.DB.prepare("DELETE FROM program_transcription_jobs WHERE episode_id=?").bind(id));
+    }
+    for (const episode of upserts) {
+      const id = episode.id;
+      const key = audioKeysOf(episode, url.origin)[0] || "";
+      if (!id || !key || episode.visible === false || previousAudio.get(id) === key) continue;
+      statements.push(env.DB.prepare("DELETE FROM program_transcripts WHERE episode_id=?").bind(id));
+      statements.push(env.DB.prepare("INSERT INTO program_transcription_jobs (episode_id,audio_key) VALUES (?,?) ON CONFLICT(episode_id) DO UPDATE SET audio_key=excluded.audio_key,attempts=0,next_at=0,last_error=NULL,updated_at=unixepoch()")
+        .bind(id, key));
+    }
     // ההודעה בדף הבית ודף העדכונים מתפרסמים יחד עם הקטלוג
     statements.push(...settingsStatements(env, body.settings));
     // כל פרסום נשמר כגרסה — גיבוי אוטומטי שאפשר לחזור אליו מאזור הניהול

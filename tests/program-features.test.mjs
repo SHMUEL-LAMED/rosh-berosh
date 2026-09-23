@@ -558,6 +558,26 @@ test("transcripts are made in 2MB parts and summarized, for admins only", async 
   assert.doesNotMatch(JSON.stringify(pub), /חלק 1/, "transcripts never reach the public catalog");
 });
 
+test("new recordings transcribe in the scheduled job without a manager click", async () => {
+  const { worker, db, env, media, admin, call, settle, ctx } = await setup();
+  const key = "program-recordings/auto.mp3";
+  await media.put(key, new Uint8Array(2 * 1024 * 1024 + 20), { httpMetadata: { contentType: "audio/mpeg" } });
+  env.AI = { async run() { return { text: "טקסט מההקלטה" }; } };
+  const saved = await publish(call, admin, [episode("auto", { r2Key: key })]);
+  assert.equal(saved.status, 200, await saved.clone().text());
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs WHERE episode_id='auto'").get().n, 1);
+  for (let i = 0; i < 2; i += 1) {
+    await worker.scheduled({}, env, ctx);
+    await settle();
+  }
+  const transcript = await (await call("/api/program/ai/transcript/auto", { token: admin })).json();
+  assert.equal(transcript.partsDone, 2);
+  assert.equal(transcript.text, "טקסט מההקלטה טקסט מההקלטה");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs WHERE episode_id='auto'").get().n, 0);
+  await publish(call, admin, [episode("auto", { r2Key: key })]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs WHERE episode_id='auto'").get().n, 0, "publishing the same recording does not restart transcription");
+});
+
 test("the share page gives crawlers Open Graph tags and sends people to the episode", async () => {
   const { call, admin } = await setup();
   await publish(call, admin, [

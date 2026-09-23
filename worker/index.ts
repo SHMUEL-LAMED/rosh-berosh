@@ -13,7 +13,7 @@ import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 import { readIvrCatalog } from "./ivr-catalog.js";
 import { programApi, programSharePage } from "./program-api";
 import { runScheduledPush } from "./program-push";
-import type { AiBinding } from "./program-ai";
+import { runAutomaticTranscription, type AiBinding } from "./program-ai";
 import { placeholders } from "./sql.js";
 
 interface Env {
@@ -645,7 +645,8 @@ const worker = {
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
       await ensureRuntimeSchema(env);
-      await runScheduledPush(env);
+      await runScheduledPush(env).catch((error) => console.error("scheduled push error", error));
+      await runAutomaticTranscription(env, "https://rosh-berosh.smwlyqswkwt232.workers.dev");
     })().catch((error) => console.error("scheduled push error", error)));
   },
 };
