@@ -70,6 +70,24 @@ const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORD
 const SONG_MEDIA_SQL = `SELECT s.id, s.audio_url AS audioUrl, COALESCE(NULLIF(a.cover_url,''), s.cover_url) AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.active=1 AND a.survey_id=${ACTIVE_SURVEY_SQL}`;
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
+const REQUESTED_VOTE_RESET_ID = "one-time-vote-reset-ml1701ml-20260923";
+async function runOneTimeRequestedVoteReset(env: Env): Promise<void> {
+  if (await env.DB.prepare("SELECT key FROM program_settings WHERE key=?").bind(REQUESTED_VOTE_RESET_ID).first()) return;
+  const rows = await env.DB.prepare("SELECT b.id, b.voter_key AS voterKey, b.survey_id AS surveyId FROM ballots b WHERE b.survey_id=(SELECT id FROM surveys WHERE active=1 ORDER BY created_at DESC LIMIT 1) AND b.channel='site' AND (lower(b.voter_email)=? OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_sub=b.voter_key AND lower(s.email)=?))")
+    .bind("ml1701ml@gmail.com", "ml1701ml@gmail.com").all<{ id: string; voterKey: string; surveyId: string }>();
+  if (rows.results.length !== 1) { console.error("requested vote reset requires exactly one matching ballot; found", rows.results.length); return; }
+  const { id, voterKey, surveyId } = rows.results[0];
+  // D1 batch is transactional: an audit conflict or failed deletion rolls back the whole reset.
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO program_settings (key,value_json) VALUES (?,?)").bind(REQUESTED_VOTE_RESET_ID, JSON.stringify({ ballotId: id })),
+    env.DB.prepare("DELETE FROM song_votes WHERE ballot_id=?").bind(id),
+    env.DB.prepare("DELETE FROM album_votes WHERE ballot_id=?").bind(id),
+    env.DB.prepare("DELETE FROM artist_votes WHERE ballot_id=?").bind(id),
+    env.DB.prepare("DELETE FROM ballots WHERE id=? AND survey_id=?").bind(id, surveyId),
+    env.DB.prepare("DELETE FROM site_ballot_progress WHERE survey_id=? AND user_sub=?").bind(surveyId, voterKey),
+  ]);
+  console.log("one-time requested vote reset completed");
+}
 const unique = (items: string[]) => [...new Set(items)];
 const CATALOG_CACHE_SECONDS = 60;
 // מפתחות המטמון אינם נתיבים אמיתיים של האתר. קטלוג הקו מוגש רק אחרי בדיקת
@@ -373,6 +391,10 @@ async function serveMedia(request: Request, env: Env, ctx: ExecutionContext, pat
 
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  if (url.pathname === "/api/maintenance/vote-reset-status-20260923" && request.method === "GET") {
+    try { return json({ complete: !!(await env.DB.prepare("SELECT key FROM program_settings WHERE key=?").bind(REQUESTED_VOTE_RESET_ID).first()) }); }
+    catch { return json({ complete: false }); }
+  }
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, ctx, url.pathname);
   // דף שיתוף לתוכנית (תגי Open Graph לוואטסאפ/פייסבוק, והפניה מיידית לאתר התוכניות)
   if (url.pathname.startsWith("/p/") && (request.method === "GET" || request.method === "HEAD")) {
@@ -646,6 +668,7 @@ const worker = {
   // כל חמש דקות: מנה מתור התראות הדחיפה, ותוכניות מתוזמנות שמועד הפרסום שלהן הגיע
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
+      await runOneTimeRequestedVoteReset(env).catch((error) => console.error("requested vote reset failed", error));
       await ensureRuntimeSchema(env);
       await runScheduledPush(env).catch((error) => console.error("scheduled push error", error));
       await runAutomaticTranscription(env, "https://rosh-berosh.smwlyqswkwt232.workers.dev");
