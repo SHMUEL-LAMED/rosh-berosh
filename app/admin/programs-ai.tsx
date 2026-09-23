@@ -114,7 +114,8 @@ export function AiCard({ episode, onPatch, onMessage }: { episode: Episode; onPa
 
 /* ---------- הגהה: השמות, התיאורים, ההודעה והעדכונים — תיקוני כתיב בלבד, כל אחד באישור ---------- */
 
-const PROOF_MAX_ITEMS = 40, PROOF_MAX_CHARS = 38000;
+// Small requests keep the model response short enough to finish within a Worker request.
+const PROOF_MAX_ITEMS = 8, PROOF_MAX_CHARS = 6000;
 type ProofState = { running: boolean; done: number; total: number; results: ProofResult[]; error: string };
 
 /** איפה הטקסט יושב בטיוטה, ומה הערך שלו עכשיו */
@@ -164,7 +165,7 @@ export function ProofreadCard({ data, origin, mutate, onMessage, onOpen }: { dat
       state.done++; setProof({ ...state, results: [...state.results] });
     }
     setProof({ ...state, running: false, results: [...state.results] });
-    onMessage(state.results.length ? `נמצאו הצעות תיקון ב־${state.results.length} טקסטים.` : "לא נמצאו שגיאות כתיב.");
+    onMessage(state.error ? "בדיקת האיכות לא הושלמה. חלק מהטקסטים לא נבדקו." : state.results.length ? `נמצאו הצעות תיקון ב־${state.results.length} טקסטים.` : "לא נמצאו שגיאות כתיב.");
   };
   const applyMany = (indexes: number[]) => {
     if (!proof) return;

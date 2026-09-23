@@ -281,6 +281,29 @@ test("proofreading goes to Claude when the key is set", async () => {
   } finally { globalThis.fetch = original; }
 });
 
+test("proofreading falls back to Workers AI when Claude rejects the request", async () => {
+  const { call, env, admin } = await setup();
+  env.ANTHROPIC_API_KEY = "sk-test";
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (input === "https://api.anthropic.com/v1/messages") return Response.json({ error: { message: "credit balance low" } }, { status: 402 });
+    return original(input, init);
+  };
+  let called = false;
+  env.AI = { async run() { called = true; return { response: '{"results":[{"key":"a","fixed":"שלום, עולם"}]}' }; } };
+  try {
+    const request = () => call("/api/program/ai/proofread", { method: "POST", token: admin, body: { items: [{ key: "a", text: "שלום,עולם" }] } });
+    const response = await request();
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.equal((await response.json()).results[0].fixed, "שלום, עולם");
+    assert.equal(called, true);
+    env.AI = undefined;
+    const unavailable = await request();
+    assert.equal(unavailable.status, 502);
+    assert.match((await unavailable.json()).error, /המכסה בחשבון Claude/);
+  } finally { globalThis.fetch = original; }
+});
+
 test("word changes stay aligned around insertions and are capped at 30", async () => {
   const { call, env, admin } = await setup();
   const long = Array.from({ length: 80 }, (_, n) => `מילה${n}`).join(" ");
