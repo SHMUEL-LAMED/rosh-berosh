@@ -364,7 +364,7 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
   }
   if (path === "/likes" && method === "POST") {
     const user = await readSession(request, env);
-    if (!user?.sub) return h.reply(request, { error: "צריך להתחבר כדי לסמן אהבתי." }, 401);
+    if (!user?.sub) return h.reply(request, { error: "צריך להתחבר כדי לסמן \"אהבתי\"." }, 401);
     if (!(await checkBallotRate(env.DB, `plike:${user.sub}`))) return tooMany();
     const input = await body<{ episodeId?: string; like?: boolean }>();
     const episodeId = h.safeId(input.episodeId);
