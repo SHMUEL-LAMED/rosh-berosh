@@ -6,7 +6,8 @@
 import { configuredAdminEmails, createSession, readAdminEmails, readSession, saveAdminEmails, sessionCookie, type SessionUser } from "./auth";
 import { checkBallotRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
-import { israelHour } from "./program-schedule.js";
+import { israelHour, isPublic } from "./program-schedule.js";
+import { loadEpisode } from "./program-audio";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
 type Helpers = {
@@ -15,7 +16,7 @@ type Helpers = {
   safeId: (value: unknown) => string;
 };
 
-export const PUBLIC_SETTING_KEYS = ["banner", "updates"] as const;
+export const PUBLIC_SETTING_KEYS = ["banner", "updates", "contacts"] as const;
 /** כתובת אתר התוכניות (GitHub Pages) — יעד המעבר מניהול הסקר. */
 export const PROGRAM_SITE = "https://shmuel-lamed.github.io/rosh-berosh-2/";
 const HANDOFF_TTL = 180;
@@ -64,6 +65,30 @@ export function normalizeUpdates(raw: unknown) {
   }).filter((u) => u.title || u.text).sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.date.localeCompare(a.date));
 }
 
+/** פרטי הקשר שבאתר (טלפונים, דוא״ל והערות) — ברירת המחדל עד שנשמרו לראשונה. */
+export const DEFAULT_CONTACTS = {
+  phone: "077-226-2271",
+  phone2: "073-707-9536",
+  email: "rbr17011701@gmail.com",
+  phoneNote: "האזנה לתוכניות בשלוחה 1, שירים מומלצים בשלוחה 3 והרשמה לצינתוק בשלוחה 4.",
+  hostsNote: "לשאלות ולתגובות למגישים: שלוחה 9 בקו התוכן. פורום המאזינים נמצא בשלוחה 5.",
+  chatNote: "בבקשה ציינו לאיזו קבוצה להצטרף — גברים או נשים.",
+};
+export type Contacts = typeof DEFAULT_CONTACTS;
+
+/** פרטי הקשר: בדיוק שישה שדות. שדה שלא נשלח כלל נשאר בברירת המחדל; "" מרוקן אותו. */
+export function normalizeContacts(raw: unknown): Contacts {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...DEFAULT_CONTACTS };
+  const c = raw as Record<string, unknown>;
+  const field = (key: keyof Contacts, max: number) => (c[key] === undefined || c[key] === null ? DEFAULT_CONTACTS[key] : text(c[key], max));
+  const email = c.email === undefined || c.email === null ? DEFAULT_CONTACTS.email : String(c.email).trim();
+  return {
+    phone: field("phone", 30), phone2: field("phone2", 30),
+    email: email.length <= 120 && isValidEmail(email) ? email : "",
+    phoneNote: field("phoneNote", 500), hostsNote: field("hostsNote", 500), chatNote: field("chatNote", 500),
+  };
+}
+
 /** ההודעה פעילה עכשיו? (מסומנת, יש טקסט, והתאריך לא עבר) */
 export function bannerLive(banner: ReturnType<typeof normalizeBanner>) {
   return banner.enabled && !!banner.text && (!banner.until || banner.until >= day());
@@ -80,9 +105,9 @@ export async function activeSurveyStatus(env: Env, origin: string) {
 
 /** מה מתפרסם לציבור יחד עם הקטלוג. */
 export async function publicSettings(env: Env, origin = "") {
-  const rows = await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates')").all<{ key: string; value_json: string }>();
+  const rows = await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates','contacts')").all<{ key: string; value_json: string }>();
   const values = new Map(rows.results.map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
-  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), survey: await activeSurveyStatus(env, origin) };
+  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), contacts: normalizeContacts(values.get("contacts")), survey: await activeSurveyStatus(env, origin) };
 }
 
 /** משפטי הכתיבה של ההגדרות שהגיעו עם פרסום הקטלוג. */
@@ -91,6 +116,7 @@ export function settingsStatements(env: Env, raw: unknown) {
   const statements = [];
   if ("banner" in settings) statements.push(settingStatement(env, "banner", normalizeBanner(settings.banner)));
   if ("updates" in settings) statements.push(settingStatement(env, "updates", normalizeUpdates(settings.updates)));
+  if ("contacts" in settings) statements.push(settingStatement(env, "contacts", normalizeContacts(settings.contacts)));
   return statements;
 }
 
@@ -116,6 +142,29 @@ export const RETENTION_BUCKETS = Array.from({ length: 20 }, (_, i) => i * 5);
 /** לכל סף (0,5,…,95): כמה מאזינים שונים הגיעו לאחוז הזה לפחות. */
 export function retentionCurve(maxima: Array<{ pct: number }>) {
   return RETENTION_BUCKETS.map((pct) => ({ pct, listeners: maxima.filter((row) => Number(row.pct) >= pct).length }));
+}
+
+export const COMMENT_STATUSES = ["pending", "approved", "hidden"] as const;
+export const COMMENT_MAX = 1000;
+type CommentRow = { id: string; episode_id: string; user_sub: string | null; name: string | null; text: string; at_seconds: number | null; status: string; pinned: number; reply: string | null; reply_by: string | null; replied_at: number | null; created_at: number; email?: string | null };
+const COMMENT_COLUMNS = "id,episode_id,user_sub,name,text,at_seconds,status,pinned,reply,reply_by,replied_at,created_at";
+// למנהלים: הדוא״ל של כותב התגובה, מהסשן האחרון שלו או מהנתונים האישיים שלו
+const COMMENT_ADMIN_SELECT = `SELECT ${COMMENT_COLUMNS.split(",").map((column) => `c.${column}`).join(",")}, COALESCE((SELECT s.email FROM auth_sessions s WHERE s.user_sub=c.user_sub ORDER BY s.created_at DESC LIMIT 1),(SELECT u.email FROM program_user_data u WHERE u.user_sub=c.user_sub),'') AS email FROM program_comments c`;
+
+/** תגובה כפי שהציבור רואה אותה: שם פרטי בלבד, בלי דוא״ל ובלי מזהה חשבון. */
+export function publicComment(row: CommentRow) {
+  return {
+    id: row.id, name: String(row.name || "").trim().split(/\s+/)[0] || "", text: row.text,
+    at: row.at_seconds === null || row.at_seconds === undefined ? null : Number(row.at_seconds),
+    pinned: !!Number(row.pinned), reply: row.reply || null, createdAt: Number(row.created_at),
+  };
+}
+function adminComment(row: CommentRow) {
+  return {
+    id: row.id, episodeId: row.episode_id, name: row.name || "", email: row.email || "", text: row.text,
+    at: row.at_seconds === null || row.at_seconds === undefined ? null : Number(row.at_seconds),
+    status: row.status, pinned: !!Number(row.pinned), reply: row.reply || null, replyBy: row.reply_by || null, createdAt: Number(row.created_at),
+  };
 }
 
 export async function programToolsApi(request: Request, env: Env, h: Helpers): Promise<Response | null> {
@@ -412,6 +461,89 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     const { id } = await body<{ id?: string }>();
     if (!h.safeId(id)) return h.reply(request, { error: "חסר מזהה." }, 400);
     await env.DB.prepare("DELETE FROM program_messages WHERE id=?").bind(h.safeId(id)).run();
+    return h.reply(request, { ok: true });
+  }
+
+  /* ---------- תגובות המאזינים (באישור מנהל) ----------
+     מחוברים בלבד כותבים; כל תגובה ממתינה עד שמנהל מאשר אותה. `at` — הרגע
+     בתוכנית (בשניות) שהתגובה מתייחסת אליו. */
+  if (path === "/comments" && method === "POST") {
+    const user = await readSession(request, env);
+    if (!user?.sub) return h.reply(request, { error: "צריך להתחבר כדי להגיב." }, 401);
+    if (!(await checkBallotRate(env.DB, `pcomment:${user.sub}`))) return tooMany();
+    const input = await body<{ episodeId?: string; text?: string; at?: unknown }>();
+    const content = String(input.text ?? "").trim();
+    if (content.length < 2) return h.reply(request, { error: "התגובה קצרה מדי." }, 400);
+    if (content.length > COMMENT_MAX) return h.reply(request, { error: `התגובה ארוכה מדי (עד ${COMMENT_MAX} תווים).` }, 400);
+    let at: number | null = null;
+    if (input.at !== undefined && input.at !== null && input.at !== "") {
+      const value = Number(input.at);
+      if (!Number.isInteger(value) || value < 0) return h.reply(request, { error: "הרגע בתוכנית אינו תקין." }, 400);
+      at = value;
+    }
+    const episode = await loadEpisode(env, h.safeId(input.episodeId));
+    if (!episode || !episode.visible || !isPublic(episode.data, true)) return h.reply(request, { error: "התוכנית לא נמצאה." }, 404);
+    const row: CommentRow = { id: crypto.randomUUID(), episode_id: episode.id, user_sub: user.sub, name: normalizeName(user.name), text: content, at_seconds: at, status: "pending", pinned: 0, reply: null, reply_by: null, replied_at: null, created_at: nowSeconds() };
+    await env.DB.prepare("INSERT INTO program_comments (id,episode_id,user_sub,name,text,at_seconds,status,created_at) VALUES (?,?,?,?,?,?,'pending',?)")
+      .bind(row.id, row.episode_id, row.user_sub, row.name, row.text, row.at_seconds, row.created_at).run();
+    return h.reply(request, { ok: true, comment: { ...publicComment(row), status: row.status } });
+  }
+  if (path === "/comments" && method === "GET") {
+    const requested = h.safeId(url.searchParams.get("episode"));
+    if (!requested) return h.reply(request, { error: "חסר מזהה תוכנית." }, 400);
+    const episodeId = (await loadEpisode(env, requested))?.id || requested;
+    const user = await readSession(request, env);
+    const [approved, mine] = await env.DB.batch([
+      env.DB.prepare(`SELECT ${COMMENT_COLUMNS} FROM program_comments WHERE episode_id=? AND status='approved' ORDER BY pinned DESC, created_at ASC, rowid ASC LIMIT 500`).bind(episodeId),
+      env.DB.prepare(`SELECT ${COMMENT_COLUMNS} FROM program_comments WHERE episode_id=? AND status='pending' AND user_sub=? ORDER BY created_at ASC, rowid ASC LIMIT 50`).bind(episodeId, user?.sub || ""),
+    ]);
+    return h.reply(request, {
+      comments: (approved.results as CommentRow[]).map(publicComment),
+      mine: user?.sub ? (mine.results as CommentRow[]).map((row) => ({ ...publicComment(row), status: row.status })) : [],
+    });
+  }
+  if (path === "/comments/all" && method === "GET") {
+    if (!await h.admin(request, env)) return forbidden();
+    const status = url.searchParams.get("status") || "all";
+    if (status !== "all" && !(COMMENT_STATUSES as readonly string[]).includes(status)) return h.reply(request, { error: "סטטוס לא מוכר." }, 400);
+    const where = status === "all" ? "" : "WHERE c.status=?";
+    const list = env.DB.prepare(`${COMMENT_ADMIN_SELECT} ${where} ORDER BY c.created_at DESC, c.rowid DESC LIMIT 300`);
+    const [rows, pending] = await env.DB.batch([
+      status === "all" ? list : list.bind(status),
+      env.DB.prepare("SELECT COUNT(*) AS pending FROM program_comments WHERE status='pending'"),
+    ]);
+    return h.reply(request, { comments: (rows.results as CommentRow[]).map(adminComment), pending: Number((pending.results[0] as { pending?: number } | undefined)?.pending || 0) });
+  }
+  if (path === "/comments/moderate" && method === "POST") {
+    const user = await h.admin(request, env);
+    if (!user) return forbidden();
+    const input = await body<{ id?: string; status?: string; pinned?: boolean; reply?: string }>();
+    const id = h.safeId(input.id);
+    if (!id) return h.reply(request, { error: "חסר מזהה." }, 400);
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (input.status !== undefined) {
+      if (!(COMMENT_STATUSES as readonly string[]).includes(String(input.status))) return h.reply(request, { error: "סטטוס לא מוכר." }, 400);
+      sets.push("status=?"); values.push(String(input.status));
+    }
+    if (input.pinned !== undefined) { sets.push("pinned=?"); values.push(input.pinned ? 1 : 0); }
+    if (input.reply !== undefined && input.reply !== null) {
+      const answer = String(input.reply).trim();
+      if (answer.length > COMMENT_MAX) return h.reply(request, { error: `התשובה ארוכה מדי (עד ${COMMENT_MAX} תווים).` }, 400);
+      if (answer) { sets.push("reply=?", "reply_by=?", "replied_at=?"); values.push(answer, user.email, nowSeconds()); }
+      else sets.push("reply=NULL", "reply_by=NULL", "replied_at=NULL");
+    }
+    const exists = await env.DB.prepare("SELECT 1 AS one FROM program_comments WHERE id=?").bind(id).first();
+    if (!exists) return h.reply(request, { error: "התגובה לא נמצאה." }, 404);
+    if (sets.length) await env.DB.prepare(`UPDATE program_comments SET ${sets.join(",")} WHERE id=?`).bind(...values, id).run();
+    const row = await env.DB.prepare(`${COMMENT_ADMIN_SELECT} WHERE c.id=?`).bind(id).first<CommentRow>();
+    return h.reply(request, { ok: true, comment: adminComment(row as CommentRow) });
+  }
+  if (path === "/comments" && method === "DELETE") {
+    if (!await h.admin(request, env)) return forbidden();
+    const { id } = await body<{ id?: string }>();
+    if (!h.safeId(id)) return h.reply(request, { error: "חסר מזהה." }, 400);
+    await env.DB.prepare("DELETE FROM program_comments WHERE id=?").bind(h.safeId(id)).run();
     return h.reply(request, { ok: true });
   }
 
