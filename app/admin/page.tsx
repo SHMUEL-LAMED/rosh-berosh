@@ -73,7 +73,11 @@ export default function AdminPage() {
   const toggle = async (kind: "album" | "song" | "artist", id: string, active: boolean) => { try { await api("/api/admin/toggle", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id, active }) }); notify("המצב עודכן."); await load(); } catch (error) { notify(error instanceof Error ? error.message : "העדכון נכשל."); } };
   const remove = async (kind: "album" | "song" | "artist", id: string) => {
     const label = kind === "album" ? "האלבום, כל השירים וכל הקבצים שלו" : kind === "song" ? "השיר וקובץ השמע שלו" : "הזמר";
-    if (!confirm(`למחוק לצמיתות את ${label}?`)) return;
+    const votes = data?.results[kind === "album" ? "albums" : kind === "song" ? "songs" : "artists"].find((item) => item.id === id)?.votes || 0;
+    const warning = data?.settings.votingOpen
+      ? `הסקר פתוח כעת.${votes ? ` לפריט הזה כבר יש ${votes} קולות.` : ""} מחיקה עלולה לשנות את הבחירות הזמינות בזמן ההצבעה.\n\n`
+      : "";
+    if (!confirm(`${warning}למחוק לצמיתות את ${label}?`)) return;
     notify("מוחקים…");
     try { await api("/api/admin/catalog", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id }) }); notify("נמחק בהצלחה."); await load(); }
     catch (error) { notify(error instanceof Error ? error.message : "המחיקה נכשלה."); }
