@@ -25,6 +25,7 @@ const eslintConfig = defineConfig([
         R2Bucket: "readonly",
         R2Object: "readonly",
         R2ObjectBody: "readonly",
+        FixedLengthStream: "readonly",
       },
     },
     rules: { "no-undef": "error" },

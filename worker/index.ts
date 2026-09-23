@@ -60,6 +60,10 @@ type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; alb
 const DEFAULT_RULES: Rules = { votingOpen: 0, albumsEnabled: 1, albumsMin: 5, albumsMax: 5, songsEnabled: 1, songsMin: 1, songsMax: 1, artistsEnabled: 1, artistsMin: 1, artistsMax: 3 };
 const ACTIVE_SURVEY_SQL = "COALESCE((SELECT id FROM surveys WHERE active = 1 ORDER BY created_at DESC LIMIT 1), 'main')";
 
+// תמונת האלבום היא התמונה של כל השירים שבו. לשיר יש עטיפה משלו רק כשלאלבום
+// עדיין אין, כך שכל השירים באלבום נראים אותו דבר באתר ובנגן.
+const SONG_MEDIA_SQL = `SELECT s.id, s.audio_url AS audioUrl, COALESCE(NULLIF(a.cover_url,''), s.cover_url) AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.active=1 AND a.survey_id=${ACTIVE_SURVEY_SQL}`;
+
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const unique = (items: string[]) => [...new Set(items)];
 const CATALOG_CACHE_SECONDS = 60;
@@ -67,8 +71,11 @@ const CATALOG_CACHE_SECONDS = 60;
 // הסוד, ולכן העותק השמור יושב תחת כתובת שאי אפשר לבקש מבחוץ: גם אם מישהו
 // ינחש אותה, אין ראוטר שמגיש אותה, והמטמון נקרא רק מהקוד שכבר אימת את הסוד.
 const SITE_CATALOG_CACHE_KEY = "/__cache/catalog";
+const SITE_MEDIA_CACHE_KEY = "/__cache/catalog-media";
 const IVR_CATALOG_CACHE_KEY = "/__cache/ivr-catalog";
-const CATALOG_CACHE_KEYS = [SITE_CATALOG_CACHE_KEY, IVR_CATALOG_CACHE_KEY];
+const CATALOG_CACHE_KEYS = [SITE_CATALOG_CACHE_KEY, SITE_MEDIA_CACHE_KEY, IVR_CATALOG_CACHE_KEY];
+// קובץ גדול מזה אינו נשמר במטמון הקצה ותמיד מוגש ישר מ-R2.
+const MEDIA_EDGE_CACHE_MAX_BYTES = 100 * 1024 * 1024;
 
 function catalogCache(request: Request, pathname: string = SITE_CATALOG_CACHE_KEY): { cache?: Cache; key: Request } {
   const url = new URL(request.url);
@@ -166,15 +173,24 @@ function invalidateCatalogCache(request: Request, ctx: ExecutionContext): void {
 async function catalogMedia(request: Request, env: Env): Promise<Response> {
   const requested = new URL(request.url).searchParams.get("albumIds")?.split(",").map((id) => id.trim()).filter(Boolean) ?? [];
   const albumIds = unique(requested).slice(0, 50);
-  if (!albumIds.length) return json({ songs: [] });
   try {
-    const songs = await env.DB.prepare(`SELECT s.id, s.audio_url AS audioUrl, s.cover_url AS coverUrl, s.preview_start AS previewStart, s.preview_end AS previewEnd FROM songs s JOIN albums a ON a.id=s.album_id WHERE s.active=1 AND a.active=1 AND a.survey_id=${ACTIVE_SURVEY_SQL} AND a.id IN (${placeholders(albumIds.length)})`).bind(...albumIds).all();
+    const songs = albumIds.length
+      ? await env.DB.prepare(`${SONG_MEDIA_SQL} AND a.id IN (${placeholders(albumIds.length)})`).bind(...albumIds).all()
+      : await env.DB.prepare(SONG_MEDIA_SQL).all();
     return json({ songs: songs.results });
   } catch (error) {
     console.error("catalog media error", error);
     return json({ error: "לא ניתן לטעון כרגע את קובצי השירים." }, 500);
   }
 }
+
+// האתר מושך את קובצי כל השירים בבקשה אחת מיד עם הכניסה, במקביל לקטלוג,
+// כדי שכפתור ההשמעה יהיה מוכן כשמגיעים לשירים. הבקשה בלי albumIds זהה לכל
+// המבקרים ולכן נשמרת במטמון כמו הקטלוג, ונמחקת יחד איתו בכל שינוי ניהול.
+const cachedCatalogMedia = (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>
+  new URL(request.url).searchParams.get("albumIds")
+    ? catalogMedia(request, env)
+    : cachedJson(request, ctx, SITE_MEDIA_CACHE_KEY, () => catalogMedia(request, env));
 
 // The phone service needs the names and identifiers used for voting, but none
 // of the website's image/audio metadata. Keep this endpoint to one D1 round
@@ -275,7 +291,18 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   }
 }
 
-async function serveMedia(request: Request, env: Env, pathname: string): Promise<Response> {
+function mediaResponse(body: ReadableStream | null, status: number, headers: Headers, cacheStatus: "HIT" | "MISS"): Response {
+  const out = new Headers(headers);
+  out.set("x-rosh-berosh-cache", cacheStatus);
+  return new Response(body, { status, headers: out });
+}
+
+// קובצי השמע והעטיפות אינם משתנים לעולם (לכל העלאה מפתח חדש), ולכן הם נשמרים
+// במטמון הקצה של Cloudflare. בלי זה כל האזנה, וכל קפיצה לקטע ההשמעה, חיכתה
+// לקריאה מ-R2 שיושב רחוק מהמאזינים. המטמון עונה בעצמו על בקשות Range (206),
+// כך שהנגן יכול לקפוץ לפזמון מיד. בפעם הראשונה הבקשה נענית מ-R2 כרגיל,
+// והקובץ המלא נשמר ברקע.
+async function serveMedia(request: Request, env: Env, ctx: ExecutionContext, pathname: string): Promise<Response> {
   let key = "";
   try { key = pathname.slice(7).split("/").map(decodeURIComponent).join("/"); } catch { return new Response("Not Found", { status: 404 }); }
   const ivrPromptObject = key.startsWith("ivr-prompts/");
@@ -283,6 +310,15 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
   const privateObject = key.startsWith("settings/") || key.startsWith("poll-archives/") || key.startsWith("ivr-progress/") || (ivrPromptObject && !ivrPromptAudio);
   if (!key || key.includes("..") || privateObject) return new Response("Not Found", { status: 404 });
   const rangeHeader = request.headers.get("range");
+  const cache = (globalThis.caches as EdgeCacheStorage | undefined)?.default;
+  const cacheUrl = new URL(request.url);
+  cacheUrl.search = "";
+  cacheUrl.hash = "";
+  const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
+  if (cache) {
+    const hit = await cache.match(rangeHeader ? new Request(cacheKey.url, { method: "GET", headers: { range: rangeHeader } }) : cacheKey).catch(() => undefined);
+    if (hit) return mediaResponse(request.method === "HEAD" ? null : hit.body, hit.status, hit.headers, "HIT");
+  }
   const object = rangeHeader
     ? await env.MEDIA.get(key, { range: request.headers })
     : await env.MEDIA.get(key);
@@ -294,22 +330,38 @@ async function serveMedia(request: Request, env: Env, pathname: string): Promise
   headers.set("cache-control", headers.get("cache-control") || "public, max-age=31536000, immutable");
   headers.set("x-content-type-options", "nosniff");
   headers.set("accept-ranges", "bytes");
-  if ("range" in object && object.range) {
-    const r = object.range as { offset: number; length: number };
-    headers.set("content-range", `bytes ${r.offset}-${r.offset + r.length - 1}/${object.size}`);
-    headers.set("content-length", String(r.length));
-  }
   const ct = headers.get("content-type") || "";
   if (ct.includes("svg") || ct.includes("html") || ct.includes("xml")) {
     headers.set("content-type", "application/octet-stream");
   }
+  // העותק שבמטמון הוא תמיד הקובץ המלא, עם אורך מפורש: רק כך המטמון יודע
+  // לחתוך ממנו בעצמו את הטווח שכל בקשה הבאה מבקשת.
+  const fullHeaders = new Headers(headers);
+  fullHeaders.set("content-length", String(object.size));
+  const cacheable = !!cache && object.size <= MEDIA_EDGE_CACHE_MAX_BYTES;
+  const store = (body: ReadableStream) => cache!.put(cacheKey, new Response(body.pipeThrough(new FixedLengthStream(object.size)), { status: 200, headers: fullHeaders }));
+  const partial = "range" in object && object.range;
+  if (partial) {
+    const r = object.range as { offset: number; length: number };
+    headers.set("content-range", `bytes ${r.offset}-${r.offset + r.length - 1}/${object.size}`);
+    headers.set("content-length", String(r.length));
+  }
   const status = rangeHeader && "range" in object ? 206 : 200;
-  return new Response(request.method === "HEAD" ? null : object.body, { status, headers });
+  if (request.method === "HEAD") return mediaResponse(null, status, headers, "MISS");
+  if (cacheable && status === 200) {
+    const [forClient, forCache] = object.body.tee();
+    ctx.waitUntil(store(forCache).catch((error) => console.error("media cache error", key, error)));
+    return mediaResponse(forClient, status, headers, "MISS");
+  }
+  if (cacheable) {
+    ctx.waitUntil(env.MEDIA.get(key).then((full) => full ? store(full.body) : undefined).catch((error) => console.error("media cache error", key, error)));
+  }
+  return mediaResponse(object.body, status, headers, "MISS");
 }
 
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, url.pathname);
+  if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, ctx, url.pathname);
   if (url.pathname.startsWith("/api/program/")) {
     await ensureRuntimeSchema(env);
     const response = await programApi(request, env, ctx);
@@ -347,7 +399,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (request.method !== "GET" && response.ok) invalidateCatalogCache(request, ctx);
     return response;
   }
-  if (url.pathname === "/api/catalog/media" && request.method === "GET") return catalogMedia(request, env);
+  if (url.pathname === "/api/catalog/media" && request.method === "GET") return cachedCatalogMedia(request, env, ctx);
   if (url.pathname === "/api/catalog" && request.method === "GET") return cachedCatalog(request, env, ctx);
   if (url.pathname === "/api/ivr/catalog" && request.method === "GET") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);

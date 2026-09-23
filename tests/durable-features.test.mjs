@@ -173,7 +173,7 @@ test("the phone catalog is cached too, and never leaks past the secret check", (
 
 test("every change that touches the phone payload clears both catalog copies", () => {
   const worker = source("worker/index.ts");
-  assert.match(worker, /CATALOG_CACHE_KEYS = \[SITE_CATALOG_CACHE_KEY, IVR_CATALOG_CACHE_KEY\]/);
+  assert.match(worker, /CATALOG_CACHE_KEYS = \[SITE_CATALOG_CACHE_KEY, SITE_MEDIA_CACHE_KEY, IVR_CATALOG_CACHE_KEY\]/);
   assert.match(worker, /for \(const pathname of CATALOG_CACHE_KEYS\)/);
   const promptUpload = worker.slice(worker.indexOf('/api/ivr/prompt'), worker.indexOf('/api/ballots/check'));
   assert.match(promptUpload, /invalidateCatalogCache\(request, ctx\)/, "העלאת קריינות משנה את קטלוג הקו וחייבת למחוק אותו");
@@ -355,4 +355,35 @@ test("a phone stage is stamped when the caller leaves it, not when its minimum i
   assert.doesNotMatch(persist, /stampStages\(\)/, "saving progress must not stamp a stage the caller is still inside");
   // שישה מקומות: שלושה שלבים בשני מסלולי התפריט.
   assert.ok((phone.match(/finishStage\("/g) || []).length >= 8, "every stage exit stamps, on both menu paths");
+});
+
+test("all song media loads in one cached request alongside the catalog", () => {
+  const worker = source("worker/index.ts");
+  assert.match(worker, /const SITE_MEDIA_CACHE_KEY = "\/__cache\/catalog-media"/);
+  assert.match(worker, /cachedJson\(request, ctx, SITE_MEDIA_CACHE_KEY, \(\) => catalogMedia\(request, env\)\)/);
+  const page = source("app/page.tsx");
+  const load = page.slice(page.indexOf("const loadCatalog = useCallback"), page.indexOf("const loadSongMedia = useCallback"));
+  // הבקשה לקבצים יוצאת לפני שמחכים לקטלוג, ולא אחריו.
+  assert.ok(load.indexOf("fetchSongMedia(null)") < load.indexOf('fetch("/api/catalog"'));
+  assert.match(page, /await mediaSettled\.current/);
+});
+
+test("songs and the player use the album's image", () => {
+  const worker = source("worker/index.ts");
+  assert.match(worker, /COALESCE\(NULLIF\(a\.cover_url,''\), s\.cover_url\) AS coverUrl/);
+  const page = source("app/page.tsx");
+  assert.match(page, /play\(withAlbumCover\(song, album\)\)/);
+  assert.match(page, /play\(withAlbumCover\(song, selectedAlbum\)\)/);
+  const admin = source("worker/admin.ts");
+  assert.match(admin, /UPDATE songs SET cover_url=\? WHERE album_id=\?"\)\.bind\(coverUrl, albumId\)/);
+  assert.match(admin, /let coverUrl: string \| null = album\.coverUrl \|\| null;/);
+});
+
+test("public media is kept in the edge cache and ranges are served from it", () => {
+  const worker = source("worker/index.ts");
+  const serve = worker.slice(worker.indexOf("async function serveMedia("), worker.indexOf("async function route("));
+  assert.ok(serve.indexOf("privateObject) return") < serve.indexOf("cache.match"), "קבצים פרטיים נחסמים לפני המטמון");
+  assert.match(serve, /headers: \{ range: rangeHeader \}/);
+  assert.match(serve, /new FixedLengthStream\(object\.size\)/);
+  assert.match(serve, /MEDIA_EDGE_CACHE_MAX_BYTES/);
 });

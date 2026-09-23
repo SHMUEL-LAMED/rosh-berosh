@@ -9,6 +9,16 @@ import { hasStageChoices } from "./voting-stage.js";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string | null };
 type Song = { id: string; albumId: string; title: string; audioUrl?: string | null; coverUrl?: string | null; previewStart?: number; previewEnd?: number };
+type SongMedia = Pick<Song, "id" | "audioUrl" | "coverUrl" | "previewStart" | "previewEnd">;
+// תמונת האלבום היא התמונה של כל השירים שבו; עטיפה של השיר עצמו משמשת רק
+// כשלאלבום אין תמונה.
+const withAlbumCover = (song: Song, album?: Album | null): Song => ({ ...song, coverUrl: album?.coverUrl || song.coverUrl });
+async function fetchSongMedia(albumIds: string[] | null): Promise<SongMedia[]> {
+  const query = albumIds ? `?albumIds=${encodeURIComponent(albumIds.join(","))}` : "";
+  const response = await fetch(`/api/catalog/media${query}`, { cache: "no-store" });
+  if (!response.ok) throw new Error();
+  return ((await response.json()) as { songs?: SongMedia[] }).songs || [];
+}
 type Artist = { id: string; name: string; imageUrl?: string | null };
 type Rules = { votingOpen: number; albumsEnabled: number; albumsMin: number; albumsMax: number; songsEnabled: number; songsMin: number; songsMax: number; artistsEnabled: number; artistsMin: number; artistsMax: number };
 type Catalog = { surveyId: string; albums: Album[]; songs: Song[]; artists: Artist[]; rules: Rules };
@@ -113,37 +123,59 @@ export default function Home() {
   const progressReady = useRef(false);
   const loadedMediaAlbums = useRef(new Set<string>());
   const loadingMediaAlbums = useRef(new Set<string>());
+  const mediaSettled = useRef<Promise<void>>(Promise.resolve());
 
+  // קובצי השמע של כל השירים נמשכים מיד, במקביל לקטלוג, ולא רק כשפותחים
+  // אלבום: כך כפתור ההשמעה כבר מוכן כשמגיעים לשירים. אם הבקשה הכוללת נכשלת,
+  // loadSongMedia מושך את האלבומים הנחוצים בנפרד כמו קודם.
+  const mergeSongMedia = useCallback((songs: SongMedia[], albumIds: string[] | null) => {
+    const media = new Map(songs.map((song) => [song.id, song]));
+    setCatalog((current) => {
+      if (!current) return current;
+      const covered = new Set(albumIds ?? current.albums.map((album) => album.id));
+      // שיר שאין לו קובץ נשאר עם null מפורש, כדי שלא ייראה כאילו הוא עדיין נטען.
+      return { ...current, songs: current.songs.map((song) => media.has(song.id) ? { ...song, ...media.get(song.id) } : covered.has(song.albumId) && song.audioUrl === undefined ? { ...song, audioUrl: null } : song) };
+    });
+  }, []);
   const loadCatalog = useCallback(async () => {
     setLoadFailed(false);
+    const allMedia = fetchSongMedia(null).catch(() => null);
+    let settle = () => {};
+    mediaSettled.current = new Promise<void>((resolve) => { settle = resolve; });
     try {
       const response = await fetch("/api/catalog", { cache: "no-store" });
       if (!response.ok) throw new Error();
       loadedMediaAlbums.current.clear();
       loadingMediaAlbums.current.clear();
-      setCatalog(await response.json());
+      const body = await response.json() as Catalog;
+      setCatalog(body);
+      const media = await allMedia;
+      if (media) {
+        body.albums.forEach((album) => loadedMediaAlbums.current.add(album.id));
+        mergeSongMedia(media, null);
+      }
     } catch {
       setLoadFailed(true);
       notify("לא הצלחנו לטעון את רשימת המצעד.", "error");
+    } finally {
+      settle();
     }
-  }, [notify]);
+  }, [notify, mergeSongMedia]);
   const loadSongMedia = useCallback(async (albumIds: string[]) => {
+    // הבקשה הכוללת כבר בדרך: מחכים לה ולא מבקשים את אותם קבצים פעמיים.
+    await mediaSettled.current;
     const wanted = [...new Set(albumIds)].filter((id) => !loadedMediaAlbums.current.has(id) && !loadingMediaAlbums.current.has(id));
     if (!wanted.length) return;
     wanted.forEach((id) => loadingMediaAlbums.current.add(id));
     try {
-      const response = await fetch(`/api/catalog/media?albumIds=${encodeURIComponent(wanted.join(","))}`, { cache: "no-store" });
-      if (!response.ok) throw new Error();
-      const body = await response.json() as { songs?: Array<Pick<Song, "id" | "audioUrl" | "coverUrl" | "previewStart" | "previewEnd">> };
-      const media = new Map((body.songs || []).map((song) => [song.id, song]));
-      setCatalog((current) => current ? { ...current, songs: current.songs.map((song) => ({ ...song, ...media.get(song.id) })) } : current);
+      mergeSongMedia(await fetchSongMedia(wanted), wanted);
       wanted.forEach((id) => loadedMediaAlbums.current.add(id));
     } catch {
       wanted.forEach((id) => loadedMediaAlbums.current.delete(id));
     } finally {
       wanted.forEach((id) => loadingMediaAlbums.current.delete(id));
     }
-  }, []);
+  }, [mergeSongMedia]);
   const checkVote = useCallback(async () => {
     setVoted(null); setVoteCheckFailed(false);
     try {
@@ -330,7 +362,7 @@ export default function Home() {
           const chosen = songs[album.id]?.length ?? 0;
           return <><Title kicker={`שלב שני · אלבום ${songAlbumIndex + 1} מתוך ${selectedAlbums.length}`} title={`בחרו ${rangeText(catalog.rules.songsMin, catalog.rules.songsMax, "שירים")} מ״${album.title}״`} count={`${chosen}/${catalog.rules.songsMax}`} />
             <div className="song-progress"><span>{album.artistName}</span><div className="dots">{selectedAlbums.map((item, index) => <i key={item.id} className={index === songAlbumIndex ? "on" : index < songAlbumIndex ? "done" : ""} />)}</div></div>
-            <div className="song-groups"><fieldset><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button type="button" className="song-select" aria-pressed={songs[album.id]?.includes(song.id) ?? false} onClick={() => toggleSong(album.id, song.id)}><i aria-hidden="true">{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl && <button type="button" className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => { setSiblings(songsByAlbum(album.id).filter(s => s.audioUrl)); play(song); }}>{player?.id === song.id ? "■" : "▶"}</button>}</div>)}</fieldset></div></>;
+            <div className="song-groups"><fieldset><legend><b>{album.title}</b><small>{album.artistName}</small></legend>{songsByAlbum(album.id).map((song) => <div key={song.id} className={`song-row ${songs[album.id]?.includes(song.id) ? "selected" : ""}`}><button type="button" className="song-select" aria-pressed={songs[album.id]?.includes(song.id) ?? false} onClick={() => toggleSong(album.id, song.id)}><i aria-hidden="true">{songs[album.id]?.includes(song.id) ? "✓" : "+"}</i><span>{song.title}</span></button>{song.audioUrl ? <button type="button" className="song-play" aria-label={`השמעת ${song.title}`} onClick={() => { setSiblings(songsByAlbum(album.id).filter(s => s.audioUrl).map((s) => withAlbumCover(s, album))); play(withAlbumCover(song, album)); }}>{player?.id === song.id ? "■" : "▶"}</button> : song.audioUrl === undefined ? <span className="song-play song-play-loading" role="status" aria-label={`טוענים את ${song.title}`}>…</span> : null}</div>)}</fieldset></div></>;
         })()}
         {catalog && stage === "artists" && <><Title kicker="שלב שלישי" title={`בחרו ${rangeText(catalog.rules.artistsMin, catalog.rules.artistsMax, "זמרים")}`} count={`${artists.length}/${catalog.rules.artistsMax}`} /><div className="artist-grid">{catalog.artists.map((artist) => <button type="button" key={artist.id} aria-pressed={artists.includes(artist.id)} className={`artist-card ${artists.includes(artist.id) ? "selected" : ""}`} onClick={() => toggleArtist(artist.id)}>{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b><i aria-hidden="true">{artists.includes(artist.id) ? "✓" : "+"}</i></button>)}</div></>}
         {catalog && stage === "summary" && <><Title kicker="כמעט סיימנו" title="אישור ההצבעה" /><div className="summary">{catalog.rules.albumsEnabled ? <><h3>האלבומים והשירים שבחרתם</h3><div className="summary-albums">{selectedAlbums.map((album) => <div key={album.id} className="summary-album">{album.coverUrl ? <img src={album.coverUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`cover-fallback${album.coverUrl ? " hidden-fallback" : ""}`}>♫</span><div><b>{album.title}</b><small>{album.artistName}</small><span>{selectedSongNames(album.id)}</span></div></div>)}</div></> : null}{catalog.rules.artistsEnabled ? <><h3>הזמרים שבחרתם</h3><div className="summary-artists">{selectedArtists.map((artist) => <div key={artist.id} className="summary-artist">{artist.imageUrl ? <img src={artist.imageUrl} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextElementSibling?.classList.remove("hidden-fallback"); }} /> : null}<span className={`artist-initial${artist.imageUrl ? " hidden-fallback" : ""}`}>{artist.name.slice(0, 1)}</span><b>{artist.name}</b></div>)}</div></> : null}</div><div className="signed-voter"><span>ההצבעה תישמר עבור</span><b>{user.email}</b></div></>}
@@ -582,10 +614,12 @@ function BrowsePanel({ catalog, loadSongMedia }: { catalog: Catalog; loadSongMed
         <div className="browse-body">
           {selectedSongs.map((song) => {
             const isPlaying = currentSong?.id === song.id;
-            return <button type="button" key={song.id} aria-pressed={isPlaying} aria-label={`${isPlaying ? "עצירת" : "השמעת"} ${song.title}`} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => { setSiblings(selectedSongs.filter(s => s.audioUrl)); play(song); }}>
-              {song.coverUrl && <img className="browse-song-cover" src={song.coverUrl} alt="" />}
+            const cover = selectedAlbum?.coverUrl || song.coverUrl;
+            const loading = song.audioUrl === undefined;
+            return <button type="button" key={song.id} disabled={!song.audioUrl} aria-pressed={isPlaying} aria-label={loading ? `טוענים את ${song.title}` : `${isPlaying ? "עצירת" : "השמעת"} ${song.title}`} className={`browse-song ${isPlaying ? "playing" : ""}`} onClick={() => { if (!song.audioUrl) return; setSiblings(selectedSongs.filter(s => s.audioUrl).map((s) => withAlbumCover(s, selectedAlbum))); play(withAlbumCover(song, selectedAlbum)); }}>
+              {cover && <img className="browse-song-cover" src={cover} alt="" />}
               <span className="browse-song-title">{song.title}</span>
-              <span className="browse-song-action">{isPlaying ? "■" : "▶"}</span>
+              <span className="browse-song-action">{loading ? "…" : !song.audioUrl ? "" : isPlaying ? "■" : "▶"}</span>
             </button>;
           })}
           {selectedSongs.length === 0 && <p className="browse-empty">אין שירים באלבום זה</p>}
