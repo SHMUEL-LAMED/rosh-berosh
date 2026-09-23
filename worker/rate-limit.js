@@ -7,7 +7,7 @@ async function rateBucket(value) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function checkBallotRate(db, ip, now = Math.floor(Date.now() / 1000)) {
+export async function checkBallotRate(db, ip, now = Math.floor(Date.now() / 1000), limit = BALLOT_RATE_LIMIT) {
   try {
     if (now - lastCleanupAt >= BALLOT_RATE_WINDOW) {
       await db.prepare("DELETE FROM ballot_rate_limits WHERE reset_at < ?").bind(now - BALLOT_RATE_WINDOW).run();
@@ -23,11 +23,16 @@ export async function checkBallotRate(db, ip, now = Math.floor(Date.now() / 1000
         reset_at = CASE WHEN ballot_rate_limits.reset_at <= ? THEN excluded.reset_at ELSE ballot_rate_limits.reset_at END
       RETURNING count
     `).bind(bucket, resetAt, now, now).first();
-    return Number(row?.count || 0) <= BALLOT_RATE_LIMIT;
+    return Number(row?.count || 0) <= limit;
   } catch (error) {
     console.error("ballot rate limit error", error);
     return false;
   }
+}
+
+/** אותו מונה לדקה, עם תקרה אחרת (לפעולות שמאזין עושה הרבה, כמו סימון רגעים). */
+export function checkRate(db, key, limit) {
+  return checkBallotRate(db, key, undefined, limit);
 }
 
 export const ballotRateConfig = { limit: BALLOT_RATE_LIMIT, window: BALLOT_RATE_WINDOW };

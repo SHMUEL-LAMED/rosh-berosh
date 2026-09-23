@@ -4,7 +4,7 @@
    לסטטיסטיקה, הודעות מהמאזינים, רשימת המנהלים (אותה רשימה של אתר הסקר)
    ורשימת התפוצה (אותה טבלה של אתר הסקר, עם חשבון Google המחובר). */
 import { configuredAdminEmails, createSession, readAdminEmails, readSession, saveAdminEmails, sessionCookie, type SessionUser } from "./auth";
-import { checkBallotRate } from "./rate-limit";
+import { checkBallotRate, checkRate } from "./rate-limit";
 import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 import { israelHour, isPublic } from "./program-schedule.js";
 import { loadEpisode } from "./program-audio";
@@ -23,6 +23,11 @@ const HANDOFF_TTL = 180;
 export const VERSIONS_KEPT = 40;
 const MAX_TEXT = 4000;
 const DAY_SECONDS = 86400;
+/** סימון רגעים: בכפולות של 5 שניות, עד 200 לכל מאזין בכל תוכנית, 30 בדקה; הסיכום בחלונות של 30 שניות. */
+export const MOMENT_STEP = 5;
+export const MOMENT_MAX = 200;
+export const MOMENT_RATE = 30;
+export const MOMENT_BUCKET = 30;
 
 const text = (value: unknown, max = 300) => String(value ?? "").trim().slice(0, max);
 const day = (at = Date.now()) => new Date(at).toISOString().slice(0, 10);
@@ -338,7 +343,8 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
   if (path === "/stats" && method === "GET") {
     if (!await h.admin(request, env)) return forbidden();
     const since30 = nowSeconds() - 30 * DAY_SECONDS, since7 = nowSeconds() - 7 * DAY_SECONDS;
-    const [days, episodes, recent, totals, devices, week, sources, hours, likes] = await env.DB.batch([
+    const since90 = nowSeconds() - 90 * DAY_SECONDS;
+    const [days, episodes, recent, totals, devices, week, sources, hours, likes, moments] = await env.DB.batch([
       env.DB.prepare("SELECT day, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events WHERE created_at>=? GROUP BY day ORDER BY day").bind(since30),
       env.DB.prepare("SELECT episode_id AS id, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events GROUP BY episode_id ORDER BY plays DESC LIMIT 300"),
       env.DB.prepare("SELECT episode_id AS id, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events WHERE created_at>=? GROUP BY episode_id ORDER BY plays DESC LIMIT 300").bind(since30),
@@ -349,6 +355,7 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
       env.DB.prepare("SELECT ref, COUNT(*) AS plays FROM program_events WHERE kind='play' AND created_at>=? AND ref IS NOT NULL GROUP BY ref ORDER BY plays DESC").bind(since30),
       env.DB.prepare("SELECT hour, COUNT(*) AS plays FROM program_events WHERE kind='play' AND created_at>=? AND hour IS NOT NULL GROUP BY hour").bind(since30),
       env.DB.prepare("SELECT episode_id AS id, COUNT(*) AS likes FROM program_likes GROUP BY episode_id ORDER BY likes DESC LIMIT 20"),
+      env.DB.prepare("SELECT episode_id AS id, COUNT(*) AS count FROM program_moments WHERE created_at>=? GROUP BY episode_id ORDER BY count DESC, id LIMIT 10").bind(since90),
     ]);
     const byHour = new Map((hours.results as Array<{ hour: number; plays: number }>).map((row) => [Number(row.hour), Number(row.plays) || 0]));
     const deviceMap: Record<string, number> = {};
@@ -356,7 +363,8 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     return h.reply(request, { days: days.results, episodes: episodes.results, recent: recent.results, totals: totals.results[0] || {}, week: week.results[0] || {}, devices: deviceMap,
       sources: (sources.results as Array<{ ref: string; plays: number }>).map((row) => ({ ref: row.ref, plays: Number(row.plays) || 0 })),
       hours: Array.from({ length: 24 }, (_, hour) => ({ hour, plays: byHour.get(hour) || 0 })),
-      likes: (likes.results as Array<{ id: string; likes: number }>).map((row) => ({ id: row.id, likes: Number(row.likes) || 0 })) });
+      likes: (likes.results as Array<{ id: string; likes: number }>).map((row) => ({ id: row.id, likes: Number(row.likes) || 0 })),
+      moments: (moments.results as Array<{ id: string; count: number }>).map((row) => ({ id: row.id, count: Number(row.count) || 0 })) });
   }
   if (path.startsWith("/stats/episode/") && method === "GET") {
     if (!await h.admin(request, env)) return forbidden();
@@ -428,6 +436,53 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     }
     const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_likes WHERE episode_id=?").bind(episodeId).first<{ total: number }>();
     return h.reply(request, { ok: true, liked, count: Number(count?.total || 0) });
+  }
+
+  /* ---------- "הרגעים הכי חמים" ----------
+     מאזין מחובר מסמן ♥ על רגע בתוכנית (מעוגל למטה לכפולה של 5 שניות). כל
+     אחד רואה רק את הסימונים שלו; הסיכום לפי רגעים — למנהלים בלבד. */
+  if (path === "/moments" && method === "POST") {
+    const user = await readSession(request, env);
+    if (!user?.sub) return h.reply(request, { error: "צריך להתחבר כדי לסמן רגעים." }, 401);
+    if (!(await checkRate(env.DB, `pmoment:${user.sub}`, MOMENT_RATE))) return tooMany();
+    const input = await body<{ episodeId?: string; at?: unknown; on?: unknown }>();
+    const value = Number(input.at);
+    if (input.at === null || input.at === undefined || input.at === "" || !Number.isFinite(value) || value < 0) return h.reply(request, { error: "הרגע בתוכנית אינו תקין." }, 400);
+    if (typeof input.on !== "boolean") return h.reply(request, { error: "חסר אם לסמן או לבטל את הסימון." }, 400);
+    const at = Math.floor(value / MOMENT_STEP) * MOMENT_STEP;
+    const episode = await loadEpisode(env, h.safeId(input.episodeId));
+    if (!episode || !episode.visible || !isPublic(episode.data, true)) return h.reply(request, { error: "התוכנית לא נמצאה." }, 404);
+    if (input.on) {
+      const exists = await env.DB.prepare("SELECT 1 AS one FROM program_moments WHERE user_sub=? AND episode_id=? AND at_seconds=?").bind(user.sub, episode.id, at).first();
+      if (!exists) {
+        const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_moments WHERE user_sub=? AND episode_id=?").bind(user.sub, episode.id).first<{ total: number }>();
+        if (Number(count?.total || 0) >= MOMENT_MAX) return h.reply(request, { error: `אפשר לסמן עד ${MOMENT_MAX} רגעים בכל תוכנית.` }, 400);
+        await env.DB.prepare("INSERT OR IGNORE INTO program_moments (user_sub,episode_id,at_seconds) VALUES (?,?,?)").bind(user.sub, episode.id, at).run();
+      }
+    } else {
+      await env.DB.prepare("DELETE FROM program_moments WHERE user_sub=? AND episode_id=? AND at_seconds=?").bind(user.sub, episode.id, at).run();
+    }
+    return h.reply(request, { ok: true, at, on: input.on });
+  }
+  if (path === "/moments/mine" && method === "GET") {
+    const user = await readSession(request, env);
+    if (!user?.sub) return h.reply(request, { error: "צריך להתחבר." }, 401);
+    const episodeId = h.safeId(url.searchParams.get("episode"));
+    if (!episodeId) return h.reply(request, { error: "חסר מזהה תוכנית." }, 400);
+    const rows = await env.DB.prepare("SELECT at_seconds AS at FROM program_moments WHERE user_sub=? AND episode_id=? ORDER BY at_seconds").bind(user.sub, episodeId).all();
+    return h.reply(request, { moments: (rows.results as Array<{ at: number }>).map((row) => Number(row.at)) });
+  }
+  if (path.startsWith("/moments/") && method === "GET") {
+    if (!await h.admin(request, env)) return forbidden();
+    const id = h.safeId(decodeURIComponent(path.slice("/moments/".length)));
+    if (!id) return h.reply(request, { error: "חסר מזהה תוכנית." }, 400);
+    const [totals, grouped] = await env.DB.batch([
+      env.DB.prepare("SELECT COUNT(DISTINCT user_sub) AS total FROM program_moments WHERE episode_id=?").bind(id),
+      env.DB.prepare(`SELECT (at_seconds/${MOMENT_BUCKET})*${MOMENT_BUCKET} AS at, COUNT(DISTINCT user_sub) AS count FROM program_moments WHERE episode_id=? GROUP BY at ORDER BY at`).bind(id),
+    ]);
+    const buckets = (grouped.results as Array<{ at: number; count: number }>).map((row) => ({ at: Number(row.at), count: Number(row.count) || 0 })).filter((row) => row.count > 0);
+    const top = [...buckets].sort((a, b) => b.count - a.count || a.at - b.at).slice(0, 5);
+    return h.reply(request, { id, total: Number((totals.results[0] as { total?: number } | undefined)?.total || 0), buckets, top });
   }
 
   /* ---------- הודעות מהמאזינים ---------- */

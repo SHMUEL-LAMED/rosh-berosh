@@ -237,6 +237,15 @@ const TABLES = [
     replied_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+  // "הרגעים הכי חמים": רגעים בתוכנית שמאזין מחובר סימן ב־♥ (בכפולות של 5 שניות).
+  // כל מאזין רואה רק את שלו; הסיכום לפי רגעים — למנהלים בלבד.
+  `CREATE TABLE IF NOT EXISTS program_moments (
+    user_sub TEXT NOT NULL,
+    episode_id TEXT NOT NULL,
+    at_seconds INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (user_sub, episode_id, at_seconds)
+  )`,
 ];
 
 const COLUMNS = [
@@ -300,6 +309,7 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS program_versions_created_idx ON program_versions(created_at)",
   "CREATE INDEX IF NOT EXISTS program_likes_episode_idx ON program_likes(episode_id)",
   "CREATE INDEX IF NOT EXISTS program_comments_episode_idx ON program_comments(episode_id,status,created_at)",
+  "CREATE INDEX IF NOT EXISTS program_moments_episode_idx ON program_moments(episode_id)",
 ];
 
 const SEEDS = [

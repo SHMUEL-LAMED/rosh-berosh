@@ -294,3 +294,139 @@ test("word changes stay aligned around insertions and are capped at 30", async (
   assert.equal(results[1].changes.length, 30);
   assert.deepEqual(results[1].changes[0], { from: "מילה1", to: "תיקון1" });
 });
+
+/* ---------- "הרגעים הכי חמים" ---------- */
+
+test("listeners mark moments privately, rounded down to 5 seconds", async () => {
+  const { call, admin, voter, other } = await setup();
+  await publish(call, admin, { episodes: [episode("ep-1"), episode("ep-hidden", { visible: false }), episode("ep-soon", { publishAt: "2099-01-01T20:00" })] });
+  const mark = (token, body) => call("/api/program/moments", { method: "POST", token, body });
+
+  assert.equal((await mark(null, { episodeId: "ep-1", at: 10, on: true })).status, 401);
+  assert.equal((await call("/api/program/moments/mine?episode=ep-1")).status, 401);
+  assert.equal((await mark(voter, { episodeId: "ep-hidden", at: 10, on: true })).status, 404);
+  assert.equal((await mark(voter, { episodeId: "ep-soon", at: 10, on: true })).status, 404);
+  assert.equal((await mark(voter, { episodeId: "nope", at: 10, on: true })).status, 404);
+  assert.equal((await mark(voter, { episodeId: "ep-1", at: -1, on: true })).status, 400);
+  assert.equal((await mark(voter, { episodeId: "ep-1", at: "abc", on: true })).status, 400);
+  assert.equal((await mark(voter, { episodeId: "ep-1", at: 5, on: "yes" })).status, 400);
+
+  const first = await mark(voter, { episodeId: "ep-1", at: 64.9, on: true });
+  assert.equal(first.status, 200, await first.clone().text());
+  assert.deepEqual(await first.json(), { ok: true, at: 60, on: true });
+  await mark(voter, { episodeId: "ep-1", at: 62, on: true }); // אותו רגע — לא נכפל
+  await mark(voter, { episodeId: "ep-1", at: 7, on: true });
+  await mark(other, { episodeId: "ep-1", at: 120, on: true });
+  assert.deepEqual(await (await call("/api/program/moments/mine?episode=ep-1", { token: voter })).json(), { moments: [5, 60] });
+  assert.deepEqual(await (await call("/api/program/moments/mine?episode=ep-1", { token: other })).json(), { moments: [120] });
+
+  assert.deepEqual(await (await mark(voter, { episodeId: "ep-1", at: 9, on: false })).json(), { ok: true, at: 5, on: false });
+  assert.deepEqual(await (await call("/api/program/moments/mine?episode=ep-1", { token: voter })).json(), { moments: [60] });
+});
+
+test("moment heat is for admins only, in 30-second buckets of distinct listeners", async () => {
+  const { call, db, admin, voter, other } = await setup();
+  await publish(call, admin, { episodes: [episode("ep-1"), episode("ep-2")] });
+  const mark = (token, episodeId, at) => call("/api/program/moments", { method: "POST", token, body: { episodeId, at, on: true } });
+  await mark(voter, "ep-1", 30); await mark(voter, "ep-1", 45); await mark(voter, "ep-1", 300);
+  await mark(other, "ep-1", 50); await mark(other, "ep-1", 0);
+  await mark(admin, "ep-1", 59);
+  await mark(voter, "ep-2", 10);
+
+  assert.equal((await call("/api/program/moments/ep-1", { token: voter })).status, 403);
+  assert.equal((await call("/api/program/moments/ep-1")).status, 403);
+  const heat = await (await call("/api/program/moments/ep-1", { token: admin })).json();
+  assert.deepEqual(heat, {
+    id: "ep-1", total: 3,
+    buckets: [{ at: 0, count: 1 }, { at: 30, count: 3 }, { at: 300, count: 1 }],
+    top: [{ at: 30, count: 3 }, { at: 0, count: 1 }, { at: 300, count: 1 }],
+  });
+  assert.deepEqual(await (await call("/api/program/moments/ep-9", { token: admin })).json(), { id: "ep-9", total: 0, buckets: [], top: [] });
+
+  // marks older than 90 days are left out of the stats ranking
+  db.prepare("INSERT INTO program_moments (user_sub,episode_id,at_seconds,created_at) VALUES ('old','ep-2',5,?),('old','ep-2',10,?),('old','ep-2',15,?),('old','ep-2',20,?),('old','ep-2',25,?),('old','ep-2',35,?)")
+    .run(...Array(6).fill(Math.floor(Date.now() / 1000) - 91 * 86400));
+  const stats = await (await call("/api/program/stats", { token: admin })).json();
+  assert.deepEqual(stats.moments, [{ id: "ep-1", count: 6 }, { id: "ep-2", count: 1 }]);
+});
+
+test("moments are capped at 200 per listener per episode and rate limited", async () => {
+  const { call, db, admin, voter } = await setup();
+  await publish(call, admin, { episodes: [episode("ep-1")] });
+  const insert = db.prepare("INSERT INTO program_moments (user_sub,episode_id,at_seconds) VALUES (?,?,?)");
+  for (let n = 0; n < 200; n += 1) insert.run("sub-voter@example.com", "ep-1", n * 5);
+  const mark = (at, on = true) => call("/api/program/moments", { method: "POST", token: voter, body: { episodeId: "ep-1", at, on } });
+  const over = await mark(5000);
+  assert.equal(over.status, 400);
+  assert.match((await over.json()).error, /200/);
+  assert.equal((await mark(10)).status, 200, "an existing mark can be set again");
+  assert.equal((await mark(10, false)).status, 200);
+  assert.equal((await mark(5000)).status, 200, "room again after removing one");
+
+  const statuses = [];
+  for (let n = 0; n < 30; n += 1) statuses.push((await mark(0, false)).status);
+  assert.ok(statuses.includes(429), "30 a minute, then 429");
+  assert.equal(statuses.filter((status) => status === 200).length, 26);
+});
+
+/* ---------- הצעות לשם מהתמלול ---------- */
+
+test("title suggestions need a finished transcript and come back trimmed and deduped", async () => {
+  const { call, db, env, admin, voter } = await setup();
+  await publish(call, admin, { episodes: [episode("ep-1")] });
+  const sent = [];
+  env.AI = { async run(model, input) {
+    sent.push({ model, input });
+    return { response: "הנה ההצעות:\n```json\n" + JSON.stringify({
+      titles: ["  1. ניגון של שבת  ", "\"קולות מהעיר\"", "ניגון של שבת", "", 7, "הפתעה   באולפן", "שיר חדש ושמח", "ראש בראש עם האורח", "עודף"],
+      whatsapp: "  🎵 תוכנית חדשה עלתה!\nהאזינו עכשיו  ",
+    }) + "\n```" };
+  } };
+  const titles = (token = admin, body = { episodeId: "ep-1" }) => call("/api/program/ai/titles", { method: "POST", token, body });
+  assert.equal((await titles(voter)).status, 403);
+  const early = await titles();
+  assert.equal(early.status, 409);
+  assert.match((await early.json()).error, /תמלול/);
+  db.prepare("INSERT INTO program_transcripts (episode_id,text,parts_done,parts_total) VALUES ('ep-1','דיברנו על ניגוני שבת',1,2)").run();
+  assert.equal((await titles()).status, 409, "a partial transcript is not enough");
+  db.prepare("UPDATE program_transcripts SET parts_done=2").run();
+
+  const response = await titles();
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.deepEqual(await response.json(), {
+    titles: ["ניגון של שבת", "קולות מהעיר", "הפתעה באולפן", "שיר חדש ושמח", "ראש בראש עם האורח"],
+    whatsapp: "🎵 תוכנית חדשה עלתה!\nהאזינו עכשיו",
+  });
+  assert.equal(sent[0].model, "@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+  assert.match(sent[0].input.messages[0].content, /whatsapp/);
+  assert.match(sent[0].input.messages[0].content, /ראש בראש/);
+  assert.match(sent[0].input.messages[1].content, /ניגוני שבת/);
+
+  env.AI = { run: async () => ({ response: "אין לי רעיונות" }) };
+  const unreadable = await titles();
+  assert.equal(unreadable.status, 502);
+  assert.match((await unreadable.json()).error, /אי אפשר לקרוא/);
+  env.AI = { run: async () => { throw new Error("down"); } };
+  assert.equal((await titles()).status, 502);
+});
+
+test("title suggestions go to Claude when the key is set", async () => {
+  const { call, db, env, admin } = await setup();
+  db.prepare("INSERT INTO program_transcripts (episode_id,text,parts_done,parts_total) VALUES ('ep-1','תמלול קצר',1,1)").run();
+  env.ANTHROPIC_API_KEY = "sk-test";
+  const original = globalThis.fetch;
+  let sent = null;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url !== "https://api.anthropic.com/v1/messages") return original(input, init);
+    sent = JSON.parse(init.body);
+    return Response.json({ content: [{ type: "text", text: '{"titles":["שם אחד","שם שני"],"whatsapp":"האזינו 🎧"}' }], stop_reason: "end_turn" });
+  };
+  try {
+    const response = await call("/api/program/ai/titles", { method: "POST", token: admin, body: { episodeId: "ep-1" } });
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.deepEqual(await response.json(), { titles: ["שם אחד", "שם שני"], whatsapp: "האזינו 🎧" });
+    assert.match(sent.system, /"titles"/);
+    assert.match(sent.messages[0].content, /תמלול קצר/);
+  } finally { globalThis.fetch = original; }
+});

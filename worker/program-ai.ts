@@ -176,6 +176,38 @@ export function proofreadResults(items: ProofreadItem[], fixes: Array<{ key: str
   });
 }
 
+/* ---------- הצעות לשם התוכנית ולהודעת וואטסאפ, מתוך התמלול ---------- */
+export const TITLES_SYSTEM = `אתה עורך תוכן של "ראש בראש" — תוכנית רדיו חרדית של מוזיקה ואקטואליה. תקבל תמלול אוטומטי (ייתכנו בו שגיאות זיהוי) של תוכנית אחת.
+החזר JSON תקין בלבד, בלי שום טקסט לפניו או אחריו, במבנה:
+{"titles": ["...", "...", "...", "...", "..."], "whatsapp": "..."}
+- titles: בדיוק 5 הצעות לשם התוכנית בעברית — קצרות וקולעות, 2–6 מילים כל אחת, בלי מירכאות ובלי מספר תוכנית, מבוססות על מה שנאמר בתמלול בלבד.
+- whatsapp: הודעת פתיחה לוואטסאפ בעברית, 2–3 שורות (מופרדות בירידת שורה), שמזמינה להאזין לתוכנית; מותר 1–2 אימוג׳ים, בלי קישורים.`;
+
+export type TitleSuggestions = { titles: string[]; whatsapp: string };
+
+/** מוציא {titles, whatsapp} מתשובת המודל (גם כשהיא עטופה בטקסט או ב־```): שמות נקיים, בלי כפילויות, עד 5. */
+export function parseTitles(raw: unknown): TitleSuggestions | null {
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    const cleaned = raw.replace(/```(?:json)?/gi, "");
+    const start = cleaned.indexOf("{"), end = cleaned.lastIndexOf("}");
+    if (start < 0 || end <= start) return null;
+    try { value = JSON.parse(cleaned.slice(start, end + 1)); } catch { return null; }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  const seen = new Set<string>();
+  const titles = (Array.isArray(v.titles) ? v.titles : []).flatMap((item) => {
+    if (typeof item !== "string") return [];
+    const title = item.replace(/^\s*(?:\d+[.)]\s*|[-•*]\s*)/, "").replace(/^["״“”„]+|["״“”„]+$/g, "").replace(/\s+/g, " ").trim();
+    if (!title || seen.has(title)) return [];
+    seen.add(title);
+    return [title];
+  }).slice(0, 5);
+  const whatsapp = typeof v.whatsapp === "string" ? v.whatsapp.trim() : "";
+  return titles.length ? { titles, whatsapp } : null;
+}
+
 export async function programAiApi(request: Request, env: Env, h: Helpers): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname.slice("/api/program".length);
@@ -227,19 +259,24 @@ export async function programAiApi(request: Request, env: Env, h: Helpers): Prom
     return h.reply(request, { text: row.text, partsDone: Number(row.parts_done), partsTotal: Number(row.parts_total), summary, updatedAt: new Date(Number(row.updated_at) * 1000).toISOString() });
   }
 
+  /** התמלול המלא של התוכנית, או null כשהוא עוד לא הושלם. */
+  const finishedTranscript = async (episodeId: string) => {
+    const row = await env.DB.prepare("SELECT text,parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(episodeId)
+      .first<{ text: string; parts_done: number; parts_total: number }>();
+    return !row || !Number(row.parts_total) || Number(row.parts_done) < Number(row.parts_total) || !row.text.trim() ? null : row.text;
+  };
+  const notTranscribed = () => h.reply(request, { error: "צריך קודם להשלים את התמלול של התוכנית." }, 409);
+
   if (path === "/ai/summarize" && request.method === "POST") {
     const { episodeId: raw } = await body<{ episodeId?: string }>();
     const episodeId = h.safeId(raw);
-    const row = await env.DB.prepare("SELECT text,parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(episodeId)
-      .first<{ text: string; parts_done: number; parts_total: number }>();
-    if (!row || !Number(row.parts_total) || Number(row.parts_done) < Number(row.parts_total) || !row.text.trim()) {
-      return h.reply(request, { error: "צריך קודם להשלים את התמלול של התוכנית." }, 409);
-    }
+    const text = await finishedTranscript(episodeId);
+    if (!text) return notTranscribed();
     const useClaude = !!env.ANTHROPIC_API_KEY;
     if (!useClaude && !env.AI) return h.reply(request, { error: "שירות הבינה המלאכותית אינו מחובר לוורקר." }, 503);
     let parsed: EpisodeSummary | null = null;
     try {
-      parsed = parseSummary(useClaude ? await summarizeWithClaude(env, row.text) : await summarizeWithWorkersAi(env, row.text));
+      parsed = parseSummary(useClaude ? await summarizeWithClaude(env, text) : await summarizeWithWorkersAi(env, text));
     } catch (error) {
       console.error("program summarize error", episodeId, error);
       return h.reply(request, { error: "יצירת התיאור נכשלה בשירות הבינה המלאכותית. נסו שוב בעוד רגע." }, 502);
@@ -248,6 +285,25 @@ export async function programAiApi(request: Request, env: Env, h: Helpers): Prom
     const stored = { ...parsed, model: useClaude ? CLAUDE_MODEL : LLAMA_MODEL, createdAt: new Date().toISOString() };
     await env.DB.prepare("UPDATE program_transcripts SET summary_json=?,updated_at=unixepoch() WHERE episode_id=?").bind(JSON.stringify(stored), episodeId).run();
     return h.reply(request, stored);
+  }
+  if (path === "/ai/titles" && request.method === "POST") {
+    const { episodeId: raw } = await body<{ episodeId?: string }>();
+    const episodeId = h.safeId(raw);
+    const text = await finishedTranscript(episodeId);
+    if (!text) return notTranscribed();
+    const useClaude = !!env.ANTHROPIC_API_KEY;
+    if (!useClaude && !env.AI) return h.reply(request, { error: "שירות הבינה המלאכותית אינו מחובר לוורקר." }, 503);
+    let parsed: TitleSuggestions | null = null;
+    try {
+      parsed = parseTitles(useClaude
+        ? await askClaude(env, TITLES_SYSTEM, `התמלול:\n\n${text.slice(0, CLAUDE_CHARS)}`, 2000)
+        : await askWorkersAi(env, TITLES_SYSTEM, `התמלול:\n\n${text.slice(0, LLAMA_CHARS)}`, 1024));
+    } catch (error) {
+      console.error("program titles error", episodeId, error);
+      return h.reply(request, { error: "יצירת ההצעות לשם נכשלה בשירות הבינה המלאכותית. נסו שוב בעוד רגע." }, 502);
+    }
+    if (!parsed) return h.reply(request, { error: "שירות הבינה המלאכותית החזיר תשובה שאי אפשר לקרוא. נסו שוב." }, 502);
+    return h.reply(request, parsed);
   }
   if (path === "/ai/proofread" && request.method === "POST") {
     const input = await body<{ items?: unknown }>();
