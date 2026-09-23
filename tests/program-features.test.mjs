@@ -578,3 +578,29 @@ test("the share page gives crawlers Open Graph tags and sends people to the epis
     assert.match(await missing.text(), /url=https:\/\/shmuel-lamed\.github\.io\/rosh-berosh-2\//);
   }
 });
+
+test("spelling fixes reach episodes already in the database, once, without touching later edits", async () => {
+  const { db, call } = await setup();
+  const fixes = JSON.parse(await (await import("node:fs/promises")).readFile(new URL("../worker/program-text-fixes.json", import.meta.url), "utf8"));
+  const [a, b] = fixes.filter((f, i, all) => all.findIndex((x) => x.id === f.id) === i).slice(0, 2);
+  assert.ok(a && b && a.id !== b.id, "the fixes list covers at least two episodes");
+  const row = (id) => JSON.parse(db.prepare("SELECT data_json FROM program_episodes WHERE id=?").get(id).data_json);
+  // מצב כמו בשרת החי: הטקסט המקורי עם השגיאות, ומנהל שכבר ערך תוכנית אחת בעצמו
+  const put = (id, data) => db.prepare("UPDATE program_episodes SET data_json=? WHERE id=?").run(JSON.stringify(data), id);
+  put(a.id, { ...row(a.id), [a.field]: a.from });
+  put(b.id, { ...row(b.id), [b.field]: "נוסח שמנהל כתב בעצמו" });
+  db.prepare("INSERT INTO program_settings (key,value_json) VALUES ('draft',?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json")
+    .run(JSON.stringify({ data: { seasons: [], episodes: [{ id: a.id, [a.field]: a.from }] }, updatedAt: "x", by: "admin@example.com" }));
+  db.prepare("DELETE FROM program_settings WHERE key='program-text-fixes-v1'").run();
+
+  const catalog = await (await call("/api/program/catalog")).json();
+  assert.equal(catalog.episodes.find((e) => e.id === a.id)[a.field], a.to, "the original text is corrected");
+  assert.equal(row(b.id)[b.field], "נוסח שמנהל כתב בעצמו", "an admin's own edit is left alone");
+  const draft = JSON.parse(db.prepare("SELECT value_json FROM program_settings WHERE key='draft'").get().value_json);
+  assert.equal(draft.data.episodes[0][a.field], a.to, "the shared draft is corrected too");
+
+  // רץ פעם אחת בלבד: טקסט ישן שמוחזר אחר כך (למשל בשחזור גרסה) לא "מתוקן" שוב בלי ידיעה
+  put(a.id, { ...row(a.id), [a.field]: a.from });
+  await call("/api/program/catalog");
+  assert.equal(row(a.id)[a.field], a.from);
+});
