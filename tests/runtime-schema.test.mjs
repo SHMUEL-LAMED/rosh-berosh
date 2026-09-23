@@ -129,6 +129,91 @@ test("the statements run against SQLite from an empty database and stay idempote
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM poll_settings").get().total, 1);
 });
 
+// D1 כמו בייצור: `batch` הוא טרנזקציה אחת — משפט שנכשל מבטל את כל הקבוצה
+function batchingDb(options = {}) {
+  const db = fakeDb(options);
+  db.batches = 0;
+  db.runs = 0;
+  const prepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    const statement = prepare(sql);
+    const run = statement.run;
+    return { ...statement, sql, run: () => { db.runs++; return run(); } };
+  };
+  db.batch = async (statements) => {
+    db.batches++;
+    if (statements.some((statement) => options.fail?.(statement.sql))) throw new Error("D1_ERROR: batch rolled back");
+    const results = [];
+    for (const statement of statements) {
+      if (statement.sql.startsWith("PRAGMA")) results.push(await statement.all());
+      else { db.executed.push(statement.sql); results.push({ success: true, results: [] }); }
+    }
+    return results;
+  };
+  return db;
+}
+
+test("a cold worker builds the schema in three D1 round trips, not one per statement", async () => {
+  const full = {};
+  for (const { table, column } of RUNTIME_SCHEMA_COLUMNS) (full[table] ??= []).push(column);
+  const db = batchingDb({ existingColumns: full });
+  assert.deepEqual(await applyRuntimeSchema(db), []);
+  assert.equal(db.batches, 3);
+  assert.equal(db.runs, 0);
+  assert.deepEqual(created(db.executed), EXPECTED_TABLES);
+  assert.equal(db.executed.filter((sql) => sql.startsWith("CREATE INDEX") || sql.startsWith("CREATE UNIQUE INDEX")).length, RUNTIME_SCHEMA_INDEXES.length);
+  for (const seed of RUNTIME_SCHEMA_SEEDS) assert.ok(db.executed.includes(seed), seed);
+});
+
+test("batched: only the missing columns are added", async () => {
+  const db = batchingDb();
+  assert.deepEqual(await applyRuntimeSchema(db), []);
+  assert.deepEqual(db.executed.filter((sql) => sql.startsWith("ALTER TABLE")), RUNTIME_SCHEMA_COLUMNS.map(columnStatement));
+});
+
+test("batched: a failing statement rolls back its batch, and the rest still run one by one", async () => {
+  const db = batchingDb({ fail: (sql) => sql.includes("album_votes") });
+  const failures = await applyRuntimeSchema(db);
+  assert.ok(failures.length >= 1);
+  assert.ok(failures.every((failure) => failure.statement.includes("album_votes")));
+  assert.ok(created(db.executed).includes("ivr_store_meta"));
+  assert.ok(db.executed.includes("CREATE INDEX IF NOT EXISTS program_moments_episode_idx ON program_moments(episode_id)"));
+});
+
+test("batched statements run against SQLite from an empty database and stay idempotent", async (t) => {
+  let DatabaseSync;
+  try { ({ DatabaseSync } = await import("node:sqlite")); }
+  catch { return t.skip("node:sqlite is unavailable without --experimental-sqlite"); }
+
+  const sqlite = new DatabaseSync(":memory:");
+  let batches = 0;
+  const db = {
+    prepare(sql) {
+      return { sql, async all() { return { results: sqlite.prepare(sql).all() }; }, async run() { sqlite.prepare(sql).run(); return { success: true }; } };
+    },
+    async batch(statements) {
+      batches++;
+      sqlite.exec("BEGIN");
+      try {
+        const results = statements.map((statement) => (/^\s*(PRAGMA|SELECT)/i.test(statement.sql)
+          ? { results: sqlite.prepare(statement.sql).all() }
+          : (sqlite.prepare(statement.sql).run(), { results: [] })));
+        sqlite.exec("COMMIT");
+        return results;
+      } catch (error) { sqlite.exec("ROLLBACK"); throw error; }
+    },
+  };
+
+  assert.deepEqual(await applyRuntimeSchema(db), []);
+  assert.deepEqual(await applyRuntimeSchema(db), []);
+  assert.equal(batches, 6);
+  const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map((row) => row.name);
+  for (const table of EXPECTED_TABLES) assert.ok(tables.includes(table), table);
+  const columns = sqlite.prepare("PRAGMA table_info(program_transcripts)").all().map((row) => row.name);
+  assert.ok(columns.includes("parts_json"));
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM surveys").get().total, 1);
+});
+
 test("the phone line builds only its own tables, so a call never waits for the whole schema", async () => {
   const db = fakeDb();
   const failures = await applyIvrRuntimeSchema(db);
