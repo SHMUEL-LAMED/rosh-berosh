@@ -262,3 +262,19 @@ test("the stream endpoint refuses bad ids and never relays Google's HTML", async
     assert.equal(page.status, 502, "an HTML interstitial is not audio");
   } finally { restoreHtml(); }
 });
+
+test("only recordings of episodes in the catalog are streamed; any other Drive id is a 404", async () => {
+  const { worker, env } = await setup();
+  let fetched = 0;
+  const restore = withDrive((url, headers, method) => { fetched += 1; return driveOk(url, headers, method); });
+  try {
+    const unknown = await stream(worker, env, "1AbCdEfGhIjKlMnOpQrStUvWxYz012345");
+    assert.equal(unknown.status, 404);
+    assert.match((await unknown.json()).error, /לא נמצאה/);
+    assert.equal(unknown.headers.get("access-control-allow-origin"), PROGRAM_ORIGIN);
+    assert.equal((await stream(worker, env, "1zYtLR6CVkcM4mQZ")).status, 404, "part of a catalog id is a different file");
+    assert.equal(fetched, 0, "Drive is never asked for a file outside the catalog");
+    assert.equal((await stream(worker, env, "1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4")).status, 200);
+    assert.equal(fetched, 1);
+  } finally { restore(); }
+});

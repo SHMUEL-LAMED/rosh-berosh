@@ -381,7 +381,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
   if (url.pathname.startsWith("/api/program/")) {
     await ensureRuntimeSchema(env);
-    const response = await programApi(request, env, ctx);
+    const response = await programApi(request, env);
     if (response) return response;
   }
   // The voting line calls these two endpoints at the start of every call. Do not

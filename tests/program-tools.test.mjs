@@ -137,11 +137,12 @@ test("listening events are anonymous, rate limited, and add up to administrator 
     assert.equal(r.status, 200, await r.clone().text());
   }
   assert.equal((await call("/api/program/events", { method: "POST", body: { kind: "play" } })).status, 400);
-  for (let i = 0; i < 5; i++) await call("/api/program/events", { method: "POST", ip: "9.9.9.9", body: { kind: "play", episodeId: "ep-1" } });
+  // 60 בדקה לכל כתובת — מאזינים רבים יוצאים לרשת מאותה כתובת
+  for (let i = 0; i < 60; i++) assert.equal((await call("/api/program/events", { method: "POST", ip: "9.9.9.9", body: { kind: "play", episodeId: "ep-1" } })).status, 200);
   assert.equal((await call("/api/program/events", { method: "POST", ip: "9.9.9.9", body: { kind: "play", episodeId: "ep-1" } })).status, 429);
   assert.equal((await call("/api/program/stats", { token: voter })).status, 403);
   const stats = await (await call("/api/program/stats", { token: admin })).json();
-  assert.equal(Number(stats.totals.plays), 3 + 5);
+  assert.equal(Number(stats.totals.plays), 3 + 60);
   assert.equal(stats.episodes[0].id, "ep-1");
   assert.equal(Number(stats.episodes[0].seconds), 120);
   assert.equal(stats.days.length, 1);
@@ -244,4 +245,25 @@ test("signing in on the program site signs in the voting site too", async () => 
   const me = await worker.fetch(new Request("http://localhost/api/auth/me", { headers: { cookie: cookie.split(";")[0] } }), env, ctx);
   assert.equal(me.status, 200);
   assert.equal((await me.json()).user.email, "voter@example.com", "the voting site now knows the same account");
+});
+
+test("a draft save can require the draft it was based on, and a stale save gets the stored draft back", async () => {
+  const { call, admin } = await setup();
+  const put = (title, extra = {}) => call("/api/program/draft", { method: "PUT", token: admin, body: { data: { seasons: [], episodes: [{ id: "ep-1", title }] }, ...extra } });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+  const first = await put("א", { ifUpdatedAt: "anything" });
+  assert.equal(first.status, 200, "with no stored draft there is nothing to conflict with");
+  const saved = await first.json();
+  await tick();
+  const second = await (await put("ב", { ifUpdatedAt: saved.updatedAt })).json();
+  assert.equal(second.ok, true);
+  assert.notEqual(second.updatedAt, saved.updatedAt);
+  const stale = await put("ג", { ifUpdatedAt: saved.updatedAt });
+  assert.equal(stale.status, 409);
+  assert.deepEqual(await stale.json(), { error: "draft-conflict", draft: { data: { seasons: [], episodes: [{ id: "ep-1", title: "ב" }] }, updatedAt: second.updatedAt, by: "admin@example.com" } });
+  assert.equal((await (await call("/api/program/draft", { token: admin })).json()).draft.data.episodes[0].title, "ב", "nothing was written");
+  await tick();
+  const plain = await put("ד");
+  assert.equal(plain.status, 200, "without ifUpdatedAt the save goes through, as before");
+  assert.deepEqual(Object.keys(await plain.json()).sort(), ["by", "ok", "updatedAt"]);
 });
