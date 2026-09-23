@@ -319,13 +319,14 @@ test("listening events carry position and source, and the stats show sources, ho
   await send({ kind: "listen", episodeId: "ep-1", seconds: 60, pct: 12 }, "10.0.0.2");
   await send({ kind: "play", episodeId: "ep-1", ref: "google" }, "10.0.0.3");
   await send({ kind: "listen", episodeId: "ep-1", pct: 250 }, "10.0.0.3");
+  await send({ kind: "play", episodeId: "ep-2", ref: "email" }, "10.0.0.4");
 
   const stats = await (await call("/api/program/stats", { token: admin })).json();
   const sources = Object.fromEntries(stats.sources.map((row) => [row.ref, row.plays]));
-  assert.deepEqual(sources, { whatsapp: 1, other: 1, google: 1 }, "an unknown source becomes other");
+  assert.deepEqual(sources, { whatsapp: 1, other: 1, google: 1, email: 1 }, "an unknown source becomes other; the mailing-list email is its own source");
   assert.equal(stats.hours.length, 24);
   assert.deepEqual(stats.hours.map((row) => row.hour), Array.from({ length: 24 }, (_, i) => i));
-  assert.equal(stats.hours.reduce((sum, row) => sum + row.plays, 0), 3);
+  assert.equal(stats.hours.reduce((sum, row) => sum + row.plays, 0), 4);
 
   assert.equal((await call("/api/program/stats/episode/ep-1")).status, 403);
   const detail = await (await call("/api/program/stats/episode/ep-1", { token: admin })).json();

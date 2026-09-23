@@ -142,7 +142,7 @@ export async function latestVersion(env: Env) {
     .first<{ id: string; by: string | null; createdAt: number }>() ?? null;
 }
 
-export const REFS = ["whatsapp", "google", "facebook", "direct", "internal", "other"] as const;
+export const REFS = ["email", "whatsapp", "google", "facebook", "direct", "internal", "other"] as const;
 export const normalizeRef = (value: unknown) => (REFS as readonly string[]).includes(String(value)) ? String(value) : "other";
 export const USERDATA_MAX = 300 * 1024;
 export const RETENTION_BUCKETS = Array.from({ length: 20 }, (_, i) => i * 5);
@@ -687,6 +687,13 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
       await env.DB.prepare("UPDATE subscribers SET unsubscribed_at=unixepoch() WHERE email=?").bind(email).run();
       return h.reply(request, { ok: true, subscribed: false, email });
     }
+  }
+  /* הכתובות הפעילות — לטיוטת המייל שאתר התוכניות יוצר בג'ימייל של המנהל (mail.html), למנהלים בלבד */
+  if (path === "/subscribers" && method === "GET") {
+    if (!await h.admin(request, env)) return forbidden();
+    const rows = await env.DB.prepare("SELECT email, COALESCE(name,'') AS name FROM subscribers WHERE unsubscribed_at IS NULL ORDER BY created_at ASC, rowid ASC LIMIT 20000").all<{ email: string; name: string }>();
+    const subscribers = rows.results.map((row) => ({ email: normalizeEmail(row.email), name: row.name })).filter((row) => isValidEmail(row.email));
+    return h.reply(request, { subscribers, active: subscribers.length });
   }
   if (path === "/subscribers/count" && method === "GET") {
     if (!await h.admin(request, env)) return forbidden();

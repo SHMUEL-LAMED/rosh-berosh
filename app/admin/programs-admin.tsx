@@ -24,6 +24,18 @@ type Mutate = (fn: (current: Catalog) => Catalog) => void;
 type PatchEpisode = (id: string, fields: Partial<Episode> | ((episode: Episode) => Partial<Episode>)) => void;
 type Common = { data: Catalog; change(next: Catalog): void; mutate: Mutate; patchEpisode: PatchEpisode; onMessage(message: string): void };
 
+/** עורך טיוטת המייל באתר התוכניות (mail.html): נפתח בלשונית חדשה כבר מחוברים — קוד מעבר חד־פעמי,
+    כמו המעבר לניהול. הלשונית נפתחת מיד בלחיצה (אחרת הדפדפן חוסם אותה), והכתובת נקבעת אחרי שהקוד מגיע. */
+function openMailDraft(id: string, onMessage: (message: string) => void) {
+  const target = `${PROGRAM_SITE}mail.html?ep=${encodeURIComponent(id)}`;
+  const tab = window.open("", "_blank");
+  if (!tab) { onMessage("הדפדפן חסם את הלשונית החדשה. אפשרו חלונות קופצים ונסו שוב."); return; }
+  tab.opener = null;
+  api<{ code: string }>("/api/program/handoff", { method: "POST", body: "{}" })
+    .then(({ code }) => { tab.location.href = `${target}&handoff=${encodeURIComponent(code)}`; })
+    .catch(() => { tab.location.href = target; });
+}
+
 /* ---------- הרכיב ---------- */
 
 export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection | null; onMessage(message: string): void }) {
@@ -240,7 +252,7 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
     {dragging && <div className="prog-drop-hint" aria-hidden="true">שחררו כאן — הקלטה או תמונה לתוכנית „{label(episode)}”</div>}
     <Section title={label(episode)} aside={<div className="row-actions">
       {live ? <a href={`${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(episode.slug)}`} target="_blank" rel="noopener">צפייה באתר ↗</a> : <button type="button" onClick={() => onMessage("התוכנית עוד לא באתר. היא תופיע אחרי „פרסום התוכניות”.")}>צפייה באתר ↗</button>}
-      <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={() => (history ? setHistory(null) : loadHistory())}>{history ? "הסתרת הגרסאות" : "גרסאות קודמות"}</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
+      <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={() => openMailDraft(episode.id, onMessage)}>✉ מייל למאזינים</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={() => (history ? setHistory(null) : loadHistory())}>{history ? "הסתרת הגרסאות" : "גרסאות קודמות"}</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
     </div>}>
       <div className="prog-form">
         <label className="wide"><span>שם התוכנית</span><input value={episode.title} placeholder="למשל: שירי הסתיו" onChange={(e) => onPatch({ title: e.target.value })} /></label>
@@ -429,6 +441,8 @@ function HealthGroup({ group, items, onFix }: { group: typeof HEALTH_GROUPS[numb
 function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin, changes, base, onOpen, onPublished, onDiscard }: Common & { origin: Catalog; changes: Changes; base: { current: string | null }; onOpen(id: string | null): void; onPublished(published: Catalog, versionId: string | null): void; onDiscard(): void }) {
   const [busy, setBusy] = useState(false), [versions, setVersions] = useState<Version[] | null>(null), [preview, setPreview] = useState("");
   const [notify, setNotify] = useState(true), [conflict, setConflict] = useState<Conflict | null>(null);
+  // התוכניות שעלו לאתר בפרסום האחרון — להן מציעים טיוטת מייל לרשימת התפוצה
+  const [fresh, setFresh] = useState<Episode[]>([]);
   const [checks, setChecks] = useState<Record<string, { running: boolean; done: number; total: number; problems: Array<{ id: string; text: string }> }>>({});
   const [migrate, setMigrate] = useState<{ running: boolean; done: number; total: number; moved: number; had: number; failed: string[] } | null>(null);
   const stopMigrate = useRef(false), fileInput = useRef<HTMLInputElement>(null);
@@ -455,8 +469,11 @@ function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin,
     setBusy(true); setConflict(null); onMessage("מפרסמים…");
     try {
       const removedIds = origin.episodes.filter((o) => !data.episodes.some((e) => e.id === o.id)).map((o) => o.id);
+      const isPublic = (e: Episode) => e.visible && !scheduled(e);
+      const goingLive = data.episodes.filter((e) => isPublic(e) && !origin.episodes.some((o) => o.id === e.id && isPublic(o)));
       const r = await api<{ versionId?: string; notified?: number }>("/api/program/catalog", { method: "POST", body: JSON.stringify({ seasons: data.seasons, episodes: data.episodes.map((e) => normEpisode(e, 0)), removedIds, settings: data.settings, baseVersion: base.current ?? null, force, notify }) });
       onPublished(normCatalog(JSON.parse(JSON.stringify(data))), r.versionId ?? null); setVersions(null); onMessage("פורסם! אתר התוכניות מציג עכשיו את הגרסה החדשה.");
+      setFresh([...goingLive].sort((a, b) => (b.date || "").localeCompare(a.date || "")));
       if (notify && r.notified) drainPush().then((n) => { if (n) onMessage(n === 1 ? "נשלחה התראה למכשיר אחד." : `נשלחה התראה ל־${n} מכשירים.`); });
     } catch (error) {
       const e = error as ApiError;
@@ -533,6 +550,10 @@ function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin,
       {!!health.must.length && <div className="prog-must"><b>לפני שמפרסמים, צריך לתקן:</b><ul>{health.must.map((p) => <li key={p.id}><button type="button" className="prog-link" onClick={() => onOpen(p.id)}>{p.text}</button></li>)}</ul></div>}
       <div className="row-actions">{changes?.any ? <><button type="button" className="prog-primary big" disabled={!!health.must.length || busy} onClick={() => publish(false)}>{busy ? "מפרסמים…" : "פרסום לאתר התוכניות ←"}</button><button type="button" onClick={discard}>ביטול כל השינויים</button></> : <span className="prog-done">✓ אין שינויים שמחכים לפרסום</span>}</div>
       {!!changes?.added && <label className="prog-check"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> לשלוח התראה לטלפון של המאזינים על התוכניות החדשות</label>}
+      {fresh.length > 0 && <div className="prog-mail-offer" role="status">
+        <p><b>✉ {fresh.length === 1 ? "התוכנית עלתה!" : `${fresh.length} תוכניות עלו!`}</b> מייל מעוצב לרשימת התפוצה — עם כפתור האזנה באתר וקישור הורדה ישיר — נוצר כטיוטה בג׳ימייל שלכם. עורכים, ושולחים משם.</p>
+        <div className="row-actions">{fresh.slice(0, 3).map((e) => <button key={e.id} type="button" className="prog-primary" onClick={() => openMailDraft(e.id, onMessage)}>טיוטת מייל{fresh.length > 1 ? `: ${label(e)}` : ""} ←</button>)}<button type="button" onClick={() => setFresh([])}>לא עכשיו</button></div>
+      </div>}
       {conflict && <div className="prog-conflict" role="alertdialog" aria-labelledby="prog-conflict-title">
         <h3 id="prog-conflict-title">מנהל אחר פרסם בינתיים</h3>
         <p>מאז שהתחלתם לערוך, מישהו אחר פרסם גרסה חדשה לאתר{conflict.who}. אם תפרסמו עכשיו, השינויים שלו יימחקו ויוחלפו בטיוטה שלכם.</p>

@@ -208,6 +208,24 @@ test("one-click mailing-list signup uses the signed-in account and the voting si
   assert.equal((await call("/api/program/subscribers/count", { token: voter })).status, 403);
 });
 
+test("the mailing list for the Gmail draft: active addresses only, for managers only", async () => {
+  const { call, admin, voter, db } = await setup();
+  const add = db.prepare("INSERT INTO subscribers (id, email, name, source, consented_at, unsubscribed_at) VALUES (?, ?, ?, 'import', unixepoch(), ?)");
+  add.run("s1", "First@Example.com", "ראשון", null);
+  add.run("s2", "second@example.com", null, null);
+  add.run("s3", "gone@example.com", "", Math.floor(Date.now() / 1000));
+  add.run("s4", "not-an-address", "", null);
+  assert.equal((await call("/api/program/subscribers")).status, 403);
+  assert.equal((await call("/api/program/subscribers", { token: voter })).status, 403, "listeners never see the list");
+  const response = await call("/api/program/subscribers", { token: admin });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.headers.get("access-control-allow-origin"), ORIGIN, "the program site reads it cross-origin");
+  const body = await response.json();
+  assert.deepEqual(body.subscribers.map((row) => row.email), ["first@example.com", "second@example.com"]);
+  assert.equal(body.subscribers[0].name, "ראשון");
+  assert.equal(body.active, 2);
+});
+
 test("one sign-in covers both sites: the program site bounces through here and comes back signed in", async () => {
   const { worker, env, db } = await setup();
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("cookie-voter"));
