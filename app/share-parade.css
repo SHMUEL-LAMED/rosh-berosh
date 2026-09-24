@@ -1,22 +1,60 @@
-/* שיתוף המצעד — הכרטיס עם אפשרויות השיתוף, החלון הקופץ וכפתור השיתוף בכותרת */
-.share-parade{width:min(560px,100%);margin:26px auto 0;padding:22px;border:1px solid rgba(184,149,48,.28);border-radius:18px;text-align:right;background:var(--panel2)}
-.success-card .share-parade{margin-top:30px}
-.share-parade.compact{margin-top:18px;padding:0;border:0;background:transparent}
-.share-parade-copy b{display:block;font-size:17px}
-.share-parade-copy small{display:block;margin-top:7px;color:var(--muted);font-size:12px;line-height:1.65}
-.share-parade-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:9px;margin-top:16px}
-.share-parade.compact .share-parade-actions{margin-top:0}
-.share-parade-actions a,.share-parade-actions button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:46px;padding:0 12px;border:1px solid #d8c080;border-radius:13px;color:#806515;background:#fff;font:inherit;font-size:14px;font-weight:800;text-decoration:none;cursor:pointer}
-.share-parade-actions a:hover,.share-parade-actions button:hover{background:#faf5e6}
-.share-parade-actions .share-whatsapp{border-color:#0f7a6d;color:#fff;background:#0f7a6d}.share-parade-actions .share-whatsapp:hover{background:#0c6559}
-.share-parade-actions .share-telegram{border-color:#176fa8;color:#fff;background:#176fa8}.share-parade-actions .share-telegram:hover{background:#125c8b}
-.share-parade-link{width:100%;height:44px;margin-top:12px;padding:0 12px;border:1px solid #d8c080;border-radius:11px;color:var(--text);background:#fff;font-size:13px}
-.share-parade-status{margin:12px 0 0;color:#166b59;font-size:12px}.share-parade-status.error{color:#b3245c}
-.user-nav .share-nav{border-color:#d4b060;color:#806515;background:#fdf8ec}
-.share-overlay{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:20px;background:rgba(10,16,31,.58);backdrop-filter:blur(5px)}
-.share-dialog{position:relative;width:min(540px,100%);max-height:calc(100vh - 40px);overflow-y:auto;padding:34px 28px 24px;border:1px solid rgba(184,149,48,.42);border-radius:23px;color:var(--text);background:var(--panel);box-shadow:0 24px 75px rgba(0,0,0,.34);text-align:right}
-.share-dialog h2{margin:5px 0 8px;font-size:28px}.share-dialog>p:not(.kicker){margin:0;color:var(--muted);line-height:1.65}
-.share-close{position:absolute;top:10px;left:13px;width:36px;height:36px;border:0;border-radius:50%;color:var(--muted);background:transparent;font-size:28px;line-height:1;cursor:pointer}.share-close:hover{background:rgba(0,0,0,.06)}
-.share-later{display:block;margin:17px auto 0;border:0;color:var(--muted);background:transparent;font:inherit;text-decoration:underline;cursor:pointer}
-.share-dialog .share-continue{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin-top:18px;border-radius:13px;cursor:pointer}
-@media(max-width:580px){.share-dialog{padding:30px 18px 20px}.share-dialog h2{font-size:24px}}
+/* שיתוף המצעד — כרטיס ההזמנה, שלבי המייל המעוצב, החלון הקופץ וכפתור השיתוף בכותרת */
+.share-invite{width:min(600px,100%);margin:30px auto 0;overflow:hidden;border:1px solid #dcc57a;border-radius:26px;text-align:center;color:#29213f;background:linear-gradient(180deg,#fffdf7,#f8f1dc);box-shadow:0 22px 60px rgba(91,68,16,.18)}
+.share-invite.in-dialog{width:100%;margin:0;border:0;border-radius:0;box-shadow:none}
+.share-invite-hero{position:relative;overflow:hidden;padding:30px 26px 28px;color:#fff;background:radial-gradient(circle at 14% 12%,rgba(255,255,255,.16),transparent 26%),radial-gradient(circle at 86% 108%,rgba(234,212,122,.42),transparent 42%),linear-gradient(140deg,#17112b,#3b2f5c 58%,#9a7b1c)}
+.share-invite-sparkles i{position:absolute;color:#ead47a;font-style:normal;opacity:.5;animation:share-twinkle 3.2s ease-in-out infinite}
+.share-invite-sparkles i:nth-child(1){top:20px;right:26px;font-size:18px}
+.share-invite-sparkles i:nth-child(2){top:70px;left:34px;font-size:13px;animation-delay:.8s}
+.share-invite-sparkles i:nth-child(3){bottom:24px;right:48px;font-size:12px;animation-delay:1.6s}
+.share-invite-sparkles i:nth-child(4){top:30px;left:96px;font-size:22px;animation-delay:2.2s}
+.share-invite-badge{position:relative;width:88px;height:88px;margin:0 auto 12px;filter:drop-shadow(0 10px 22px rgba(0,0,0,.38));animation:share-float 5s ease-in-out infinite}
+.share-invite-kicker{position:relative;margin:0;color:#ead47a;font-size:12px;font-weight:800;letter-spacing:.14em}
+.share-invite .share-invite-hero h2{position:relative;margin:8px 0 0;color:#fff;font-size:clamp(25px,4.6vw,33px);font-weight:900;line-height:1.2}
+.share-invite-blurb{position:relative;max-width:460px;margin:10px auto 0;color:#f4eac4;font-size:15px;line-height:1.7}
+.share-invite-body{padding:22px 24px 24px}
+.share-invite svg{width:20px;height:20px;flex:none}
+.share-invite-mail{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:58px;padding:0 20px;border:0;border-radius:16px;color:#fff;font-size:17px;font-weight:900;background:linear-gradient(105deg,#2b3a7a,#b89530 58%,#967b1f);box-shadow:0 12px 28px rgba(150,118,25,.3);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.share-invite-mail::after{content:"";position:absolute;top:0;bottom:0;left:-60%;width:45%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.32),transparent);transform:skewX(-18deg);animation:share-shine 4.5s ease-in-out infinite;pointer-events:none}
+.share-invite-mail:hover{transform:translateY(-2px);box-shadow:0 16px 34px rgba(150,118,25,.38)}
+.share-invite-mail:disabled{cursor:wait;opacity:.75;transform:none}
+.share-invite-more{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.share-invite-more.single{grid-template-columns:1fr}
+.share-invite-more button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 14px;border:1px solid #d8c080;border-radius:14px;color:#806515;background:#fff;font-size:15px;font-weight:800;cursor:pointer;transition:background .15s}
+.share-invite-more button:hover{background:#fbf5e3}
+.share-invite-note{margin:14px 0 0;color:#7a7088;font-size:12.5px}
+.share-invite-link{width:100%;height:44px;margin-top:12px;padding:0 12px;border:1px solid #d8c080;border-radius:11px;color:var(--text);background:#fff;font-size:13px}
+.share-invite-status{margin:12px 0 0;color:#166b59;font-size:13px}.share-invite-status.error{color:#b3245c}
+/* אחרי הלחיצה על המייל: ההזמנה הועתקה, שלושה צעדים, פתיחת המייל ותצוגה מקדימה */
+.share-mail{margin-top:16px;padding:18px;border:1px solid #e3d3a0;border-radius:18px;text-align:right;background:#fff;animation:share-in .25s ease-out}
+.share-mail-title{display:flex;align-items:center;gap:8px;margin:0;color:#137863;font-weight:900}
+.share-mail-title svg{width:22px;height:22px;padding:3px;border-radius:50%;color:#fff;background:#1f9d7f}
+.share-mail-title.failed{color:#94411d;font-weight:700;line-height:1.6}
+.share-mail-steps{display:grid;gap:10px;margin:14px 0 0;padding:0;list-style:none}
+.share-mail-steps li{display:flex;align-items:center;gap:11px;color:#3a3150;font-size:14.5px;line-height:1.5}
+.share-mail-steps b{width:28px;height:28px;display:grid;flex:none;place-items:center;border-radius:50%;color:#fff;background:#b89530;font-size:14px}
+.share-mail-steps kbd{display:inline-block;padding:0 7px;border:1px solid #d8c080;border-bottom-width:2px;border-radius:6px;color:#5a4712;background:#fdf8ec;font:700 12.5px/1.6 Arial,sans-serif}
+.share-mail-open{display:flex;align-items:center;justify-content:center;gap:9px;min-height:52px;margin-top:16px;border-radius:14px;color:#fff;background:#241b42;font-weight:900;text-decoration:none;transition:background .15s}
+.share-mail-open:hover{background:#352a5c}
+.share-mail-alt{display:block;margin-top:9px;color:#806515;font-size:13px;text-align:center;text-decoration:underline}
+.share-mail-preview{margin-top:14px;padding-top:12px;border-top:1px solid #efe6cf}
+.share-mail-preview summary{color:#806515;font-size:13.5px;font-weight:800;cursor:pointer}
+.share-mail-preview iframe{display:block;width:100%;height:600px;margin-top:10px;border:0;border-radius:14px;background:#f6f1e3}
+/* החלון הקופץ: הכרטיס עצמו, עם כפתור סגירה על הכותרת הכהה */
+.share-overlay{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:16px;background:rgba(10,16,31,.62);backdrop-filter:blur(5px);animation:share-fade .2s ease-out}
+.share-dialog{position:relative;width:min(560px,100%);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow-y:auto;border:1px solid rgba(220,197,122,.7);border-radius:26px;color:var(--text);background:#fbf5e3;box-shadow:0 30px 90px rgba(0,0,0,.4);animation:share-pop .3s cubic-bezier(.2,.9,.3,1.15)}
+.share-close{position:absolute;z-index:2;top:12px;left:12px;width:38px;height:38px;border:0;border-radius:50%;color:#fff;background:rgba(255,255,255,.14);font-size:26px;line-height:1;cursor:pointer}
+.share-close:hover{background:rgba(255,255,255,.26)}
+.share-close:focus-visible{outline-color:#ead47a}
+.share-dialog-foot{padding:0 24px 22px}
+.share-later{display:block;margin:0 auto;border:0;color:var(--muted);background:transparent;font:inherit;text-decoration:underline;cursor:pointer}
+.share-dialog .share-continue{display:flex;align-items:center;justify-content:center;width:100%;min-height:50px;border-radius:14px;cursor:pointer}
+.user-nav .share-nav{display:inline-flex;align-items:center;gap:6px;border-color:#d4b060;color:#6b5410;background:linear-gradient(105deg,#fdf6df,#f3e3b0);font-weight:800}
+.user-nav .share-nav svg{width:16px;height:16px;flex:none}
+@keyframes share-twinkle{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:.85;transform:scale(1.1)}}
+@keyframes share-float{50%{transform:translateY(-5px)}}
+@keyframes share-shine{0%,62%{left:-60%}100%{left:130%}}
+@keyframes share-in{from{opacity:0;transform:translateY(-6px)}}
+@keyframes share-fade{from{opacity:0}}
+@keyframes share-pop{from{opacity:0;transform:translateY(14px) scale(.97)}}
+@media(prefers-reduced-motion:reduce){.share-invite-sparkles i,.share-invite-badge,.share-invite-mail::after,.share-mail,.share-overlay,.share-dialog{animation:none}}
+@media(max-width:580px){.share-invite{border-radius:22px}.share-invite-hero{padding:26px 18px 24px}.share-invite-body{padding:18px 16px 20px}.share-invite-more{grid-template-columns:1fr}.share-invite-mail{font-size:16px}.share-mail{padding:15px}.share-dialog{border-radius:22px}.share-dialog-foot{padding:0 16px 18px}.user-nav .share-nav svg{display:none}}
