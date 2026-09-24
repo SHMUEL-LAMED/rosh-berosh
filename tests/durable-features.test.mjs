@@ -65,6 +65,27 @@ test("successful voters receive a downloadable and shareable branded receipt", (
   assert.match(worker, /if \(!existing && blocked\)/, "a blocked computer must still be able to share an existing authenticated ballot");
 });
 
+test("voters are invited to share the parade: after voting, on return, mid-vote and from the header", () => {
+  const share = source("app/share-parade.tsx");
+  const page = source("app/page.tsx");
+  assert.match(share, /https:\/\/wa\.me\/\?text=/);
+  assert.match(share, /https:\/\/t\.me\/share\/url\?url=/);
+  assert.match(share, /mailto:\?subject=/);
+  assert.match(share, /navigator\.clipboard\.writeText\(url\)/);
+  assert.match(share, /navigator\.share\(\{ title: SHARE_TITLE, text: SHARE_TEXT, url \}\)/);
+  assert.match(share, /typeof navigator\.share === "function"/, "the device share sheet is offered only where it exists");
+  assert.match(share, /window\.location\.origin/, "the shared link follows the domain the site was opened from");
+  // מסך התודה ומסך "כבר הצבעתם" מציגים את הכרטיס; החלון קופץ למי שכבר הצביע,
+  // באמצע ההצבעה, ומכפתור קבוע בכותרת.
+  assert.equal((page.match(/<ShareParadeCard \/>/g) || []).length, 2);
+  assert.match(page, /oncePer\("session", SHARE_VOTED_KEY\)\) setSharePrompt\("voted"\)/);
+  assert.match(page, /target > stageIndex && target === middleStage && \(preview \|\| oncePer\("local", SHARE_MID_KEY\)\)\) setSharePrompt\("mid"\)/);
+  assert.match(page, /className="share-nav" onClick=\{\(\) => setSharePrompt\("manual"\)\}/);
+  // אחרי התחברות חדשה חלון רשימת התפוצה כבר על המסך — שני חלונות אינם קופצים יחד.
+  assert.match(page, /if \(preview \|\| voted !== true \|\| freshLogin\) return;/);
+  assert.match(page, /\{sharePrompt && <ShareParadeDialog reason=\{sharePrompt\} onClose=\{closeShare\} \/>\}/);
+});
+
 test("admin preview reaches the final screen without writing a ballot or progress", () => {
   const page = source("app/page.tsx");
   const admin = source("app/admin/page.tsx");
