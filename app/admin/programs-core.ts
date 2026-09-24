@@ -31,12 +31,18 @@ export type Catalog = { seasons: Season[]; episodes: Episode[]; settings: Settin
 export type SurveyRow = { id: string; name: string; active: boolean; open: boolean };
 export type Version = { id: string; by: string; episodes: number; createdAt: number };
 export type Message = { id: string; name: string; email: string; text: string; episodeId: string | null; readAt: number | null; createdAt: number };
+/** מאיזה יום סופרים, ואחרי כמה שניות האזנה היא נספרת (`/api/program/stats/config`) */
+export type StatsConfig = { since: string; minSeconds: number; by?: string; updatedAt?: number };
+/** plays — האזנות שעברו את הסף; full — האזנות מלאות; starts — כל מי שהתחיל לשמוע; downloads — הורדות */
+export type ListenCounts = { plays: number; listeners?: number; seconds?: number; full?: number; starts?: number; downloads?: number };
 export type Stats = {
-  days: Array<{ day: string; plays: number; listeners: number }>; episodes: Array<{ id: string; plays: number }>; recent: Array<{ id: string; plays: number }>;
-  totals: { plays?: number; seconds?: number }; week: { plays?: number; listeners?: number }; devices: Record<string, number>;
+  config?: StatsConfig;
+  days: Array<{ day: string } & ListenCounts>; episodes: Array<{ id: string } & ListenCounts>; recent: Array<{ id: string } & ListenCounts>;
+  totals: Partial<ListenCounts>; week: Partial<ListenCounts>; month?: { downloads?: number }; devices: Record<string, number>;
   sources?: Array<{ ref: string; plays: number }>; hours?: Array<{ hour: number; plays: number }>; likes?: Array<{ id: string; likes: number }>; moments?: Array<{ id: string; count: number }>;
+  downloads?: { sources: Array<{ ref: string; downloads: number }> };
 };
-export type EpisodeStats = { plays: number; listeners: number; retention: Array<{ pct: number; listeners: number }> };
+export type EpisodeStats = ListenCounts & { listeners: number; retention: Array<{ pct: number; listeners: number }> };
 export type Moments = { id: string; total: number; buckets: Array<{ at: number; count: number }>; top: Array<{ at: number; count: number }> };
 export type Comment = { id: string; episodeId: string; name: string; email: string; text: string; at: number | null; status: "pending" | "approved" | "hidden"; pinned: boolean; reply: string | null; replyBy: string | null; createdAt: number };
 export type AiSummary = { description: string; summary: string; tags: string[]; guests: string[]; model?: string; createdAt?: string };

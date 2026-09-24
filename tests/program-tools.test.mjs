@@ -132,7 +132,8 @@ test("a preview link shows the draft to anyone who has it, until it is revoked",
 
 test("listening events are anonymous, rate limited, and add up to administrator statistics", async () => {
   const { call, admin, voter } = await setup();
-  for (const [ip, kind, seconds] of [["1.1.1.1", "play", 0], ["1.1.1.1", "listen", 120], ["2.2.2.2", "play", 0], ["2.2.2.2", "play", 0]]) {
+  // 1.1.1.1 שמע שתי דקות, 2.2.2.2 רק לחץ על ניגון, 3.3.3.3 שמע עשר דקות (כל אירוע עד 600 שניות)
+  for (const [ip, kind, seconds] of [["1.1.1.1", "play", 0], ["1.1.1.1", "listen", 120], ["2.2.2.2", "play", 0], ["2.2.2.2", "play", 0], ["3.3.3.3", "play", 0], ["3.3.3.3", "listen", 300], ["3.3.3.3", "listen", 300]]) {
     const r = await call("/api/program/events", { method: "POST", ip, body: { kind, episodeId: "ep-1", seconds, device: "phone" } });
     assert.equal(r.status, 200, await r.clone().text());
   }
@@ -142,12 +143,17 @@ test("listening events are anonymous, rate limited, and add up to administrator 
   assert.equal((await call("/api/program/events", { method: "POST", ip: "9.9.9.9", body: { kind: "play", episodeId: "ep-1" } })).status, 429);
   assert.equal((await call("/api/program/stats", { token: voter })).status, 403);
   const stats = await (await call("/api/program/stats", { token: admin })).json();
-  assert.equal(Number(stats.totals.plays), 3 + 60);
+  assert.deepEqual(stats.config, { since: "2026-09-24", minSeconds: 600 }, "by default: counting from 24.9.2026, and a listen is ten minutes");
+  assert.equal(stats.totals.plays, 1, "only the ten-minute listener counts; pressing play is not a listen");
+  assert.equal(stats.totals.starts, 4, "four devices started the episode");
+  assert.equal(stats.totals.listeners, 1);
+  assert.equal(stats.totals.seconds, 720);
   assert.equal(stats.episodes[0].id, "ep-1");
-  assert.equal(Number(stats.episodes[0].seconds), 120);
+  assert.equal(stats.episodes[0].plays, 1);
+  assert.equal(stats.episodes[0].seconds, 720);
   assert.equal(stats.days.length, 1);
-  assert.equal(Number(stats.devices.phone), 3, "only plays count, and only those that named a phone");
-  assert.ok(Number(stats.totals.listeners) >= 2);
+  assert.equal(stats.devices.phone, 1, "only listens count, and only those that named a phone");
+  assert.equal(stats.week.plays, 1);
 });
 
 test("listeners write to the hosts; administrators read, mark and delete", async () => {

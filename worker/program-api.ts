@@ -1,6 +1,6 @@
 import { createSession, GOOGLE_CLIENT_ID, readSession, sessionCookie, type SessionUser, verifyGoogleCredential } from "./auth";
 import seed from "./program-seed.json";
-import { latestVersion, PROGRAM_SITE, programToolsApi, publicSettings, readSetting, settingsStatements, versionStatements } from "./program-tools";
+import { latestVersion, PROGRAM_SITE, programToolsApi, publicSettings, readSetting, recordDownload, settingsStatements, versionStatements } from "./program-tools";
 import { DRIVE_DOWNLOAD, DRIVE_ID, driveIdOf, loadEpisode, programAudioKey, safeMediaKey, audioKeysOf } from "./program-audio";
 import { isPublic, israelWallClock } from "./program-schedule.js";
 import { NOTIFIED_KEY, notifiedStatement, notifyEpisodes, programPushApi } from "./program-push";
@@ -195,7 +195,7 @@ async function catalog(env: Env, includeHidden = false, origin = "") {
   };
 }
 
-export async function programApi(request: Request, env: Env): Promise<Response | null> {
+export async function programApi(request: Request, env: Env, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/program/")) return null;
   if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }));
@@ -529,16 +529,24 @@ export async function programApi(request: Request, env: Env): Promise<Response |
     const user = episode && !(episode.visible && isPublic(episode.data, true)) ? await readSession(request, env) : null;
     if (!episode || (!(episode.visible && isPublic(episode.data, true)) && !user?.isAdmin)) return reply(request, { error: "התוכנית לא נמצאה." }, 404);
     const title = String(episode.data.title || "").replace(/[/\\:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 150) || episode.id;
+    // כל הורדה של תוכנית ציבורית נספרת לסטטיסטיקה (פעם אחת לכל מכשיר ביום; ראו recordDownload).
+    // הרישום לא מעכב את ההורדה, ותקלה בו לא מפילה אותה.
+    const count = () => {
+      if (!episode.visible || !isPublic(episode.data, true)) return;
+      const counted = recordDownload(env, request, episode.id).catch((error) => { console.error("program download count error", episode.id, error); });
+      if (ctx) ctx.waitUntil(counted);
+    };
     for (const key of audioKeysOf(episode.data, url.origin)) {
       const ext = (key.match(/\.([a-z0-9]{2,4})$/i)?.[1] || "mp3").toLowerCase();
       const response = await r2AudioResponse(request, env, key, downloadDisposition(title, episode.id, ext));
       if (response) {
         response.headers.set("cache-control", "public, max-age=3600");
+        count();
         return cors(request, response);
       }
     }
     const driveId = driveIdOf(episode.data);
-    if (driveId) return cors(request, new Response(null, { status: 302, headers: { location: DRIVE_DOWNLOAD(driveId), "cache-control": "no-store" } }));
+    if (driveId) { count(); return cors(request, new Response(null, { status: 302, headers: { location: DRIVE_DOWNLOAD(driveId), "cache-control": "no-store" } })); }
     return reply(request, { error: "ההקלטה של התוכנית אינה זמינה להורדה." }, 404);
   }
 

@@ -5,7 +5,7 @@
    והרגעים הכי חמים), תגובות המאזינים באישור מנהל, והתראות לטלפון. */
 
 import { useState } from "react";
-import { api, drainPush, errorText, fmtTime, label, n2, scheduled, streamUrl, when, PROGRAM_SITE, type ApiError, type Catalog, type Comment, type EpisodeStats, type Moments, type Stats } from "./programs-core";
+import { api, drainPush, errorText, fmtDate, fmtTime, label, n2, scheduled, streamUrl, today, when, PROGRAM_SITE, type ApiError, type Catalog, type Comment, type EpisodeStats, type Moments, type Stats, type StatsConfig } from "./programs-core";
 import { Bars, HBars, Section } from "./programs-ui";
 
 const SOURCE_NAMES: Record<string, string> = { email: "מייל (רשימת התפוצה)", whatsapp: "וואטסאפ", google: "גוגל", facebook: "פייסבוק", direct: "ישיר (קישור או כתובת)", internal: "מתוך האתר", other: "אחר" };
@@ -13,11 +13,59 @@ const byDate = (a: { date: string; number: number | null }, b: { date: string; n
 
 type EpisodeDeep = { stats: EpisodeStats | null; moments: Moments | null; error: string };
 
+/* ---------- מה נספר: אחרי כמה דקות האזנה היא נספרת, ומאיזה יום (איפוס) ---------- */
+const MINUTE_CHOICES = [1, 2, 3, 5, 10, 15, 20, 30];
+export const minutesText = (minutes: number) => (minutes === 1 ? "דקה" : `${minutes} דקות`);
+export function CountSettings({ config, onSaved, onMessage }: { config: StatsConfig; onSaved(): void; onMessage(message: string): void }) {
+  // התאריך שבחרו ועוד לא שמרו; עד אז — התאריך השמור
+  const [busy, setBusy] = useState(false), [draft, setDraft] = useState<string | null>(null);
+  const since = draft ?? config.since;
+  const minutes = Math.round(config.minSeconds / 60);
+  const choices = [...new Set([...MINUTE_CHOICES, minutes])].sort((a, b) => a - b);
+  const save = async (body: Record<string, unknown>, done: string) => {
+    setBusy(true);
+    try { await api("/api/program/stats/config", { method: "POST", body: JSON.stringify(body) }); setDraft(null); onMessage(done); onSaved(); }
+    catch (cause) { onMessage(errorText(cause, "השמירה נכשלה.")); }
+    finally { setBusy(false); }
+  };
+  const reset = () => {
+    if (!confirm("לאפס את הספירה? כל המספרים (האזנות, האזנות מלאות והורדות) יתחילו מאפס מהיום.\nההאזנות הקודמות לא נמחקות — בחירת תאריך מוקדם יותר מחזירה אותן.")) return;
+    save({ reset: true }, "הספירה אופסה — מהיום סופרים מחדש.");
+  };
+  return <div className="prog-count">
+    <h3>מה נספר</h3>
+    <p className="panel-help"><b>האזנה</b> — מי ששמע לפחות {minutesText(minutes)} מהתוכנית באותו יום (או את כולה). <b>האזנה מלאה</b> — שמע לפחות 90% מהתוכנית. <b>הורדה</b> — לחיצה על קישור ההורדה, באתר או במייל; פעם אחת לכל מכשיר ביום, ובוטים וסורקי קישורים לא נספרים.</p>
+    <div className="prog-count-row">
+      <label>האזנה נספרת אחרי <select className="prog-select" value={minutes} disabled={busy} onChange={(e) => save({ minMinutes: Number(e.target.value) }, `מעכשיו האזנה נספרת אחרי ${minutesText(Number(e.target.value))}.`)}>{choices.map((m) => <option key={m} value={m}>{minutesText(m)}</option>)}</select></label>
+      <label>סופרים מ־<input type="date" value={since} max={today()} disabled={busy} onChange={(e) => setDraft(e.target.value)} /></label>
+      <button type="button" className="prog-btn" disabled={busy || !since || since === config.since} onClick={() => save({ since }, `הספירה מתחילה עכשיו מ־${fmtDate(since)}.`)}>שמירת התאריך</button>
+      <button type="button" className="prog-btn" disabled={busy} onClick={reset}>איפוס — לספור מהיום</button>
+    </div>
+    {config.by && <p className="panel-help">עודכן לאחרונה על ידי <span dir="ltr">{config.by}</span>{config.updatedAt ? ` · ${when(config.updatedAt)}` : ""}.</p>}
+  </div>;
+}
+
+/** טבלה: לכל תוכנית — האזנות, האזנות מלאות, הורדות ומאזינים */
+export function EpisodeTable({ rows, name }: { rows: Stats["episodes"]; name(id: string): string }) {
+  const [all, setAll] = useState(false);
+  if (!rows.length) return <p className="panel-help">עוד אין נתונים.</p>;
+  const sorted = rows.slice().sort((a, b) => (Number(b.plays) || 0) - (Number(a.plays) || 0) || (Number(b.downloads) || 0) - (Number(a.downloads) || 0));
+  const shown = all ? sorted : sorted.slice(0, 15);
+  return <>
+    <div className="prog-table-wrap"><table className="prog-table">
+      <thead><tr><th>תוכנית</th><th>האזנות</th><th>האזנות מלאות</th><th>הורדות</th><th>מאזינים</th></tr></thead>
+      <tbody>{shown.map((r) => <tr key={r.id}><td>{name(r.id)}</td><td>{n2(r.plays)}</td><td>{n2(r.full)}</td><td>{n2(r.downloads)}</td><td>{n2(r.listeners)}</td></tr>)}</tbody>
+    </table></div>
+    {sorted.length > 15 && <button type="button" className="prog-btn" onClick={() => setAll((v) => !v)}>{all ? "פחות" : `כל ${n2(sorted.length)} התוכניות`}</button>}
+  </>;
+}
+
 /* ---------- סטטיסטיקה מעמיקה ---------- */
 export function DeepStats({ stats, data }: { stats: Stats; data: Catalog }) {
   const [picked, setPicked] = useState(""), [cache, setCache] = useState<Record<string, EpisodeDeep>>({});
   const name = (id: string) => { const e = data.episodes.find((x) => x.id === id); return e ? label(e) : "תוכנית שנמחקה"; };
   const sources = (stats.sources || []).filter((r) => Number(r.plays)).sort((a, b) => b.plays - a.plays);
+  const dlSources = (stats.downloads?.sources || []).filter((r) => Number(r.downloads)).sort((a, b) => b.downloads - a.downloads);
   const hours = stats.hours || [], likes = (stats.likes || []).filter((r) => Number(r.likes)), moments = stats.moments || [];
   const withAudio = data.episodes.filter((e) => streamUrl(e)).slice().sort(byDate);
   const pick = async (id: string) => {
@@ -40,6 +88,7 @@ export function DeepStats({ stats, data }: { stats: Stats; data: Catalog }) {
       <div><h3>מאיפה הגיעו המאזינים (30 יום)</h3>{sources.length ? <HBars rows={sources.map((r) => ({ label: SOURCE_NAMES[r.ref] || r.ref || "אחר", n: Number(r.plays) || 0 }))} /> : <p className="panel-help">עוד אין נתונים — הם מתחילים להיאסף מעכשיו.</p>}</div>
       <div><h3>באיזו שעה מאזינים (30 יום)</h3>{hours.some((h) => Number(h.plays)) ? <Bars ariaLabel="האזנות לפי שעה ביום" items={hours.map((h) => ({ key: String(h.hour), value: Number(h.plays) || 0, label: Number(h.hour) % 3 ? "" : String(h.hour).padStart(2, "0"), title: `${String(h.hour).padStart(2, "0")}:00 — ${n2(h.plays)} האזנות` }))} /> : <p className="panel-help">עוד אין נתונים.</p>}</div>
     </div>
+    {!!dlSources.length && <><h3>מאיפה הורידו{stats.config ? ` (מאז ${fmtDate(stats.config.since)})` : ""}</h3><HBars rows={dlSources.map((r) => ({ label: SOURCE_NAMES[r.ref] || r.ref || "אחר", n: Number(r.downloads) || 0 }))} /></>}
     <div className="prog-two">
       <div>
         <h3>הכי אהובות (♥)</h3>{likes.length ? <ol className="prog-top">{likes.slice(0, 10).map((r) => <li key={r.id}><span>{name(r.id)}</span><b>♥ {n2(r.likes)}</b></li>)}</ol> : <p className="panel-help">עוד אף אחד לא סימן „אהבתי”.</p>}
@@ -48,7 +97,7 @@ export function DeepStats({ stats, data }: { stats: Stats; data: Catalog }) {
       <div>
         <h3>עד איפה מאזינים</h3>
         <select className="prog-select" value={picked} onChange={(e) => pick(e.target.value)} aria-label="תוכנית"><option value="">בחרו תוכנית…</option>{withAudio.map((e) => <option key={e.id} value={e.id}>{label(e)}</option>)}</select>
-        {picked ? (!deep ? <p className="panel-help">טוענים…</p> : deep.error ? <p className="prog-error">{deep.error}</p> : deep.stats?.retention.some((r) => Number(r.listeners)) ? <><Bars ariaLabel="כמה מאזינים הגיעו לכל נקודה בתוכנית" items={deep.stats.retention.map((r) => ({ key: String(r.pct), value: Number(r.listeners) || 0, label: r.pct % 25 ? "" : `${r.pct}%`, title: `${r.pct}% מהתוכנית: ${n2(r.listeners)} מאזינים` }))} /><p className="panel-help">{n2(deep.stats.listeners)} מאזינים · {n2(deep.stats.plays)} האזנות. כל עמודה: כמה מאזינים הגיעו לנקודה הזו בתוכנית. ירידה חדה = שם עוזבים.</p></> : <p className="panel-help">עוד אין מספיק נתונים לתוכנית הזו.</p>) : <p className="panel-help">בחרו תוכנית כדי לראות באיזה רגע מאזינים מפסיקים לשמוע.</p>}
+        {picked ? (!deep ? <p className="panel-help">טוענים…</p> : deep.error ? <p className="prog-error">{deep.error}</p> : deep.stats?.retention.some((r) => Number(r.listeners)) ? <><Bars ariaLabel="כמה מאזינים הגיעו לכל נקודה בתוכנית" items={deep.stats.retention.map((r) => ({ key: String(r.pct), value: Number(r.listeners) || 0, label: r.pct % 25 ? "" : `${r.pct}%`, title: `${r.pct}% מהתוכנית: ${n2(r.listeners)} מאזינים` }))} /><p className="panel-help">{n2(deep.stats.listeners)} מאזינים · {n2(deep.stats.plays)} האזנות{deep.stats.full !== undefined ? ` · ${n2(deep.stats.full)} האזנות מלאות · ${n2(deep.stats.downloads)} הורדות` : ""}. כל עמודה: כמה מאזינים הגיעו לנקודה הזו בתוכנית (כל מי שהתחיל לשמוע). ירידה חדה = שם עוזבים.</p></> : <p className="panel-help">עוד אין מספיק נתונים לתוכנית הזו.</p>) : <p className="panel-help">בחרו תוכנית כדי לראות באיזה רגע מאזינים מפסיקים לשמוע.</p>}
         {hot && (hot.buckets.length ? <><h3>הרגעים הכי חמים · {n2(hot.total)} מאזינים סימנו ♥</h3><Bars pink ariaLabel="כמה מאזינים סימנו כל חלק בתוכנית" items={hotBars} /><div className="prog-chips">{hot.top.map((t) => <span key={t.at} className="prog-chip static">♥ {fmtTime(t.at)} · {n2(t.count)}</span>)}</div></> : <><h3>הרגעים הכי חמים</h3><p className="panel-help">עוד אף מאזין לא סימן ♥ על רגע בתוכנית הזו.</p></>)}
       </div>
     </div>
