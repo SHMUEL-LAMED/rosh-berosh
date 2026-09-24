@@ -68,19 +68,26 @@ test("successful voters receive a downloadable and shareable branded receipt", (
 test("voters are invited to share the parade: after voting, on return, mid-vote and from the header", () => {
   const share = source("app/share-parade.tsx");
   const page = source("app/page.tsx");
-  assert.match(share, /https:\/\/wa\.me\/\?text=/);
-  assert.match(share, /https:\/\/t\.me\/share\/url\?url=/);
-  assert.match(share, /mailto:\?subject=/);
-  assert.match(share, /navigator\.clipboard\.writeText\(url\)/);
-  assert.match(share, /navigator\.share\(\{ title: SHARE_TITLE, text: SHARE_TEXT, url \}\)/);
+  // השיתוף הוא מייל מעוצב, שיתוף מהמכשיר והעתקת הקישור — בלי כפתורי וואטסאפ וטלגרם.
+  assert.doesNotMatch(share, /wa\.me|t\.me\/share|וואטסאפ|טלגרם/);
+  // מייל מעוצב אי אפשר למלא בקישור, ולכן ההזמנה מועתקת כ־HTML בתוך הלחיצה עצמה ומודבקת במייל.
+  assert.match(share, /event\.clipboardData\.setData\("text\/html", html\)/);
+  assert.match(share, /copied = document\.execCommand\("copy"\)/);
+  assert.match(share, /new ClipboardItem\(\{ "text\/html"/, "the async clipboard is the fallback");
+  assert.match(share, /const body = mail === "failed" \? text : undefined;/, "without a rich copy the email opens with the text invitation");
+  assert.match(share, /srcDoc=\{previewDoc\}/, "the voter sees the designed invitation before sending it");
+  // שיתוף מהמכשיר שולח תמונת הזמנה מעוצבת, מוכנה מראש כי חלון השיתוף חייב להיפתח מיד בלחיצה.
+  assert.match(share, /files: \[imageFile\.current\]/);
+  assert.match(share, /navigator\.canShare\?\.\(withImage\)/);
   assert.match(share, /typeof navigator\.share === "function"/, "the device share sheet is offered only where it exists");
+  assert.match(share, /navigator\.clipboard\.writeText\(url\)/);
   assert.match(share, /window\.location\.origin/, "the shared link follows the domain the site was opened from");
   // מסך התודה ומסך "כבר הצבעתם" מציגים את הכרטיס; החלון קופץ למי שכבר הצביע,
   // באמצע ההצבעה, ומכפתור קבוע בכותרת.
   assert.equal((page.match(/<ShareParadeCard \/>/g) || []).length, 2);
   assert.match(page, /oncePer\("session", SHARE_VOTED_KEY\)\) setSharePrompt\("voted"\)/);
   assert.match(page, /target > stageIndex && target === middleStage && \(preview \|\| oncePer\("local", SHARE_MID_KEY\)\)\) setSharePrompt\("mid"\)/);
-  assert.match(page, /className="share-nav" onClick=\{\(\) => setSharePrompt\("manual"\)\}/);
+  assert.match(page, /className="share-nav" onClick=\{\(\) => setSharePrompt\("manual"\)\}><ShareIcon \/>שיתוף המצעד/);
   // אחרי התחברות חדשה חלון רשימת התפוצה כבר על המסך — שני חלונות אינם קופצים יחד.
   assert.match(page, /if \(preview \|\| voted !== true \|\| freshLogin\) return;/);
   assert.match(page, /\{sharePrompt && <ShareParadeDialog reason=\{sharePrompt\} onClose=\{closeShare\} \/>\}/);

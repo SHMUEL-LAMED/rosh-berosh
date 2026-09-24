@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoginScreen, logout, useCurrentUser } from "./auth-ui";
 import { useNotice } from "./notice";
 import { usePlayer } from "./player-context";
-import { ShareParadeCard, ShareParadeDialog, type SharePromptReason } from "./share-parade";
+import { ShareIcon, ShareParadeCard, ShareParadeDialog, type SharePromptReason } from "./share-parade";
 import { SubscribeAfterLogin, SubscribeCard } from "./subscribe";
 import { hasStageChoices } from "./voting-stage.js";
 
@@ -380,7 +380,7 @@ export default function Home() {
     {!preview && <SubscribeAfterLogin />}
     {sharePrompt && <ShareParadeDialog reason={sharePrompt} onClose={closeShare} />}
     {preview && <div className={`preview-banner${ivrPreview ? " ivr" : ""}`}><b>{ivrPreview ? "תצוגה מקדימה של קו ההצבעה" : "תצוגה מקדימה של האתר"}</b><span>{ivrPreview ? "השלבים והכמויות זהים לקו; במקום מקשי הטלפון בוחרים כאן בלחיצה." : "אפשר לעבור עד הסוף. שום בחירה לא תישמר כהצבעה."}</span><a href="/admin">יציאה לניהול</a></div>}
-    <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button type="button" className="share-nav" onClick={() => setSharePrompt("manual")}>שיתוף המצעד</button><button onClick={logout}>החלפת חשבון</button></nav></header>
+    <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button type="button" className="share-nav" onClick={() => setSharePrompt("manual")}><ShareIcon />שיתוף המצעד</button><button onClick={logout}>החלפת חשבון</button></nav></header>
     <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1 className="parade-title"><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider" aria-hidden="true"></span><span className="hero-line2"><b>25</b><small>שנות מוזיקה</small></span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
     {!preview && voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><p>הבחירה שלכם שמורה כאן ואפשר לשתף אותה בכל זמן.</p>{savedReceipt && <VoteReceipt albums={savedReceipt.albums} artists={savedReceipt.artists} />}<ShareParadeCard /><SubscribeCard /></div></section> : catalog && !catalog.rules.votingOpen && !preview ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
