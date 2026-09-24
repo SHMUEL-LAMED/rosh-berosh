@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoginScreen, logout, useCurrentUser } from "./auth-ui";
 import { useNotice } from "./notice";
 import { usePlayer } from "./player-context";
+import { ShareParadeCard, ShareParadeDialog, type SharePromptReason } from "./share-parade";
 import { SubscribeAfterLogin, SubscribeCard } from "./subscribe";
 import { hasStageChoices } from "./voting-stage.js";
 
@@ -38,6 +39,18 @@ function countVisit(): boolean {
   try {
     if (window.sessionStorage.getItem(VISIT_KEY)) return false;
     window.sessionStorage.setItem(VISIT_KEY, "1");
+    return true;
+  } catch { return true; }
+}
+// חלון השיתוף: למי שכבר הצביע — בכל כניסה מחדש (ללשונית), ובאמצע ההצבעה — פעם אחת לדפדפן.
+const SHARE_VOTED_KEY = "rosh-berosh-share-voted";
+const SHARE_MID_KEY = "rosh-berosh-share-mid";
+/** true בפעם הראשונה שהמפתח נבדק באחסון הנתון, ומסמן אותו. אחסון חסום נחשב פעם ראשונה. */
+function oncePer(scope: "session" | "local", key: string): boolean {
+  try {
+    const store = scope === "session" ? window.sessionStorage : window.localStorage;
+    if (store.getItem(key)) return false;
+    store.setItem(key, "1");
     return true;
   } catch { return true; }
 }
@@ -120,6 +133,11 @@ export default function Home() {
   const [savedReceipt, setSavedReceipt] = useState<Receipt | null>(null);
   const [blocked, setBlocked] = useState(false);
   const [voteCheckFailed, setVoteCheckFailed] = useState(false);
+  const [sharePrompt, setSharePrompt] = useState<SharePromptReason | null>(null);
+  const closeShare = useCallback(() => setSharePrompt(null), []);
+  // אחרי התחברות חדשה חלון רשימת התפוצה כבר קופץ; באותה כניסה לא קופץ גם חלון השיתוף.
+  // נקרא ברינדור הראשון, לפני שהחלון ההוא מוחק את הסימון.
+  const [freshLogin] = useState(() => { try { return typeof window !== "undefined" && window.sessionStorage.getItem("rosh-berosh-show-subscribe") === "1"; } catch { return false; } });
   const progressReady = useRef(false);
   const loadedMediaAlbums = useRef(new Set<string>());
   const loadingMediaAlbums = useRef(new Set<string>());
@@ -202,6 +220,14 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [user, preview, checkVote]);
 
+  // מי שכבר הצביע מקבל בכל כניסה מחדש הזמנה לשתף את המצעד — פעם אחת ללשונית,
+  // כדי שרענון לא יחזור עליה. ההשהיה נותנת למסך להיטען לפני שהחלון קופץ.
+  useEffect(() => {
+    if (preview || voted !== true || freshLogin) return;
+    const timer = window.setTimeout(() => { if (oncePer("session", SHARE_VOTED_KEY)) setSharePrompt("voted"); }, 700);
+    return () => window.clearTimeout(timer);
+  }, [preview, voted, freshLogin]);
+
   useEffect(() => {
     if (preview || !catalog || voted !== false || progressReady.current) return;
     progressReady.current = true;
@@ -280,7 +306,14 @@ export default function Home() {
   const scrollTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
   // סיום שלב נמדד בפעם הראשונה שעוברים ממנו הלאה; חזרה אחורה אינה מאפסת אותו.
   const markStageDone = (key: "albumsDoneAt" | "songsDoneAt" | "artistsDoneAt") => setTiming((current) => current && !current[key] ? { ...current, [key]: nowSeconds() } : current);
-  const goToStage = (index: number) => { setStageIndex(Math.max(0, Math.min(stages.length - 1, index))); scrollTop(); };
+  // באמצע ההצבעה — במעבר קדימה לשלב האמצעי — קופצת פעם אחת (לכל דפדפן) ההזמנה
+  // לשתף את המצעד. בתצוגה המקדימה של המנהל היא קופצת בכל פעם.
+  const middleStage = Math.ceil((stages.length - 1) / 2);
+  const goToStage = (index: number) => {
+    const target = Math.max(0, Math.min(stages.length - 1, index));
+    if (target > stageIndex && target === middleStage && (preview || oncePer("local", SHARE_MID_KEY))) setSharePrompt("mid");
+    setStageIndex(target); scrollTop();
+  };
   const next = () => {
     if (!catalog) return;
     clearNotice();
@@ -340,15 +373,16 @@ export default function Home() {
   if (!preview && voteCheckFailed) return <main className="login-shell"><section className="success-card"><h1>לא הצלחנו לבדוק את ההצבעה</h1><p>לא נציג את טופס ההצבעה לפני שנדע אם כבר הצבעתם.</p><button className="continue" onClick={checkVote}>ניסיון חוזר</button></section></main>;
   if (voted === null) return <main className="login-shell"><div className="loading">בודקים אם כבר הצבעתם…</div></main>;
   if (!preview && blocked) return <main className="login-shell"><section className="success-card"><h1>המחשב נחסם מהצבעה</h1><p>אי אפשר לשלוח הצבעה נוספת מהמחשב הזה בסקר הנוכחי.</p></section></main>;
-  if (done && catalog) return <main className="voting-shell"><section className="success-card receipt-success"><span>✓</span><p className="kicker">{preview ? "התצוגה המקדימה הסתיימה" : "ההצבעה נקלטה"}</p><h1>{preview ? "הגעתם עד השלב האחרון" : "תודה שהשתתפתם!"}</h1><p>{preview ? "זו הייתה הדגמה בלבד. שום הצבעה או התקדמות לא נשמרו." : "הבחירות שלכם נשמרו בהצלחה."}</p><VoteReceipt albums={selectedAlbums.map((album) => ({ id: album.id, title: album.title, artistName: album.artistName, coverUrl: album.coverUrl, songs: selectedSongNames(album.id) === "לא נבחר" ? [] : selectedSongNames(album.id).split(" · ") }))} artists={selectedArtists.map((artist) => ({ id: artist.id, name: artist.name, imageUrl: artist.imageUrl }))} />{preview ? <div className="preview-finish-actions"><button className="continue" onClick={() => { setDone(false); setStageIndex(0); setSongAlbumIndex(0); setAlbums([]); setSongs({}); setArtists([]); }}>התחלת תצוגה מחדש</button><a className="back" href="/admin">חזרה לניהול</a></div> : <SubscribeCard />}</section></main>;
+  if (done && catalog) return <main className="voting-shell"><section className="success-card receipt-success"><span>✓</span><p className="kicker">{preview ? "התצוגה המקדימה הסתיימה" : "ההצבעה נקלטה"}</p><h1>{preview ? "הגעתם עד השלב האחרון" : "תודה שהשתתפתם!"}</h1><p>{preview ? "זו הייתה הדגמה בלבד. שום הצבעה או התקדמות לא נשמרו." : "הבחירות שלכם נשמרו בהצלחה."}</p><VoteReceipt albums={selectedAlbums.map((album) => ({ id: album.id, title: album.title, artistName: album.artistName, coverUrl: album.coverUrl, songs: selectedSongNames(album.id) === "לא נבחר" ? [] : selectedSongNames(album.id).split(" · ") }))} artists={selectedArtists.map((artist) => ({ id: artist.id, name: artist.name, imageUrl: artist.imageUrl }))} /><ShareParadeCard />{preview ? <div className="preview-finish-actions"><button className="continue" onClick={() => { setDone(false); setStageIndex(0); setSongAlbumIndex(0); setAlbums([]); setSongs({}); setArtists([]); }}>התחלת תצוגה מחדש</button><a className="back" href="/admin">חזרה לניהול</a></div> : <SubscribeCard />}</section></main>;
 
   return <main className={`voting-shell ${player ? "with-player" : ""} ${preview ? `preview-mode preview-${stage}` : ""}`} dir="rtl">
     <SharedBanner />
     {!preview && <SubscribeAfterLogin />}
+    {sharePrompt && <ShareParadeDialog reason={sharePrompt} onClose={closeShare} />}
     {preview && <div className={`preview-banner${ivrPreview ? " ivr" : ""}`}><b>{ivrPreview ? "תצוגה מקדימה של קו ההצבעה" : "תצוגה מקדימה של האתר"}</b><span>{ivrPreview ? "השלבים והכמויות זהים לקו; במקום מקשי הטלפון בוחרים כאן בלחיצה." : "אפשר לעבור עד הסוף. שום בחירה לא תישמר כהצבעה."}</span><a href="/admin">יציאה לניהול</a></div>}
-    <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button onClick={logout}>החלפת חשבון</button></nav></header>
+    <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button type="button" className="share-nav" onClick={() => setSharePrompt("manual")}>שיתוף המצעד</button><button onClick={logout}>החלפת חשבון</button></nav></header>
     <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1 className="parade-title"><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider" aria-hidden="true"></span><span className="hero-line2"><b>25</b><small>שנות מוזיקה</small></span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
-    {!preview && voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><p>הבחירה שלכם שמורה כאן ואפשר לשתף אותה בכל זמן.</p>{savedReceipt && <VoteReceipt albums={savedReceipt.albums} artists={savedReceipt.artists} />}<SubscribeCard /></div></section> : catalog && !catalog.rules.votingOpen && !preview ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
+    {!preview && voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><p>הבחירה שלכם שמורה כאן ואפשר לשתף אותה בכל זמן.</p>{savedReceipt && <VoteReceipt albums={savedReceipt.albums} artists={savedReceipt.artists} />}<ShareParadeCard /><SubscribeCard /></div></section> : catalog && !catalog.rules.votingOpen && !preview ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
         {!catalog && !loadFailed && <div className="loading">טוענים את רשימת המצעד…</div>}

@@ -1,0 +1,22 @@
+/* שיתוף המצעד — הכרטיס עם אפשרויות השיתוף, החלון הקופץ וכפתור השיתוף בכותרת */
+.share-parade{width:min(560px,100%);margin:26px auto 0;padding:22px;border:1px solid rgba(184,149,48,.28);border-radius:18px;text-align:right;background:var(--panel2)}
+.success-card .share-parade{margin-top:30px}
+.share-parade.compact{margin-top:18px;padding:0;border:0;background:transparent}
+.share-parade-copy b{display:block;font-size:17px}
+.share-parade-copy small{display:block;margin-top:7px;color:var(--muted);font-size:12px;line-height:1.65}
+.share-parade-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:9px;margin-top:16px}
+.share-parade.compact .share-parade-actions{margin-top:0}
+.share-parade-actions a,.share-parade-actions button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:46px;padding:0 12px;border:1px solid #d8c080;border-radius:13px;color:#806515;background:#fff;font:inherit;font-size:14px;font-weight:800;text-decoration:none;cursor:pointer}
+.share-parade-actions a:hover,.share-parade-actions button:hover{background:#faf5e6}
+.share-parade-actions .share-whatsapp{border-color:#0f7a6d;color:#fff;background:#0f7a6d}.share-parade-actions .share-whatsapp:hover{background:#0c6559}
+.share-parade-actions .share-telegram{border-color:#176fa8;color:#fff;background:#176fa8}.share-parade-actions .share-telegram:hover{background:#125c8b}
+.share-parade-link{width:100%;height:44px;margin-top:12px;padding:0 12px;border:1px solid #d8c080;border-radius:11px;color:var(--text);background:#fff;font-size:13px}
+.share-parade-status{margin:12px 0 0;color:#166b59;font-size:12px}.share-parade-status.error{color:#b3245c}
+.user-nav .share-nav{border-color:#d4b060;color:#806515;background:#fdf8ec}
+.share-overlay{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:20px;background:rgba(10,16,31,.58);backdrop-filter:blur(5px)}
+.share-dialog{position:relative;width:min(540px,100%);max-height:calc(100vh - 40px);overflow-y:auto;padding:34px 28px 24px;border:1px solid rgba(184,149,48,.42);border-radius:23px;color:var(--text);background:var(--panel);box-shadow:0 24px 75px rgba(0,0,0,.34);text-align:right}
+.share-dialog h2{margin:5px 0 8px;font-size:28px}.share-dialog>p:not(.kicker){margin:0;color:var(--muted);line-height:1.65}
+.share-close{position:absolute;top:10px;left:13px;width:36px;height:36px;border:0;border-radius:50%;color:var(--muted);background:transparent;font-size:28px;line-height:1;cursor:pointer}.share-close:hover{background:rgba(0,0,0,.06)}
+.share-later{display:block;margin:17px auto 0;border:0;color:var(--muted);background:transparent;font:inherit;text-decoration:underline;cursor:pointer}
+.share-dialog .share-continue{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin-top:18px;border-radius:13px;cursor:pointer}
+@media(max-width:580px){.share-dialog{padding:30px 18px 20px}.share-dialog h2{font-size:24px}}
