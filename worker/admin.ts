@@ -1,4 +1,4 @@
-import { readAdminEmails, readSession, saveAdminEmails } from "./auth";
+import { configuredAdminEmails, readAdminEmails, readSession, saveAdminEmails } from "./auth";
 import { buildAnalytics } from "./analytics";
 import { ensureRuntimeSchema } from "./schema";
 import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrPrompts, readIvrRecorders, removeIvrRecorder, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
@@ -676,7 +676,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
         const dupFp = await env.DB.prepare("SELECT b.fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(COALESCE(b.voter_email,b.voter_key), ', ') AS voters, CASE WHEN bf.fingerprint IS NULL THEN 0 ELSE 1 END AS blocked FROM ballots b LEFT JOIN blocked_fingerprints bf ON bf.survey_id=b.survey_id AND bf.fingerprint=b.fingerprint WHERE b.survey_id=? AND b.fingerprint IS NOT NULL AND b.fingerprint != '' GROUP BY b.fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string; blocked: number }>();
         suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", "), blocked: Boolean(r.blocked) }));
       } catch { /* fingerprint column may not exist yet */ }
-      return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, voteTimeline: { hourly: hourlyVotes.results, daily: dailyVotes.results }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, ivrRecorders, managers, yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
+      return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, voteTimeline: { hourly: hourlyVotes.results, daily: dailyVotes.results }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, ivrRecorders, managers, fixedManagers: configuredAdminEmails(env), yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
     } catch (error) {
       console.error("overview error", error);
       return json({ error: `שגיאה בטעינת הנתונים: ${error instanceof Error ? error.message : String(error)}` }, 500);
@@ -743,6 +743,8 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const email = text(body.email).toLowerCase();
     if (!email) return json({ error: "כתובת מנהל חסרה." }, 400);
     if (email === currentAdmin.email) return json({ error: "אי אפשר להסיר את החשבון שבו אתם מחוברים." }, 400);
+    // מנהל קבוע נשאר מנהל גם אחרי שמירת הרשימה, ולכן לא עונים "הוסר" על הסרה שלא תשפיע
+    if (configuredAdminEmails(env).includes(email)) return json({ error: "המנהל הזה מוגדר בהגדרות השרת ואי אפשר להסיר אותו מכאן." }, 400);
     const managers = (await readAdminEmails(env)).filter((item) => item !== email);
     return json({ ok: true, managers: await saveAdminEmails(env, managers) });
   }

@@ -195,6 +195,29 @@ test("the program site manages the same administrator list as the voting site", 
   assert.equal((await call("/api/program/admins", { method: "POST", token: admin, body: { email: "nope" } })).status, 400);
 });
 
+test("the voting site's permissions tab removes a manager, and refuses a permanent one instead of saying it did", async () => {
+  const { call, admin, env, saved } = await setup();
+  env.ADMIN_EMAILS = "admin@example.com, boss@example.com";
+  const overview = async () => (await call("/api/admin/overview", { token: admin })).json();
+  assert.equal((await call("/api/admin/managers", { method: "POST", token: admin, body: { email: "editor@example.com" } })).status, 200);
+  assert.ok((await overview()).managers.includes("editor@example.com"));
+  const remove = await call("/api/admin/managers", { method: "DELETE", token: admin, body: { email: "editor@example.com" } });
+  assert.equal(remove.status, 200, await remove.clone().text());
+  assert.ok(!(await remove.json()).managers.includes("editor@example.com"));
+  assert.ok(!(await overview()).managers.includes("editor@example.com") && !saved.includes("editor@example.com"), "a removed manager is really gone");
+
+  const { fixedManagers } = await overview();
+  for (const email of ["o0534169095@gmail.com", "boss@example.com"]) assert.ok(fixedManagers.includes(email), `${email} is marked permanent in the tab`);
+  assert.ok(!fixedManagers.includes("editor@example.com"));
+  // מנהל קבוע (מובנה או מ־ADMIN_EMAILS) נשאר מנהל: ההסרה נדחית בהודעה, ולא "הוסר" שלא קרה
+  for (const email of ["o0534169095@gmail.com", "o0534169095@xn--4dbjbascrao3i.com", "boss@example.com"]) {
+    const refused = await call("/api/admin/managers", { method: "DELETE", token: admin, body: { email } });
+    assert.equal(refused.status, 400, `${email}: a permanent manager cannot look removed`);
+    assert.match((await refused.json()).error, /אי אפשר להסיר/);
+    assert.ok((await overview()).managers.includes(email));
+  }
+});
+
 test("one-click mailing-list signup uses the signed-in account and the voting site's table", async () => {
   const { call, admin, voter, db } = await setup();
   assert.equal((await call("/api/program/subscribe")).status, 401);

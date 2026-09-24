@@ -826,7 +826,14 @@ const ADMIN_ACTIONS = {
 
   "access-remove-manager": async (call, callerPhone) => {
     const state = await phoneAdminOverview(callerPhone);
-    const manager = await pickItem(call, "בחרו מנהל אתר להסרה", (state.managers || []).map((email) => ({ email })), (item, index) => `מנהל מספר ${index + 1}. ${item.email}`);
+    // מנהלים קבועים (מוגדרים בשרת) אי אפשר להסיר, ולכן הם לא מוצעים כאן
+    const fixed = new Set(state.fixedManagers || []);
+    const removable = (state.managers || []).filter((email) => !fixed.has(email));
+    if (!removable.length) {
+      await speakBack(call, "אין מנהלי אתר שאפשר להסיר. מנהלים קבועים מוסרים רק בהגדרות השרת");
+      return "חזרתם לתפריט ההרשאות";
+    }
+    const manager = await pickItem(call, "בחרו מנהל אתר להסרה", removable.map((email) => ({ email })), (item, index) => `מנהל מספר ${index + 1}. ${item.email}`);
     if (!manager?.email) return "חזרתם לתפריט ההרשאות";
     if (!(await confirmAction(call, `האם להסיר את ההרשאה של ${manager.email}`))) return "ההסרה בוטלה";
     return (await phoneAdminAction(callerPhone, { action: "remove-manager", email: manager.email })).message;

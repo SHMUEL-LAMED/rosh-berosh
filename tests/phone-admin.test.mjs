@@ -93,6 +93,14 @@ test("every action the phone sends is handled by the worker", () => {
   for (const action of sent) assert.ok(handled.has(action), `הוורקר אינו מכיר את הפעולה ${action}`);
 });
 
+test("the phone offers only removable site managers for removal", () => {
+  const server = source("ivr-service/src/server.js");
+  const worker = source("worker/ivr-admin.ts");
+  const handler = server.slice(server.indexOf('"access-remove-manager"'), server.indexOf('"status-summary"'));
+  assert.match(handler, /state\.fixedManagers/, "מנהלים קבועים לא מוצעים להסרה");
+  assert.match(worker, /fixedManagers: configuredAdminEmails\(env\)/, "הסקירה של הקו מסמנת את המנהלים הקבועים");
+});
+
 test("a keyed code routes to its topic, action, main menu or hangup", () => {
   assert.equal(resolveAdminCode(HANGUP_CODE).type, "hangup");
   assert.equal(resolveAdminCode("").type, "hangup");
