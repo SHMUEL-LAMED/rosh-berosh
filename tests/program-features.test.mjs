@@ -315,11 +315,17 @@ test("listening events carry position and source, and the stats show sources, ho
   assert.equal((await send({ kind: "play", episodeId: "ep-1", ref: "whatsapp" }, "10.0.0.1")).status, 200);
   await send({ kind: "listen", episodeId: "ep-1", seconds: 120, pct: 42.6 }, "10.0.0.1");
   await send({ kind: "listen", episodeId: "ep-1", seconds: 120, pct: 97 }, "10.0.0.1");
+  // שמע 90% מהתוכנית (במהירות כפולה — פחות מעשר דקות בשעון): האזנה מלאה, ולכן נספרת
+  await send({ kind: "complete", episodeId: "ep-1", pct: 97 }, "10.0.0.1");
   await send({ kind: "play", episodeId: "ep-1", ref: "tiktok" }, "10.0.0.2");
-  await send({ kind: "listen", episodeId: "ep-1", seconds: 60, pct: 12 }, "10.0.0.2");
+  await send({ kind: "listen", episodeId: "ep-1", seconds: 900, pct: 12 }, "10.0.0.2");
   await send({ kind: "play", episodeId: "ep-1", ref: "google" }, "10.0.0.3");
-  await send({ kind: "listen", episodeId: "ep-1", pct: 250 }, "10.0.0.3");
+  await send({ kind: "listen", episodeId: "ep-1", seconds: 600, pct: 250 }, "10.0.0.3");
   await send({ kind: "play", episodeId: "ep-2", ref: "email" }, "10.0.0.4");
+  await send({ kind: "listen", episodeId: "ep-2", seconds: 600 }, "10.0.0.4");
+  // התחיל ועזב אחרי דקה: לא האזנה, לא מקור ולא שעה — אבל כן "התחילו לשמוע"
+  await send({ kind: "play", episodeId: "ep-1", ref: "facebook" }, "10.0.0.5");
+  await send({ kind: "listen", episodeId: "ep-1", seconds: 60 }, "10.0.0.5");
 
   const stats = await (await call("/api/program/stats", { token: admin })).json();
   const sources = Object.fromEntries(stats.sources.map((row) => [row.ref, row.plays]));
@@ -333,12 +339,90 @@ test("listening events carry position and source, and the stats show sources, ho
   assert.equal(detail.id, "ep-1");
   assert.equal(detail.plays, 3);
   assert.equal(detail.listeners, 3);
+  assert.equal(detail.full, 1);
+  assert.equal(detail.starts, 4);
+  assert.equal(detail.downloads, 0);
   assert.equal(detail.retention.length, 20);
   const at = (pct) => detail.retention.find((row) => row.pct === pct).listeners;
   assert.equal(at(0), 3);
   assert.equal(at(10), 3);
   assert.equal(at(15), 2, "12% does not reach 15%");
   assert.equal(at(95), 2, "97% and the clamped 100%");
+});
+
+const israelToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(new Date());
+
+test("a listen counts from the minutes the administrators set, and the count starts from the day they chose", async () => {
+  const { call, admin, voter, db } = await setup();
+  // האזנות מלפני יום ההתחלה (24.9.2026) — נשמרות אבל לא נספרות
+  db.prepare("INSERT INTO program_events (episode_id,kind,seconds,device,day,client_hash,created_at) VALUES ('ep-1','listen',600,'phone','2026-09-01','old-client',unixepoch()-86400)").run();
+  db.prepare("INSERT INTO program_events (episode_id,kind,seconds,device,day,client_hash,created_at) VALUES ('ep-1','complete',0,'phone','2026-09-01','old-client',unixepoch()-86400)").run();
+  await call("/api/program/events", { method: "POST", ip: "1.1.1.1", body: { kind: "play", episodeId: "ep-1" } });
+  await call("/api/program/events", { method: "POST", ip: "1.1.1.1", body: { kind: "listen", episodeId: "ep-1", seconds: 300 } });
+  const totals = async () => (await (await call("/api/program/stats", { token: admin })).json()).totals;
+  assert.deepEqual(await totals(), { plays: 0, listeners: 0, seconds: 300, full: 0, starts: 1, downloads: 0 }, "five minutes is not a listen; the old listen is not counted");
+
+  const config = (body, token = admin) => call("/api/program/stats/config", { method: "POST", token, body });
+  assert.equal((await config({ minMinutes: 5 }, voter)).status, 403);
+  assert.equal((await config({ minMinutes: 0 })).status, 400);
+  assert.equal((await config({ minMinutes: 61 })).status, 400);
+  assert.equal((await config({ since: "2026-13-40" })).status, 400);
+  assert.equal((await config({ since: "2099-01-01" })).status, 400, "the count cannot start in the future");
+  const five = await (await config({ minMinutes: 5 })).json();
+  assert.equal(five.config.minSeconds, 300);
+  assert.equal(five.config.by, "admin@example.com");
+  assert.equal((await totals()).plays, 1, "from now five minutes is a listen");
+
+  await config({ since: "2026-09-01" });
+  assert.deepEqual(await totals(), { plays: 2, listeners: 2, seconds: 900, full: 1, starts: 2, downloads: 0 }, "an earlier start day brings the old listens back");
+
+  const reset = await (await config({ reset: true })).json();
+  assert.equal(reset.config.since, israelToday());
+  assert.equal(reset.config.minSeconds, 300, "a reset keeps the threshold");
+  const after = await (await call("/api/program/stats", { token: admin })).json();
+  assert.equal(after.config.since, israelToday());
+  assert.equal(after.totals.plays, 1, "after a reset only today counts");
+  assert.equal(after.totals.full, 0);
+  const detail = await (await call("/api/program/stats/episode/ep-1", { token: admin })).json();
+  assert.equal(detail.plays, 1);
+  assert.equal(detail.config.since, israelToday());
+});
+
+test("the download link counts each device once a day — not bots, HEAD or a continued range — and the stats show it", async () => {
+  const { call, admin, media, settle } = await setup();
+  await media.put("program-recordings/dl.mp3", new Uint8Array(1000).fill(3), { httpMetadata: { contentType: "audio/mpeg" } });
+  await publish(call, admin, [
+    episode("ep-dl", { r2Key: "program-recordings/dl.mp3" }),
+    episode("ep-drive", { audio: "https://drive.google.com/file/d/1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4/view" }),
+    episode("ep-hidden", { visible: false, r2Key: "program-recordings/dl.mp3" }),
+  ]);
+  const PHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+  const DESKTOP = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36";
+  const get = (path, ip, headers = {}, extra = {}) => call(path, { ip, headers, ...extra });
+
+  assert.equal((await get("/api/program/download/ep-dl?ref=email", "1.1.1.1", { "user-agent": PHONE })).status, 200, "the mail's download link");
+  assert.equal((await get("/api/program/download/ep-dl?ref=email", "1.1.1.1", { "user-agent": PHONE })).status, 200, "the same phone again the same day");
+  assert.equal((await get("/api/program/download/ep-dl", "2.2.2.2", { "user-agent": DESKTOP, referer: "https://shmuel-lamed.github.io/rosh-berosh-2/episode.html?ep=ep-dl" })).status, 200, "the site's download button");
+  assert.equal((await get("/api/program/download/ep-drive", "3.3.3.3", { "user-agent": DESKTOP })).status, 302, "a Drive recording is counted too");
+  assert.equal((await get("/api/program/download/ep-dl", "4.4.4.4", { "user-agent": DESKTOP, range: "bytes=500-" })).status, 206);
+  assert.equal((await get("/api/program/download/ep-dl", "5.5.5.5", { "user-agent": DESKTOP }, { method: "HEAD" })).status, 200);
+  assert.equal((await get("/api/program/download/ep-dl", "6.6.6.6", { "user-agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" })).status, 200);
+  assert.equal((await get("/api/program/download/ep-dl", "7.7.7.7")).status, 200, "no browser at all");
+  assert.equal((await get("/api/program/download/ep-hidden", "8.8.8.8", { "user-agent": DESKTOP }, { token: admin })).status, 200, "an administrator's download of a hidden episode");
+  await settle();
+
+  const stats = await (await call("/api/program/stats", { token: admin })).json();
+  assert.equal(stats.totals.downloads, 3);
+  assert.equal(stats.week.downloads, 3);
+  assert.equal(stats.month.downloads, 3);
+  assert.equal(stats.totals.plays, 0, "a download is not a listen");
+  const per = Object.fromEntries(stats.episodes.map((row) => [row.id, row.downloads]));
+  assert.deepEqual(per, { "ep-dl": 2, "ep-drive": 1 });
+  assert.deepEqual(Object.fromEntries(stats.downloads.sources.map((row) => [row.ref, row.downloads])), { email: 1, internal: 1, direct: 1 });
+  assert.equal(stats.days.length, 1);
+  assert.equal(stats.days[0].downloads, 3);
+  const detail = await (await call("/api/program/stats/episode/ep-dl", { token: admin })).json();
+  assert.equal(detail.downloads, 2);
 });
 
 test("push subscriptions receive admin messages and publish notifications; dead ones are removed", async () => {

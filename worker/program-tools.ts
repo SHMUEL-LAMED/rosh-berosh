@@ -145,6 +145,76 @@ export async function latestVersion(env: Env) {
 
 export const REFS = ["email", "whatsapp", "google", "facebook", "direct", "internal", "other"] as const;
 export const normalizeRef = (value: unknown) => (REFS as readonly string[]).includes(String(value)) ? String(value) : "other";
+
+/* ---------- מה נספר בסטטיסטיקה ----------
+   "האזנה" = מאזין אחד (אותו מכשיר, באותו יום) בתוכנית אחת, שנספרת רק אם שמע לפחות את הסף
+   (ברירת מחדל 10 דקות) או את כל התוכנית. "האזנה מלאה" = הנגן דיווח ששמעו 90% מהתוכנית
+   (אירוע complete). "הורדה" = הקישור /api/program/download/<id>, פעם אחת לכל מכשיר ביום.
+   כל המספרים נספרים מיום ההתחלה (`since`, תאריך בישראל) — "איפוס" קובע אותו להיום.
+   האירועים הישנים לא נמחקים: הם רק לא נספרים, וקביעת תאריך מוקדם יותר מחזירה אותם. */
+export const STATS_DEFAULTS = { since: "2026-09-24", minSeconds: 600 };
+export const STATS_MIN_SECONDS = { min: 60, max: 3600 };
+export type StatsConfig = { since: string; minSeconds: number; by?: string; updatedAt?: number };
+const validDay = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "")) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`));
+const validMinSeconds = (value: unknown) => Number.isInteger(value) && Number(value) >= STATS_MIN_SECONDS.min && Number(value) <= STATS_MIN_SECONDS.max;
+
+export function normalizeStatsConfig(raw: unknown): StatsConfig {
+  const c = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const minSeconds = Math.round(Number(c.minSeconds));
+  return {
+    since: validDay(c.since) ? String(c.since) : STATS_DEFAULTS.since,
+    minSeconds: validMinSeconds(minSeconds) ? minSeconds : STATS_DEFAULTS.minSeconds,
+    ...(c.by ? { by: text(c.by, 120) } : {}),
+    ...(Number(c.updatedAt) > 0 ? { updatedAt: Math.floor(Number(c.updatedAt)) } : {}),
+  };
+}
+export const readStatsConfig = async (env: Env) => normalizeStatsConfig(await readSetting(env, "stats"));
+
+/**
+ * ההאזנות, שורה לכל מאזין (ביום) בכל תוכנית: כמה שניות שמע בפועל, האם שמע את כולה, מאיזה
+ * מכשיר, מאיפה הגיע ובאיזו שעה התחיל. q — האם היא נספרת כהאזנה.
+ * הפרמטרים לפי הסדר: הסף בשניות, מאיזה רגע (created_at), מאיזה יום (day), ואחריהם מה שב־`where`.
+ */
+export const listensSql = (where = "") => `SELECT *, (seconds>=? OR full=1) AS q FROM (SELECT episode_id, client_hash, MIN(day) AS day, SUM(seconds) AS seconds, MAX(kind='complete') AS full, MAX(device) AS device, COALESCE(MAX(CASE WHEN kind='play' THEN ref END), MAX(ref)) AS ref, MIN(hour) AS hour FROM program_events WHERE kind IN ('play','listen','complete') AND created_at>=? AND day>=?${where} GROUP BY client_hash, episode_id)`;
+const LISTEN_COUNTS = "COALESCE(SUM(q),0) AS plays, COUNT(DISTINCT CASE WHEN q THEN client_hash END) AS listeners, COALESCE(SUM(seconds),0) AS seconds, COALESCE(SUM(full),0) AS full, COUNT(*) AS starts";
+const DOWNLOADS_WHERE = "kind='download' AND created_at>=? AND day>=?";
+
+/** בוטים, סורקי קישורים של תיבות דואר ותצוגות מקדימות — "הורדה" שלהם אינה הורדה של מאזין */
+const BOT_AGENT = /bot|crawl|spider|slurp|preview|scan|proofpoint|mimecast|barracuda|safelinks|python|curl|wget|java\/|go-http|okhttp|axios|node-fetch|undici|headless|lighthouse|facebookexternalhit|^whatsapp\/|google-safety|googleimageproxy|feedfetcher/i;
+
+/** מאיפה הגיעה ההורדה: `?ref=` בקישור (המייל שולח ref=email), אחרת לפי הדף שממנו לחצו */
+export function downloadRef(param: string | null, referer: string | null) {
+  if (param) return normalizeRef(param);
+  let host = "";
+  try { host = referer ? new URL(referer).hostname : ""; } catch { /* בלי מקור */ }
+  if (!host) return "direct";
+  if (host === new URL(PROGRAM_SITE).hostname) return "internal";
+  if (/(^|\.)mail\.|outlook\.|(^|\.)live\.com$/.test(host)) return "email";
+  if (/whatsapp|wa\.me/.test(host)) return "whatsapp";
+  if (/facebook|fb\.com/.test(host)) return "facebook";
+  if (/(^|\.)google\./.test(host)) return "google";
+  return "other";
+}
+
+/**
+ * רושם הורדה של תוכנית — פעם אחת לכל מכשיר, לכל תוכנית, בכל יום (אותו מזהה אנונימי של אירועי
+ * ההאזנה). לא נספרים: HEAD, בקשת המשך (Range שלא מתחיל בבית 0), ובוטים או בקשה בלי דפדפן.
+ * מחזיר false כשהבקשה לא נספרת בכלל.
+ */
+export async function recordDownload(env: Env, request: Request, episodeId: string) {
+  if (request.method !== "GET") return false;
+  const range = request.headers.get("range");
+  if (range && !/^bytes=0-/i.test(range.trim())) return false;
+  const agent = request.headers.get("user-agent") || "";
+  if (!agent || BOT_AGENT.test(agent)) return false;
+  const today = day();
+  const client = await hash(`${request.headers.get("cf-connecting-ip") || "unknown"}|${agent}|${today}`);
+  const ref = downloadRef(new URL(request.url).searchParams.get("ref"), request.headers.get("referer"));
+  const device = /mobile|android|iphone|ipad/i.test(agent) ? "phone" : "desktop";
+  await env.DB.prepare("INSERT INTO program_events (episode_id,kind,seconds,device,day,client_hash,ref,hour) SELECT ?,'download',0,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM program_events WHERE day=? AND episode_id=? AND kind='download' AND client_hash=?)")
+    .bind(episodeId, device, today, client, ref, israelHour(), today, episodeId, client).run();
+  return true;
+}
 export const USERDATA_MAX = 300 * 1024;
 export const RETENTION_BUCKETS = Array.from({ length: 20 }, (_, i) => i * 5);
 
@@ -351,7 +421,8 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
   if (path === "/events" && method === "POST") {
     if (!(await checkRate(env.DB, `pevent:${clientIp}`, EVENT_RATE))) return tooMany();
     const event = await body<{ kind?: string; episodeId?: string; seconds?: number; device?: string; pct?: number; ref?: string }>();
-    const kind = event.kind === "listen" ? "listen" : "play";
+    // play — התחילו לנגן; listen — שניות האזנה (כל שתי דקות ובעצירה); complete — שמעו 90% מהתוכנית
+    const kind = event.kind === "listen" || event.kind === "complete" ? event.kind : "play";
     const episodeId = h.safeId(event.episodeId);
     if (!episodeId) return h.reply(request, { error: "חסר מזהה תוכנית." }, 400);
     const seconds = Math.min(600, Math.max(0, Math.floor(Number(event.seconds) || 0)));
@@ -365,43 +436,106 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     return h.reply(request, { ok: true });
   }
 
-  /* ---------- סטטיסטיקות (מנהל) ---------- */
+  /* ---------- סטטיסטיקות (מנהל) ----------
+     כל המספרים מיום ההתחלה (config.since) ולפי הסף (config.minSeconds) — ראו listensSql. */
   if (path === "/stats" && method === "GET") {
     if (!await h.admin(request, env)) return forbidden();
+    const config = await readStatsConfig(env);
+    const { since: from, minSeconds: min } = config;
     const since30 = nowSeconds() - 30 * DAY_SECONDS, since7 = nowSeconds() - 7 * DAY_SECONDS;
     const since90 = nowSeconds() - 90 * DAY_SECONDS;
-    const [days, episodes, recent, totals, devices, week, sources, hours, likes, moments] = await env.DB.batch([
-      env.DB.prepare("SELECT day, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events WHERE created_at>=? GROUP BY day ORDER BY day").bind(since30),
-      env.DB.prepare("SELECT episode_id AS id, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events GROUP BY episode_id ORDER BY plays DESC LIMIT 300"),
-      env.DB.prepare("SELECT episode_id AS id, SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners, SUM(seconds) AS seconds FROM program_events WHERE created_at>=? GROUP BY episode_id ORDER BY plays DESC LIMIT 300").bind(since30),
-      env.DB.prepare("SELECT SUM(kind='play') AS plays, COUNT(DISTINCT client_hash || day) AS listeners, SUM(seconds) AS seconds FROM program_events"),
-      env.DB.prepare("SELECT device, SUM(kind='play') AS plays FROM program_events WHERE created_at>=? GROUP BY device").bind(since30),
-      env.DB.prepare("SELECT SUM(kind='play') AS plays, COUNT(DISTINCT client_hash || day) AS listeners FROM program_events WHERE created_at>=?").bind(since7),
+    const L = listensSql();
+    const [days, episodes, recent, totals, devices, week, sources, hours, likes, moments, dlEpisodes, dlRecent, dlDays, dlSources, dlWeek] = await env.DB.batch([
+      env.DB.prepare(`SELECT day, ${LISTEN_COUNTS} FROM (${L}) GROUP BY day ORDER BY day`).bind(min, since30, from),
+      env.DB.prepare(`SELECT episode_id AS id, ${LISTEN_COUNTS} FROM (${L}) GROUP BY episode_id ORDER BY plays DESC, full DESC, seconds DESC LIMIT 300`).bind(min, 0, from),
+      env.DB.prepare(`SELECT episode_id AS id, ${LISTEN_COUNTS} FROM (${L}) GROUP BY episode_id ORDER BY plays DESC, full DESC, seconds DESC LIMIT 300`).bind(min, since30, from),
+      env.DB.prepare(`SELECT ${LISTEN_COUNTS} FROM (${L})`).bind(min, 0, from),
+      env.DB.prepare(`SELECT device, COALESCE(SUM(q),0) AS plays FROM (${L}) GROUP BY device`).bind(min, since30, from),
+      env.DB.prepare(`SELECT ${LISTEN_COUNTS} FROM (${L})`).bind(min, since7, from),
       // אירועים מלפני הוספת העמודות (בלי ref/hour) אינם נספרים כאן
-      env.DB.prepare("SELECT ref, COUNT(*) AS plays FROM program_events WHERE kind='play' AND created_at>=? AND ref IS NOT NULL GROUP BY ref ORDER BY plays DESC").bind(since30),
-      env.DB.prepare("SELECT hour, COUNT(*) AS plays FROM program_events WHERE kind='play' AND created_at>=? AND hour IS NOT NULL GROUP BY hour").bind(since30),
+      env.DB.prepare(`SELECT ref, COALESCE(SUM(q),0) AS plays FROM (${L}) WHERE ref IS NOT NULL GROUP BY ref ORDER BY plays DESC`).bind(min, since30, from),
+      env.DB.prepare(`SELECT hour, COALESCE(SUM(q),0) AS plays FROM (${L}) WHERE hour IS NOT NULL GROUP BY hour`).bind(min, since30, from),
       env.DB.prepare("SELECT episode_id AS id, COUNT(*) AS likes FROM program_likes GROUP BY episode_id ORDER BY likes DESC LIMIT 20"),
       env.DB.prepare("SELECT episode_id AS id, COUNT(*) AS count FROM program_moments WHERE created_at>=? GROUP BY episode_id ORDER BY count DESC, id LIMIT 10").bind(since90),
+      env.DB.prepare(`SELECT episode_id AS id, COUNT(*) AS downloads FROM program_events WHERE ${DOWNLOADS_WHERE} GROUP BY episode_id`).bind(0, from),
+      env.DB.prepare(`SELECT episode_id AS id, COUNT(*) AS downloads FROM program_events WHERE ${DOWNLOADS_WHERE} GROUP BY episode_id`).bind(since30, from),
+      env.DB.prepare(`SELECT day, COUNT(*) AS downloads FROM program_events WHERE ${DOWNLOADS_WHERE} GROUP BY day`).bind(since30, from),
+      env.DB.prepare(`SELECT COALESCE(ref,'direct') AS ref, COUNT(*) AS downloads FROM program_events WHERE ${DOWNLOADS_WHERE} GROUP BY COALESCE(ref,'direct') ORDER BY downloads DESC`).bind(0, from),
+      env.DB.prepare(`SELECT COUNT(*) AS downloads FROM program_events WHERE ${DOWNLOADS_WHERE}`).bind(since7, from),
     ]);
-    const byHour = new Map((hours.results as Array<{ hour: number; plays: number }>).map((row) => [Number(row.hour), Number(row.plays) || 0]));
+    type Row = Record<string, unknown>;
+    const n = (value: unknown) => Number(value) || 0;
+    const counts = (row: Row = {}) => ({ plays: n(row.plays), listeners: n(row.listeners), seconds: n(row.seconds), full: n(row.full), starts: n(row.starts) });
+    const rows = (result: { results: unknown[] }) => result.results as Row[];
+    // לכל תוכנית: ההאזנות וההורדות יחד (גם תוכנית שרק הורידו אותה)
+    const perEpisode = (listened: Row[], downloaded: Row[]) => {
+      const map = new Map(listened.map((row) => [String(row.id), { id: String(row.id), ...counts(row), downloads: 0 }]));
+      for (const row of downloaded) {
+        const id = String(row.id);
+        map.set(id, { ...(map.get(id) || { id, ...counts() }), downloads: n(row.downloads) });
+      }
+      return [...map.values()];
+    };
+    const dayMap = new Map(rows(days).map((row) => [String(row.day), { day: String(row.day), ...counts(row), downloads: 0 }]));
+    for (const row of rows(dlDays)) { const key = String(row.day); dayMap.set(key, { ...(dayMap.get(key) || { day: key, ...counts() }), downloads: n(row.downloads) }); }
+    const byHour = new Map(rows(hours).map((row) => [n(row.hour), n(row.plays)]));
     const deviceMap: Record<string, number> = {};
-    for (const row of devices.results as Array<{ device: string; plays: number }>) deviceMap[row.device] = Number(row.plays) || 0;
-    return h.reply(request, { days: days.results, episodes: episodes.results, recent: recent.results, totals: totals.results[0] || {}, week: week.results[0] || {}, devices: deviceMap,
-      sources: (sources.results as Array<{ ref: string; plays: number }>).map((row) => ({ ref: row.ref, plays: Number(row.plays) || 0 })),
+    for (const row of rows(devices)) deviceMap[String(row.device)] = n(row.plays);
+    const allDownloads = rows(dlEpisodes).reduce((sum, row) => sum + n(row.downloads), 0);
+    const weekRow = rows(week)[0] || {};
+    return h.reply(request, {
+      config,
+      days: [...dayMap.values()].sort((a, b) => a.day.localeCompare(b.day)),
+      episodes: perEpisode(rows(episodes), rows(dlEpisodes)), recent: perEpisode(rows(recent), rows(dlRecent)),
+      totals: { ...counts(rows(totals)[0]), downloads: allDownloads },
+      week: { plays: n(weekRow.plays), listeners: n(weekRow.listeners), full: n(weekRow.full), downloads: n(rows(dlWeek)[0]?.downloads) },
+      month: { downloads: rows(dlRecent).reduce((sum, row) => sum + n(row.downloads), 0) },
+      devices: deviceMap,
+      sources: rows(sources).map((row) => ({ ref: String(row.ref), plays: n(row.plays) })).filter((row) => row.plays),
       hours: Array.from({ length: 24 }, (_, hour) => ({ hour, plays: byHour.get(hour) || 0 })),
-      likes: (likes.results as Array<{ id: string; likes: number }>).map((row) => ({ id: row.id, likes: Number(row.likes) || 0 })),
-      moments: (moments.results as Array<{ id: string; count: number }>).map((row) => ({ id: row.id, count: Number(row.count) || 0 })) });
+      likes: rows(likes).map((row) => ({ id: String(row.id), likes: n(row.likes) })),
+      moments: rows(moments).map((row) => ({ id: String(row.id), count: n(row.count) })),
+      downloads: { sources: rows(dlSources).map((row) => ({ ref: String(row.ref), downloads: n(row.downloads) })) },
+    });
   }
   if (path.startsWith("/stats/episode/") && method === "GET") {
     if (!await h.admin(request, env)) return forbidden();
     const id = h.safeId(decodeURIComponent(path.slice("/stats/episode/".length)));
     if (!id) return h.reply(request, { error: "חסר מזהה תוכנית." }, 400);
-    const [totals, maxima] = await env.DB.batch([
-      env.DB.prepare("SELECT SUM(kind='play') AS plays, COUNT(DISTINCT client_hash) AS listeners FROM program_events WHERE episode_id=?").bind(id),
-      env.DB.prepare("SELECT client_hash, MAX(pct) AS pct FROM program_events WHERE episode_id=? AND pct IS NOT NULL GROUP BY client_hash").bind(id),
+    const config = await readStatsConfig(env);
+    const [totals, maxima, downloads] = await env.DB.batch([
+      env.DB.prepare(`SELECT ${LISTEN_COUNTS} FROM (${listensSql(" AND episode_id=?")})`).bind(config.minSeconds, 0, config.since, id),
+      // עד איפה הגיעו: כל מי שהתחיל לשמוע, גם מי שעזב לפני הסף — שם בדיוק רואים איפה עוזבים
+      env.DB.prepare("SELECT client_hash, MAX(pct) AS pct FROM program_events WHERE episode_id=? AND day>=? AND pct IS NOT NULL GROUP BY client_hash").bind(id, config.since),
+      env.DB.prepare(`SELECT COUNT(*) AS downloads FROM program_events WHERE ${DOWNLOADS_WHERE} AND episode_id=?`).bind(0, config.since, id),
     ]);
-    const row = (totals.results[0] || {}) as { plays?: number; listeners?: number };
-    return h.reply(request, { id, plays: Number(row.plays) || 0, listeners: Number(row.listeners) || 0, retention: retentionCurve(maxima.results as Array<{ pct: number }>) });
+    const row = (totals.results[0] || {}) as Record<string, unknown>;
+    const n = (value: unknown) => Number(value) || 0;
+    return h.reply(request, {
+      id, config, plays: n(row.plays), listeners: n(row.listeners), full: n(row.full), starts: n(row.starts), seconds: n(row.seconds),
+      downloads: n((downloads.results[0] as { downloads?: number } | undefined)?.downloads),
+      retention: retentionCurve(maxima.results as Array<{ pct: number }>),
+    });
+  }
+  /* הגדרות הספירה: מאיזה יום סופרים ("איפוס" = מהיום) ואחרי כמה דקות האזנה היא נספרת */
+  if (path === "/stats/config" && method === "POST") {
+    const user = await h.admin(request, env);
+    if (!user) return forbidden();
+    const input = await body<{ since?: unknown; minMinutes?: unknown; reset?: unknown }>();
+    const next: Record<string, unknown> = { ...await readStatsConfig(env) };
+    if (input.reset === true) next.since = day();
+    else if (input.since !== undefined) {
+      if (!validDay(input.since) || String(input.since) > day()) return h.reply(request, { error: "תאריך ההתחלה אינו תקין." }, 400);
+      next.since = String(input.since);
+    }
+    if (input.minMinutes !== undefined) {
+      const seconds = Math.round(Number(input.minMinutes) * 60);
+      if (!validMinSeconds(seconds)) return h.reply(request, { error: `הסף צריך להיות בין ${STATS_MIN_SECONDS.min / 60} ל־${STATS_MIN_SECONDS.max / 60} דקות.` }, 400);
+      next.minSeconds = seconds;
+    }
+    const config = normalizeStatsConfig({ ...next, by: user.email, updatedAt: nowSeconds() });
+    await settingStatement(env, "stats", config).run();
+    return h.reply(request, { ok: true, config });
   }
 
   /* ---------- נתונים אישיים לכל חשבון (סנכרון בין מכשירים) ----------

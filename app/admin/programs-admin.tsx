@@ -16,7 +16,7 @@ import {
 } from "./programs-core";
 import { FilePick, Section, Status, Switch } from "./programs-ui";
 import { AiCard, aiRun, ProofreadCard, summaryPatch } from "./programs-ai";
-import { CommentsCard, commentsError, DeepStats, PushCard } from "./programs-listeners";
+import { CommentsCard, commentsError, CountSettings, DeepStats, EpisodeTable, minutesText, PushCard } from "./programs-listeners";
 import { runJob, stopJob, useJob } from "./programs-jobs";
 
 export type ProgramSection = "programs" | "site" | "listeners" | "publish";
@@ -391,17 +391,23 @@ function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(messag
   if (error) return <Section title="מאזינים"><p className="panel-help">{error}</p></Section>;
   if (!stats || !messages) return <Section title="מאזינים"><p className="panel-help">טוענים…</p></Section>;
   const max = Math.max(1, ...stats.days.map((d) => Number(d.plays) || 0));
+  const cfg = stats.config, from = cfg ? fmtDate(cfg.since) : "";
+  const top = (rows: Stats["recent"]) => rows.filter((r) => Number(r.plays)).slice(0, 10);
   return <>
     <Section title="מי מאזין" aside={<button type="button" className="prog-btn" onClick={() => { setTick((v) => v + 1); onMessage("המספרים עודכנו."); }}>↻ רענון</button>}>
-      <div className="stat-grid prog-stats"><article><small>האזנות בשבוע האחרון</small><b>{n2(stats.week.plays)}</b></article><article><small>מאזינים בשבוע האחרון</small><b>{n2(stats.week.listeners)}</b></article><article><small>האזנות מאז ההתחלה</small><b>{n2(stats.totals.plays)}</b></article><article><small>שעות האזנה</small><b>{n2(Math.round((Number(stats.totals.seconds) || 0) / 3600))}</b></article></div>
+      {cfg && <p className="panel-help">סופרים מ־{from}. האזנה נספרת אחרי {minutesText(Math.round(cfg.minSeconds / 60))} האזנה; האזנה מלאה — שמעו 90% מהתוכנית.</p>}
+      <div className={`stat-grid prog-stats${cfg ? " six" : ""}`}><article><small>האזנות בשבוע האחרון</small><b>{n2(stats.week.plays)}</b></article><article><small>מאזינים בשבוע האחרון</small><b>{n2(stats.week.listeners)}</b></article><article><small>{cfg ? `האזנות מאז ${from}` : "האזנות מאז ההתחלה"}</small><b>{n2(stats.totals.plays)}</b></article>{cfg && <><article><small>האזנות מלאות</small><b>{n2(stats.totals.full)}</b></article><article><small>הורדות</small><b>{n2(stats.totals.downloads)}</b></article></>}<article><small>שעות האזנה</small><b>{n2(Math.round((Number(stats.totals.seconds) || 0) / 3600))}</b></article></div>
       <h3>30 הימים האחרונים</h3>
-      {stats.days.length ? <div className="prog-bars">{stats.days.map((d) => <div key={d.day} title={`${fmtDate(d.day)}: ${n2(d.plays)} האזנות`}><i style={{ height: `${Math.round(((Number(d.plays) || 0) / max) * 100)}%` }} /><small>{d.day.slice(8)}</small></div>)}</div> : <p className="panel-help">עדיין אין האזנות שנרשמו.</p>}
+      {stats.days.length ? <div className="prog-bars">{stats.days.map((d) => <div key={d.day} title={`${fmtDate(d.day)}: ${n2(d.plays)} האזנות${cfg ? `, ${n2(d.full)} מלאות, ${n2(d.downloads)} הורדות` : ""}`}><i style={{ height: `${Math.round(((Number(d.plays) || 0) / max) * 100)}%` }} /><small>{d.day.slice(8)}</small></div>)}</div> : <p className="panel-help">עדיין אין האזנות שנרשמו.</p>}
       <div className="prog-two">
-        <div><h3>הכי נשמעות החודש</h3><ol className="prog-top">{stats.recent.slice(0, 10).map((r) => <li key={r.id}><span>{name(r.id)}</span><b>{n2(r.plays)}</b></li>)}</ol></div>
-        <div><h3>הכי נשמעות מאז ומעולם</h3><ol className="prog-top">{stats.episodes.slice(0, 10).map((r) => <li key={r.id}><span>{name(r.id)}</span><b>{n2(r.plays)}</b></li>)}</ol></div>
+        <div><h3>הכי נשמעות החודש</h3><ol className="prog-top">{top(stats.recent).map((r) => <li key={r.id}><span>{name(r.id)}</span><b>{n2(r.plays)}</b></li>)}</ol></div>
+        <div><h3>{cfg ? `הכי נשמעות מאז ${from}` : "הכי נשמעות מאז ומעולם"}</h3><ol className="prog-top">{top(stats.episodes).map((r) => <li key={r.id}><span>{name(r.id)}</span><b>{n2(r.plays)}</b></li>)}</ol></div>
       </div>
+      {cfg && <><h3>לכל תוכנית (מאז {from})</h3><EpisodeTable rows={stats.episodes} name={name} /></>}
       <p className="panel-help">מכשירים החודש: טלפון {n2(stats.devices.phone)} · מחשב {n2(stats.devices.desktop)}. הספירה אנונימית.</p>
-      <DeepStats stats={stats} data={data} />
+      {/* הגדרת ספירה חדשה — המספרים של כל תוכנית נטענים מחדש */}
+      <DeepStats key={cfg ? `${cfg.since}:${cfg.minSeconds}` : "all"} stats={stats} data={data} />
+      {cfg && <CountSettings config={cfg} onSaved={() => setTick((v) => v + 1)} onMessage={onMessage} />}
     </Section>
     <Section title="הודעות מהמאזינים" aside={messages.unread ? <strong className="prog-badge warn">{messages.unread} חדשות</strong> : undefined}>
       {messages.messages.length ? <div className="prog-messages">{messages.messages.map((m) => <article key={m.id} className={m.readAt ? "" : "unread"}>
