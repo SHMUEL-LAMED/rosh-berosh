@@ -68,13 +68,18 @@ test("successful voters receive a downloadable and shareable branded receipt", (
 test("voters are invited to share the parade: after voting, on return, mid-vote and from the header", () => {
   const share = source("app/share-parade.tsx");
   const page = source("app/page.tsx");
-  // השיתוף הוא מייל מעוצב, שיתוף מהמכשיר והעתקת הקישור — בלי כפתורי וואטסאפ וטלגרם.
+  // השיתוף הוא מייל, שיתוף מהמכשיר והעתקת הקישור — בלי כפתורי וואטסאפ וטלגרם.
   assert.doesNotMatch(share, /wa\.me|t\.me\/share|וואטסאפ|טלגרם/);
-  // מייל מעוצב אי אפשר למלא בקישור, ולכן ההזמנה מועתקת כ־HTML בתוך הלחיצה עצמה ומודבקת במייל.
+  // הדרך הראשית: לחיצה אחת פותחת מייל חדש שההזמנה כבר כתובה בו, בלי להעתיק ובלי הרשאות.
+  assert.match(share, /const mailBody = inviteText\(url, \{ headline: false \}\);/);
+  assert.match(share, /const composeHref = touch \? mailtoLink\(\{ body: mailBody \}\) : gmailComposeLink\(\{ body: mailBody \}\);/);
+  assert.match(share, /<a className="share-invite-mail" href=\{composeHref\}/);
+  // טיוטה ישירה בג'ימייל של המצביע דורשת את ההרשאה המוגבלת gmail.compose — מסך "האפליקציה לא אומתה" ו־100 משתמשים לכל היותר.
+  assert.doesNotMatch(share, /gmail\.compose|initTokenClient/);
+  // הגרסה המעוצבת, כאפשרות נוספת: מועתקת כ־HTML בתוך הלחיצה עצמה ומודבקת במייל.
   assert.match(share, /event\.clipboardData\.setData\("text\/html", html\)/);
   assert.match(share, /copied = document\.execCommand\("copy"\)/);
   assert.match(share, /new ClipboardItem\(\{ "text\/html"/, "the async clipboard is the fallback");
-  assert.match(share, /const body = mail === "failed" \? text : undefined;/, "without a rich copy the email opens with the text invitation");
   assert.match(share, /srcDoc=\{previewDoc\}/, "the voter sees the designed invitation before sending it");
   // שיתוף מהמכשיר שולח תמונת הזמנה מעוצבת, מוכנה מראש כי חלון השיתוף חייב להיפתח מיד בלחיצה.
   assert.match(share, /files: \[imageFile\.current\]/);

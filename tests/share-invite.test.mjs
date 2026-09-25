@@ -28,14 +28,27 @@ test("כתובת עם תווים מיוחדים אינה שוברת את המי�
   assert.doesNotMatch(html, /"><img src=x/);
 });
 
-test("נוסח הטקסט כולל את הקישור, בלי קישורי וואטסאפ או טלגרם", () => {
+test("נוסח הטקסט: הקישור בשורה משלו, ובמייל בלי שורת הכותרת", () => {
   const text = inviteText(SITE);
-  assert.match(text, /👈 להצבעה: https:\/\/rosh-berosh\.example\.com\//);
-  assert.match(text, /^✦ הזמנה אישית למצעד האלבומים של ראש בראש ✦/);
+  assert.match(text, /^✦ הזמנה למצעד האלבומים של ראש בראש ✦\n/);
+  assert.match(text, /\n👈 להצבעה במצעד:\nhttps:\/\/rosh-berosh\.example\.com\/\n/, "a URL alone on its line becomes a link in every mail program");
+  const mail = inviteText(SITE, { headline: false });
+  assert.match(mail, /^שלום,\n/, "the subject already carries the headline");
+  assert.ok(mail.includes("\nhttps://rosh-berosh.example.com/\n"));
   assert.doesNotMatch(text + inviteEmailHtml(SITE), /wa\.me|t\.me|whatsapp|telegram/i);
 });
 
-test("קישורי המייל: גוף ריק להדבקה, או ההזמנה כטקסט כשההעתקה לא הצליחה", () => {
+// יש תוכנות דואר בווינדוס שקוטעות קישור mailto: ארוך מ־2000 תווים, ועברית מקודדת תופסת שישה תווים לאות.
+test("המייל שנפתח בלחיצה אחת: ההזמנה כבר בגוף ההודעה, בקישור קצר מ־2000 תווים", () => {
+  const production = "https://rosh-berosh.smwlyqswkwt232.workers.dev/";
+  const body = inviteText(production, { headline: false });
+  const mailto = mailtoLink({ body });
+  assert.ok(mailto.length < 2000, `mailto: ${mailto.length} תווים`);
+  assert.equal(decodeURIComponent(mailto.split("&body=")[1]), body.replace(/\n/g, "\r\n"));
+  assert.equal(new URL(gmailComposeLink({ body })).searchParams.get("body"), body);
+});
+
+test("קישורי המייל: גוף ריק להדבקת הגרסה המעוצבת, או ההזמנה כטקסט", () => {
   const subject = encodeURIComponent(SHARE_SUBJECT);
   assert.equal(mailtoLink(), `mailto:?subject=${subject}`);
   assert.equal(mailtoLink({ body: "א\nב" }), `mailto:?subject=${subject}&body=${encodeURIComponent("א\r\nב")}`);
