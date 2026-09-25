@@ -109,20 +109,24 @@ const fitPreview = (event: SyntheticEvent<HTMLIFrameElement>) => {
 };
 
 type CardProps = { kicker?: string; heading?: string; blurb?: string; inDialog?: boolean };
-type MailState = "idle" | "copying" | "copied" | "failed";
+type RichState = "idle" | "copying" | "copied";
 
-export function ShareParadeCard({ kicker = "עזרו למצעד לגדול", heading = "הביאו את החברים למצעד!", blurb = "כל קול מזיז את הדירוג. שלחו לחברים ולמשפחה הזמנה מעוצבת, ותנו גם להם לבחור את האלבומים, השירים והזמרים של 25 שנות מוזיקה יהודית.", inDialog = false }: CardProps) {
+export function ShareParadeCard({ kicker = "עזרו למצעד לגדול", heading = "הביאו את החברים למצעד!", blurb = "כל קול מזיז את הדירוג. שלחו לחברים ולמשפחה הזמנה במייל, ותנו גם להם לבחור את האלבומים, השירים והזמרים של 25 שנות מוזיקה יהודית.", inDialog = false }: CardProps) {
   const headingId = useId();
   const [url] = useState(siteUrl);
   const [touch] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches);
   const [canShare] = useState(() => typeof navigator !== "undefined" && typeof navigator.share === "function");
-  const [mail, setMail] = useState<MailState>("idle");
+  const [rich, setRich] = useState<RichState>("idle");
   // המשוב מוצג בתוך הכרטיס ולא בהודעה הצפה: בחלון הקופץ ההודעה הצפה נשארת מאחורי הרקע הכהה.
   const [status, setStatus] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
   const [revealed, setRevealed] = useState(false);
   const imageFile = useRef<File | null>(null);
   const html = inviteEmailHtml(url);
   const text = inviteText(url);
+  // הדרך הראשית: מייל חדש שההזמנה כבר כתובה בו — בלי להעתיק ובלי הרשאות.
+  // במחשב Gmail בדפדפן (כל המצביעים מחוברים עם Google), בטלפון אפליקציית המייל.
+  const mailBody = inviteText(url, { headline: false });
+  const composeHref = touch ? mailtoLink({ body: mailBody }) : gmailComposeLink({ body: mailBody });
 
   useEffect(() => {
     if (!canShare) return;
@@ -131,16 +135,21 @@ export function ShareParadeCard({ kicker = "עזרו למצעד לגדול", hea
     return () => { active = false; };
   }, [canShare, url]);
 
-  const startMail = () => {
+  const richFailed = () => {
+    setRich("idle");
+    setStatus({ text: "לא הצלחנו להעתיק את הגרסה המעוצבת בדפדפן הזה. הכפתור „שליחת הזמנה במייל” פותח מייל שההזמנה כבר כתובה בו.", tone: "error" });
+  };
+  // הגרסה המעוצבת: מייל עם HTML אי אפשר למלא בקישור, ולכן היא מועתקת ומודבקת.
+  const startRich = () => {
     setStatus(null);
-    if (copyRich(html, text)) { setMail("copied"); return; }
+    if (copyRich(html, text)) { setRich("copied"); return; }
     if (typeof ClipboardItem === "function" && navigator.clipboard?.write) {
-      setMail("copying");
+      setRich("copying");
       navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([text], { type: "text/plain" }) })])
-        .then(() => setMail("copied"), () => setMail("failed"));
+        .then(() => setRich("copied"), richFailed);
       return;
     }
-    setMail("failed");
+    richFailed();
   };
   const copyLink = async () => {
     setStatus(null);
@@ -165,9 +174,8 @@ export function ShareParadeCard({ kicker = "עזרו למצעד לגדול", hea
     }
   };
 
-  // כשההעתקה המעוצבת הצליחה, המייל נפתח ריק ומחכה להדבקה; אחרת הוא נפתח עם ההזמנה כטקסט.
-  const body = mail === "failed" ? text : undefined;
-  const openHref = touch ? mailtoLink({ body }) : gmailComposeLink({ body });
+  // אחרי העתקת הגרסה המעוצבת המייל נפתח ריק ומחכה להדבקה.
+  const pasteHref = touch ? mailtoLink() : gmailComposeLink();
   const previewDoc = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>html,body{margin:0}</style></head><body>${html}</body></html>`;
 
   return <section className={`share-invite${inDialog ? " in-dialog" : ""}`} aria-labelledby={headingId}>
@@ -179,29 +187,31 @@ export function ShareParadeCard({ kicker = "עזרו למצעד לגדול", hea
       <p className="share-invite-blurb">{blurb}</p>
     </header>
     <div className="share-invite-body">
-      <button type="button" className="share-invite-mail" disabled={mail === "copying"} onClick={startMail}><MailIcon />{mail === "copying" ? "מכינים את ההזמנה…" : "שליחת הזמנה מעוצבת במייל"}</button>
+      <a className="share-invite-mail" href={composeHref} target={touch ? undefined : "_blank"} rel="noopener noreferrer" onClick={() => setStatus({ text: "נפתח מייל חדש שההזמנה כבר כתובה בו — מוסיפים את כתובות החברים ושולחים.", tone: "ok" })}><MailIcon />שליחת הזמנה במייל</a>
+      {!touch && <a className="share-invite-alt" href={mailtoLink({ body: mailBody })}>לא בג׳ימייל? פתיחה בתוכנת הדואר שבמחשב</a>}
       <div className={`share-invite-more${canShare ? "" : " single"}`}>
         {canShare && <button type="button" onClick={() => void share()}><ShareIcon />שיתוף ההזמנה</button>}
         <button type="button" onClick={() => void copyLink()}><LinkIcon />העתקת הקישור</button>
       </div>
       {revealed && <input className="share-invite-link" readOnly value={url} dir="ltr" aria-label="הקישור לאתר המצעד" onFocus={(event) => event.currentTarget.select()} />}
       {status && <p className={`share-invite-status ${status.tone}`} role="status">{status.text}</p>}
-      {mail === "copied" || mail === "failed" ? <div className="share-mail">
-        {mail === "copied" ? <>
-          <p className="share-mail-title" role="status"><CheckIcon />ההזמנה המעוצבת הועתקה</p>
-          <ol className="share-mail-steps">
-            <li><b>1</b><span>פותחים מייל חדש בכפתור שכאן למטה</span></li>
-            <li><b>2</b><span>{touch ? "לוחצים לחיצה ארוכה בגוף ההודעה ובוחרים „הדבקה”" : <>לוחצים בגוף ההודעה ומדביקים: <kbd dir="ltr">Ctrl+V</kbd> (במק: <kbd dir="ltr">⌘+V</kbd>)</>}</span></li>
-            <li><b>3</b><span>מוסיפים את כתובות החברים ושולחים</span></li>
-          </ol>
-        </> : <p className="share-mail-title failed" role="status">לא הצלחנו להעתיק את העיצוב בדפדפן הזה. המייל ייפתח עם ההזמנה כטקסט, והקישור להצבעה כבר בפנים.</p>}
-        <a className="share-mail-open" href={openHref} target={touch ? undefined : "_blank"} rel="noopener noreferrer"><MailIcon />{touch ? "פתיחת אפליקציית המייל" : "פתיחת מייל חדש ב־Gmail"}</a>
-        {!touch && <a className="share-mail-alt" href={mailtoLink({ body })}>או בתוכנת הדואר שבמחשב</a>}
-        {mail === "copied" && <details className="share-mail-preview" open={!inDialog}>
+      {rich === "copied" ? <div className="share-mail">
+        <p className="share-mail-title" role="status"><CheckIcon />ההזמנה המעוצבת הועתקה</p>
+        <ol className="share-mail-steps">
+          <li><b>1</b><span>פותחים מייל חדש בכפתור שכאן למטה</span></li>
+          <li><b>2</b><span>{touch ? "לוחצים לחיצה ארוכה בגוף ההודעה ובוחרים „הדבקה”" : <>לוחצים בגוף ההודעה ומדביקים: <kbd dir="ltr">Ctrl+V</kbd> (במק: <kbd dir="ltr">⌘+V</kbd>)</>}</span></li>
+          <li><b>3</b><span>מוסיפים את כתובות החברים ושולחים</span></li>
+        </ol>
+        <a className="share-mail-open" href={pasteHref} target={touch ? undefined : "_blank"} rel="noopener noreferrer"><MailIcon />{touch ? "פתיחת אפליקציית המייל" : "פתיחת מייל חדש ב־Gmail"}</a>
+        {!touch && <a className="share-mail-alt" href={mailtoLink()}>או בתוכנת הדואר שבמחשב</a>}
+        <details className="share-mail-preview" open={!inDialog}>
           <summary>כך תיראה ההזמנה</summary>
           <iframe title="תצוגה מקדימה של ההזמנה" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={previewDoc} onLoad={fitPreview} />
-        </details>}
-      </div> : <p className="share-invite-note">💌 ההזמנה יוצאת מהמייל שלכם, רק לאנשים שתבחרו.</p>}
+        </details>
+      </div> : <>
+        <button type="button" className="share-invite-designed" disabled={rich === "copying"} onClick={startRich}>{rich === "copying" ? "מכינים את הגרסה המעוצבת…" : "✨ רוצים גרסה מעוצבת? העתקה והדבקה"}</button>
+        <p className="share-invite-note">💌 ההזמנה יוצאת מהמייל שלכם, רק לאנשים שתבחרו.</p>
+      </>}
     </div>
   </section>;
 }
@@ -211,8 +221,8 @@ export type SharePromptReason = "voted" | "mid" | "manual";
 
 const PROMPTS: Record<SharePromptReason, { kicker: string; heading: string; blurb: string; close: string; primary?: boolean }> = {
   voted: { kicker: "הקול שלכם כבר בפנים", heading: "עכשיו תורם של החברים", blurb: "הזמינו חברים ובני משפחה להצביע — כל קול נוסף מקרב את האהובים עליכם לפסגה.", close: "לא עכשיו" },
-  mid: { kicker: "רגע לפני שממשיכים", heading: "המצעד שווה יותר עם חברים", blurb: "שלחו הזמנה מעוצבת לחברים ולמשפחה. הבחירות שלכם שמורות, ואפשר להמשיך מיד.", close: "המשך להצבעה", primary: true },
-  manual: { kicker: "ראש בראש", heading: "הזמינו חברים למצעד", blurb: "שלחו הזמנה מעוצבת לחברים ולמשפחה, כדי שגם הם יבחרו את האלבומים, השירים והזמרים האהובים עליהם.", close: "סגירה" },
+  mid: { kicker: "רגע לפני שממשיכים", heading: "המצעד שווה יותר עם חברים", blurb: "שלחו הזמנה לחברים ולמשפחה. הבחירות שלכם שמורות, ואפשר להמשיך מיד.", close: "המשך להצבעה", primary: true },
+  manual: { kicker: "ראש בראש", heading: "הזמינו חברים למצעד", blurb: "שלחו הזמנה לחברים ולמשפחה, כדי שגם הם יבחרו את האלבומים, השירים והזמרים האהובים עליהם.", close: "סגירה" },
 };
 
 export function ShareParadeDialog({ reason, onClose }: { reason: SharePromptReason; onClose(): void }) {
