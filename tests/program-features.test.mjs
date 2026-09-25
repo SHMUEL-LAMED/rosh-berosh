@@ -651,6 +651,9 @@ test("new recordings transcribe in the scheduled job without a manager click", a
   const saved = await publish(call, admin, [episode("auto", { r2Key: key })]);
   assert.equal(saved.status, 200, await saved.clone().text());
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs WHERE episode_id='auto'").get().n, 1);
+  // ההפעלה הראשונה של התור מוסיפה גם את התוכנית החדשה ביותר מהקטלוג הזרוע. כשהשנייה מתחלפת
+  // באמצע, התור בוחר בה במקום בהקלטה של הבדיקה, והבדיקה נכשלה באקראי. כאן בודקים רק את ההקלטה החדשה.
+  db.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES ('program-auto-transcription-initialized','true',unixepoch())").run();
   for (let i = 0; i < 2; i += 1) {
     await worker.scheduled({}, env, ctx);
     await settle();
