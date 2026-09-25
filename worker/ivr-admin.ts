@@ -1,7 +1,7 @@
 import { addIvrRecorder, deleteIvrAudioIfUnreferenced, deleteIvrPrompt, readIvrPrompts, readIvrRecorders, removeIvrRecorder, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
 import { reorderIds, shiftIds } from "./reorder.js";
-import { readAdminEmails, saveAdminEmails } from "./auth";
+import { configuredAdminEmails, readAdminEmails, saveAdminEmails } from "./auth";
 import type { AdminEnv } from "./admin";
 import { createPollSnapshot, deleteCatalogItem, deletePollArchive, deleteSurveyData, extractSurveyCovers, generateTtsAudio, listPollArchives, mediaUrl, resetPollVotes, restorePollArchive, safeName, suggestChorusAI, ttsConfigured } from "./admin";
 
@@ -172,6 +172,7 @@ async function overview(env: IvrAdminEnv, callerPhone: string): Promise<Response
     prompts,
     recorders: access.recorders,
     managers,
+    fixedManagers: configuredAdminEmails(env),
     archives: archives.slice(0, 50),
     services: { tts: ttsConfigured(env), ai: Boolean(env.AI_API_KEY) },
   });
@@ -500,6 +501,7 @@ async function action(env: IvrAdminEnv, body: ActionBody): Promise<Response> {
     const email = String(body.email || "").trim().toLowerCase();
     const managers = await readAdminEmails(env);
     if (!email || !managers.includes(email)) return json({ error: "מנהל האתר לא נמצא ברשימה." }, 404);
+    if (configuredAdminEmails(env).includes(email)) return json({ error: "מנהל האתר הזה קבוע ואי אפשר להסיר אותו." }, 400);
     if (managers.length <= 1) return json({ error: "אי אפשר להסיר את מנהל האתר האחרון." }, 400);
     const next = await saveAdminEmails(env, managers.filter((item) => item !== email));
     return json({ ok: true, managers: next, message: "ההרשאה של מנהל האתר הוסרה." });

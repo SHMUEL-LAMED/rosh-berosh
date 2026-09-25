@@ -384,6 +384,34 @@ test("phone administration never removes the last authorized recorder", async ()
   assert.deepEqual(store.recorders(), ["0501111111"]);
 });
 
+test("phone administration removes a site manager, but never pretends to remove a permanent one", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("phone-manager-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const store = ivrRecorderEnv(["0501111111"]);
+  let saved = ["editor@example.com"];
+  const MEDIA = {
+    async get(key) { return key === "settings/admin-emails.json" ? { async json() { return saved; } } : store.MEDIA.get(key); },
+    async put(key, body) { if (key === "settings/admin-emails.json") saved = JSON.parse(body); },
+  };
+  const env = { IVR_SECRET: "phone-admin-secret", ADMIN_EMAILS: "boss@example.com", ...store, MEDIA };
+  const remove = (email) => worker.fetch(new Request("http://localhost/api/ivr/admin/action", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ivr-secret": "phone-admin-secret" },
+    body: JSON.stringify({ phone: "0501111111", action: "remove-manager", email }),
+  }), env, { waitUntil() {}, passThroughOnException() {} });
+
+  for (const email of ["o0534169095@gmail.com", "boss@example.com"]) {
+    const refused = await remove(email);
+    assert.equal(refused.status, 400, email);
+    assert.match((await refused.json()).error, /קבוע/);
+  }
+  const removed = await remove("editor@example.com");
+  assert.equal(removed.status, 200, await removed.clone().text());
+  assert.ok(!saved.includes("editor@example.com"));
+  assert.ok(!(await removed.json()).managers.includes("editor@example.com"));
+});
+
 test("stale phone progress is filtered against the current catalog and quotas", () => {
   const catalog = {
     albums: [{ id: "a1" }, { id: "a2" }],
