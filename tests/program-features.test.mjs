@@ -651,7 +651,10 @@ test("new recordings transcribe in the scheduled job without a manager click", a
   const saved = await publish(call, admin, [episode("auto", { r2Key: key })]);
   assert.equal(saved.status, 200, await saved.clone().text());
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs WHERE episode_id='auto'").get().n, 1);
-  for (let i = 0; i < 2; i += 1) {
+  // הריצה הראשונה מכניסה לתור גם את התוכנית האחרונה שכבר קיימת (מהזרע), והתור מסודר לפי updated_at
+  // בדיוק של שנייה: כששנייה מתחלפת באמצע הריצה, התוכנית ההיא עוקפת את ההקלטה. היא נכשלת (אינה ב־R2)
+  // ונדחית לזמן מאוחר יותר, ולכן בשלוש ריצות שני החלקים של ההקלטה מתומללים בכל סדר.
+  for (let i = 0; i < 3; i += 1) {
     await worker.scheduled({}, env, ctx);
     await settle();
   }
