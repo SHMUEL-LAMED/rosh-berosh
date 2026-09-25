@@ -15,6 +15,8 @@ import { cors, programApi, programSharePage } from "./program-api";
 import { runScheduledPush } from "./program-push";
 import { runAutomaticTranscription, type AiBinding } from "./program-ai";
 import { placeholders } from "./sql.js";
+// זמני: גיבוי האלבומים לגוגל דרייב (למנהלים בלבד). למחוק אחרי שההעתקה מסתיימת.
+import { driveBackupApi, driveBackupPage } from "./drive-backup";
 
 interface Env {
   ASSETS: Fetcher;
@@ -374,6 +376,7 @@ async function serveMedia(request: Request, env: Env, ctx: ExecutionContext, pat
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, ctx, url.pathname);
+  if (url.pathname === "/admin/drive-backup" && request.method === "GET") return driveBackupPage(request, env);
   // דף שיתוף לתוכנית (תגי Open Graph לוואטסאפ/פייסבוק, והפניה מיידית לאתר התוכניות)
   if (url.pathname.startsWith("/p/") && (request.method === "GET" || request.method === "HEAD")) {
     await ensureRuntimeSchema(env);
@@ -412,6 +415,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return user ? json({ user: { email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin } }) : json({ user: null }, 401);
   }
   if (url.pathname === "/api/auth/logout" && request.method === "POST") { await destroySession(request, env); const response = json({ ok: true }); response.headers.set("set-cookie", clearSessionCookie); return response; }
+  if (url.pathname.startsWith("/api/admin/drive-backup/")) return driveBackupApi(request, env);
   if (url.pathname.startsWith("/api/admin/subscribers")) {
     const handled = await subscribersAdminApi(request, env);
     if (handled) return handled;
