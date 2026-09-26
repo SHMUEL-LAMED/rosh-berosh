@@ -173,7 +173,8 @@ test("the login window hands a signed-in administrator straight through and keep
   const adminHtml = await asAdmin.text();
   assert.match(adminHtml, /const known=\{"email":"admin@example\.com","isAdmin":true\}/);
   assert.match(adminHtml, /\/api\/program\/auth\/session/);
-  assert.match(adminHtml, /מחוברים לאתר הסקר כ־/);
+  assert.match(adminHtml, /מחוברים כ־/);
+  assert.doesNotMatch(adminHtml, /אתר הסקר/, "the sign-in window does not mention the survey site");
 
   const anonymous = await worker.fetch(new Request("http://localhost/api/program/login"), env, ctx);
   const anonymousHtml = await anonymous.text();
