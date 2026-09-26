@@ -44,6 +44,7 @@ export const ballots = sqliteTable("ballots", {
   surveyId: text("survey_id").notNull().default("main").references(() => surveys.id),
   voterKey: text("voter_key").notNull(),
   voterEmail: text("voter_email"),
+  voterName: text("voter_name"),
   channel: text("channel").notNull().default("site"),
   fingerprint: text("fingerprint"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),

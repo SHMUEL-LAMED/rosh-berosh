@@ -249,7 +249,7 @@ async function insertPollSnapshot(env: AdminEnv, snapshot: PollSnapshot, surveyI
     ...snapshot.artists.map((row) => env.DB.prepare("INSERT INTO artists (id,survey_id,name,image_url,position,active) VALUES (?,?,?,?,?,?)").bind(row.id, surveyId, row.name, restoredUrl(row.image_url, urls), row.position, row.active)),
     // גם עמודות הזמנים משוחזרות: בלעדיהן שחזור ארכיון היה מוחק את כל מדידת
     // הזמן של הסקר. ארכיון ישן שאין בו את השדות משוחזר עם NULL.
-    ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,created_at,started_at,albums_done_at,songs_done_at,artists_done_at,sessions) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.voter_email || null, row.channel, row.fingerprint || null, row.created_at, row.started_at ?? null, row.albums_done_at ?? null, row.songs_done_at ?? null, row.artists_done_at ?? null, row.sessions ?? null)),
+    ...snapshot.ballots.map((row) => env.DB.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,voter_name,channel,fingerprint,created_at,started_at,albums_done_at,songs_done_at,artists_done_at,sessions) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(row.id, surveyId, row.voter_key, row.voter_email || null, row.voter_name || null, row.channel, row.fingerprint || null, row.created_at, row.started_at ?? null, row.albums_done_at ?? null, row.songs_done_at ?? null, row.artists_done_at ?? null, row.sessions ?? null)),
     ...snapshot.albumVotes.map((row) => env.DB.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES (?,?)").bind(row.ballot_id, row.album_id)),
     ...snapshot.songVotes.map((row) => env.DB.prepare("INSERT INTO song_votes (ballot_id,album_id,song_id) VALUES (?,?,?)").bind(row.ballot_id, row.album_id, row.song_id)),
     ...snapshot.artistVotes.map((row) => env.DB.prepare("INSERT INTO artist_votes (ballot_id,artist_id) VALUES (?,?)").bind(row.ballot_id, row.artist_id)),
@@ -673,7 +673,7 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
       let suspicious: { fingerprint: string; count: number; voters: string[]; blocked: boolean }[] = [];
       try {
-        const dupFp = await env.DB.prepare("SELECT b.fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(COALESCE(b.voter_email,b.voter_key), ', ') AS voters, CASE WHEN bf.fingerprint IS NULL THEN 0 ELSE 1 END AS blocked FROM ballots b LEFT JOIN blocked_fingerprints bf ON bf.survey_id=b.survey_id AND bf.fingerprint=b.fingerprint WHERE b.survey_id=? AND b.fingerprint IS NOT NULL AND b.fingerprint != '' GROUP BY b.fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string; blocked: number }>();
+        const dupFp = await env.DB.prepare("SELECT b.fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(COALESCE(b.voter_name,b.voter_email,b.voter_key), ', ') AS voters, CASE WHEN bf.fingerprint IS NULL THEN 0 ELSE 1 END AS blocked FROM ballots b LEFT JOIN blocked_fingerprints bf ON bf.survey_id=b.survey_id AND bf.fingerprint=b.fingerprint WHERE b.survey_id=? AND b.fingerprint IS NOT NULL AND b.fingerprint != '' GROUP BY b.fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string; blocked: number }>();
         suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", "), blocked: Boolean(r.blocked) }));
       } catch { /* fingerprint column may not exist yet */ }
       return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, voteTimeline: { hourly: hourlyVotes.results, daily: dailyVotes.results }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, ivrRecorders, managers, fixedManagers: configuredAdminEmails(env), yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
@@ -1094,11 +1094,11 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
     const pageSize = 50;
     const offset = (page - 1) * pageSize;
-    type BallotRow = { id: string; voterKey: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number };
+    type BallotRow = { id: string; voterKey: string; voterName?: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number };
     const listBallots = (columns: string) => env.DB.prepare(`SELECT ${columns} FROM ballots b WHERE b.survey_id=? ORDER BY b.created_at DESC LIMIT ${pageSize} OFFSET ${offset}`).bind(surveyId).all<BallotRow>();
     // אם שליפת המייל מהסשנים נכשלת במסד החי, עדיף להציג את ההצבעות בלי המייל מאשר רשימה ריקה.
     let ballots: D1Result<BallotRow>;
-    try { ballots = await listBallots("b.id, b.voter_key AS voterKey, COALESCE(b.voter_email,(SELECT s.email FROM auth_sessions s WHERE s.user_sub=b.voter_key ORDER BY s.created_at DESC LIMIT 1)) AS voterEmail, b.channel, b.fingerprint, b.created_at AS createdAt"); }
+    try { ballots = await listBallots("b.id, b.voter_key AS voterKey, COALESCE(b.voter_name,(SELECT s.name FROM auth_sessions s WHERE s.user_sub=b.voter_key ORDER BY s.created_at DESC LIMIT 1)) AS voterName, COALESCE(b.voter_email,(SELECT s.email FROM auth_sessions s WHERE s.user_sub=b.voter_key ORDER BY s.created_at DESC LIMIT 1)) AS voterEmail, b.channel, b.fingerprint, b.created_at AS createdAt"); }
     catch (error) {
       console.error("voters list error", error);
       try { ballots = await listBallots("b.id, b.voter_key AS voterKey, b.channel, b.created_at AS createdAt"); }

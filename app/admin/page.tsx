@@ -34,7 +34,7 @@ const TABS: Tab[] = ["dashboard", "preview", "surveys", "prog-programs", "prog-s
 const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");
 // הלשונית הפתוחה נשמרת בכתובת (#prog-programs), כדי שקישור מאתר התוכניות ייפתח ישר בחלק הנכון
 const tabFromHash = (): Tab => { if (typeof window === "undefined") return "dashboard"; const value = window.location.hash.slice(1) as Tab; return TABS.includes(value) ? value : "dashboard"; };
-type Voter = { id: string; voterKey: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
+type Voter = { id: string; voterKey: string; voterName?: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
 const SYSTEM_PROMPTS = systemPrompts;
 
@@ -586,7 +586,7 @@ function VotersPanel() {
     {loading ? <p className="loading">טוען…</p> : error ? <p className="panel-help">{error} <button type="button" onClick={() => fetchPage(page)}>לנסות שוב</button></p> : !voters.length ? <p className="panel-help">אין הצבעות עדיין.</p> : <>
       <div className="voters-list">{voters.map((v) => <article key={v.id} className="voter-card">
         <div className="voter-header">
-          <span className="voter-key">{v.channel === "site" ? (v.voterEmail || "כתובת המייל לא נשמרה בהצבעה ישנה") : v.voterKey}</span>
+          <span className="voter-key">{v.channel === "site" ? (v.voterName || v.voterEmail || "השם לא נשמר בהצבעה ישנה") : v.voterKey}</span>
           <span className={`voter-channel ${v.channel}`}>{channelLabel(v.channel)}</span>
           <time>{new Date(v.createdAt < 1_000_000_000_000 ? v.createdAt * 1000 : v.createdAt).toLocaleString("he-IL")}</time>
         </div>

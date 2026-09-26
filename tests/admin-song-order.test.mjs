@@ -167,6 +167,18 @@ test("the voters panel returns an email instead of the opaque Google subject", a
   assert.equal(body.voters[0].voterEmail, "voter@example.com");
 });
 
+test("the voters panel shows the voter's name, stored or from the login session", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAlbum(db);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,voter_name,channel,created_at) VALUES ('ballot-named','main','sub-1','a@example.com','ישראל ישראלי','site',2)").run();
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,created_at) VALUES ('ballot-old','main','sub-2','b@example.com','site',1)").run();
+  db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,expires_at) VALUES ('hash-2','sub-2','b@example.com','משה כהן',unixepoch()+3600)").run();
+  const response = await worker.fetch(new Request("http://localhost/api/admin/voters", { headers: { cookie } }), env, ctx);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.voters.map((v) => v.voterName), ["ישראל ישראלי", "משה כהן"]);
+});
+
 test("an administrator can block and unblock a suspicious computer", async () => {
   const { worker, db, env, cookie } = await setup();
   const fingerprint = "a".repeat(64);
@@ -268,6 +280,14 @@ test("a ballot submitted with timing keeps it, and a bogus timing is dropped ins
   const bogus = await submit("0500000002", { startedAt: now + 9999, sessions: -4 });
   assert.equal(bogus.status, 201);
   assert.deepEqual({ ...db.prepare("SELECT started_at AS startedAt, sessions FROM ballots WHERE voter_key='0500000002'").get() }, { startedAt: null, sessions: null });
+});
+
+test("a site ballot stores the signed-in voter's name", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAnalytics(db);
+  const response = await worker.fetch(new Request("http://localhost/api/ballots", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ channel: "site", albumIds: ["a2"], songIdsByAlbum: { a2: ["s3"] }, artistIds: ["r2"] }) }), env, ctx);
+  assert.equal(response.status, 201, await response.clone().text());
+  assert.equal(db.prepare("SELECT voter_name AS name FROM ballots WHERE voter_key='sub-1'").get().name, "מנהל");
 });
 
 test("the advanced-data endpoint reports pace, activity by local hour, the rank race, concentration and abandoned ballots", async () => {
