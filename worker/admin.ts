@@ -1094,18 +1094,32 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
     const pageSize = 50;
     const offset = (page - 1) * pageSize;
-    const ballots = await env.DB.prepare(`SELECT b.id, b.voter_key AS voterKey, COALESCE(b.voter_email,(SELECT s.email FROM auth_sessions s WHERE s.user_sub=b.voter_key ORDER BY s.created_at DESC LIMIT 1)) AS voterEmail, b.channel, b.fingerprint, b.created_at AS createdAt FROM ballots b WHERE b.survey_id=? ORDER BY b.created_at DESC LIMIT ${pageSize} OFFSET ${offset}`).bind(surveyId).all<{ id: string; voterKey: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number }>();
+    type BallotRow = { id: string; voterKey: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number };
+    const listBallots = (columns: string) => env.DB.prepare(`SELECT ${columns} FROM ballots b WHERE b.survey_id=? ORDER BY b.created_at DESC LIMIT ${pageSize} OFFSET ${offset}`).bind(surveyId).all<BallotRow>();
+    // אם שליפת המייל מהסשנים נכשלת במסד החי, עדיף להציג את ההצבעות בלי המייל מאשר רשימה ריקה.
+    let ballots: D1Result<BallotRow>;
+    try { ballots = await listBallots("b.id, b.voter_key AS voterKey, COALESCE(b.voter_email,(SELECT s.email FROM auth_sessions s WHERE s.user_sub=b.voter_key ORDER BY s.created_at DESC LIMIT 1)) AS voterEmail, b.channel, b.fingerprint, b.created_at AS createdAt"); }
+    catch (error) {
+      console.error("voters list error", error);
+      try { ballots = await listBallots("b.id, b.voter_key AS voterKey, b.channel, b.created_at AS createdAt"); }
+      catch (fallbackError) { console.error("voters list fallback error", fallbackError); return json({ error: "לא הצלחנו לטעון את רשימת המצביעים." }, 500); }
+    }
     const ballotIds = ballots.results.map((b) => b.id);
     if (!ballotIds.length) return json({ voters: [], page, hasMore: false });
-    const [albumVotes, songVotes, artistVotes] = await env.DB.batch([
-      env.DB.prepare(`SELECT v.ballot_id AS ballotId, a.title FROM album_votes v JOIN albums a ON a.id=v.album_id WHERE v.ballot_id IN (${placeholders(ballotIds.length)})`).bind(...ballotIds),
-      env.DB.prepare(`SELECT v.ballot_id AS ballotId, s.title, a.title AS albumTitle FROM song_votes v JOIN songs s ON s.id=v.song_id JOIN albums a ON a.id=v.album_id WHERE v.ballot_id IN (${placeholders(ballotIds.length)})`).bind(...ballotIds),
-      env.DB.prepare(`SELECT v.ballot_id AS ballotId, ar.name FROM artist_votes v JOIN artists ar ON ar.id=v.artist_id WHERE v.ballot_id IN (${placeholders(ballotIds.length)})`).bind(...ballotIds),
+    // כל פירוט נשלף בנפרד: כשל באחד מהם לא מעלים את ההצבעות עצמן.
+    const details = async <T,>(sql: string) => {
+      try { return (await env.DB.prepare(sql).bind(...ballotIds).all<T>()).results; }
+      catch (error) { console.error("voters details error", error); return [] as T[]; }
+    };
+    const [albumVotes, songVotes, artistVotes] = await Promise.all([
+      details<{ ballotId: string; title: string }>(`SELECT v.ballot_id AS ballotId, a.title FROM album_votes v JOIN albums a ON a.id=v.album_id WHERE v.ballot_id IN (${placeholders(ballotIds.length)})`),
+      details<{ ballotId: string; title: string; albumTitle: string }>(`SELECT v.ballot_id AS ballotId, s.title, a.title AS albumTitle FROM song_votes v JOIN songs s ON s.id=v.song_id JOIN albums a ON a.id=v.album_id WHERE v.ballot_id IN (${placeholders(ballotIds.length)})`),
+      details<{ ballotId: string; name: string }>(`SELECT v.ballot_id AS ballotId, ar.name FROM artist_votes v JOIN artists ar ON ar.id=v.artist_id WHERE v.ballot_id IN (${placeholders(ballotIds.length)})`),
     ]);
     const aMap = new Map<string, string[]>(), sMap = new Map<string, { title: string; albumTitle: string }[]>(), arMap = new Map<string, string[]>();
-    for (const row of albumVotes.results as Array<{ ballotId: string; title: string }>) { const list = aMap.get(row.ballotId) || []; list.push(row.title); aMap.set(row.ballotId, list); }
-    for (const row of songVotes.results as Array<{ ballotId: string; title: string; albumTitle: string }>) { const list = sMap.get(row.ballotId) || []; list.push({ title: row.title, albumTitle: row.albumTitle }); sMap.set(row.ballotId, list); }
-    for (const row of artistVotes.results as Array<{ ballotId: string; name: string }>) { const list = arMap.get(row.ballotId) || []; list.push(row.name); arMap.set(row.ballotId, list); }
+    for (const row of albumVotes) { const list = aMap.get(row.ballotId) || []; list.push(row.title); aMap.set(row.ballotId, list); }
+    for (const row of songVotes) { const list = sMap.get(row.ballotId) || []; list.push({ title: row.title, albumTitle: row.albumTitle }); sMap.set(row.ballotId, list); }
+    for (const row of artistVotes) { const list = arMap.get(row.ballotId) || []; list.push(row.name); arMap.set(row.ballotId, list); }
     const voters = ballots.results.map((b) => ({ ...b, albums: aMap.get(b.id) || [], songs: sMap.get(b.id) || [], artists: arMap.get(b.id) || [] }));
     return json({ voters, page, hasMore: ballots.results.length === pageSize });
   }
