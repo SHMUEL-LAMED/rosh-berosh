@@ -179,6 +179,20 @@ test("the voters panel shows the voter's name, stored or from the login session"
   assert.deepEqual(body.voters.map((v) => v.voterName), ["ישראל ישראלי", "משה כהן"]);
 });
 
+test("suspicious votes list voter names, falling back to the login session and then the email", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAlbum(db);
+  const fingerprint = "f".repeat(64);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_name,voter_email,channel,fingerprint,created_at) VALUES ('s1','main','sub-a','כהן, משה','a@example.com','site',?,1)").run(fingerprint);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,created_at) VALUES ('s2','main','sub-b','b@example.com','site',?,2)").run(fingerprint);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,voter_email,channel,fingerprint,created_at) VALUES ('s3','main','sub-c','c@example.com','site',?,3)").run(fingerprint);
+  db.prepare("INSERT INTO auth_sessions (token_hash,user_sub,email,name,expires_at) VALUES ('hash-b','sub-b','b@example.com','לוי יצחק',unixepoch()+3600)").run();
+  const response = await worker.fetch(new Request("http://localhost/api/admin/overview", { headers: { cookie } }), env, ctx);
+  assert.equal(response.status, 200);
+  const { suspicious } = await response.json();
+  assert.deepEqual([...suspicious[0].voters].sort(), ["c@example.com", "כהן, משה", "לוי יצחק"].sort());
+});
+
 test("an administrator can block and unblock a suspicious computer", async () => {
   const { worker, db, env, cookie } = await setup();
   const fingerprint = "a".repeat(64);
