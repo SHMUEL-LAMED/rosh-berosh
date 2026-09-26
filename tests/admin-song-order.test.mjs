@@ -140,6 +140,23 @@ test("the voters panel lists ballots instead of failing", async () => {
   assert.deepEqual(body.voters[0].songs, [{ title: "song-b", albumTitle: "אלבום" }]);
 });
 
+test("the voters panel still lists ballots when the session-email lookup fails", async () => {
+  const { worker, db, env, cookie } = await setup();
+  seedAlbum(db);
+  db.prepare("INSERT INTO ballots (id,survey_id,voter_key,channel,created_at) VALUES ('ballot-1','main','0501234567','phone',1)").run();
+  db.prepare("INSERT INTO album_votes (ballot_id,album_id) VALUES ('ballot-1','album-1')").run();
+  const prepare = env.DB.prepare;
+  env.DB.prepare = (sql) => sql.includes("s.user_sub=b.voter_key") ? { bind: () => ({ all: async () => { throw new Error("D1_ERROR: simulated"); } }) } : prepare(sql);
+
+  const response = await worker.fetch(new Request("http://localhost/api/admin/voters", { headers: { cookie } }), env, ctx);
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.voters.length, 1);
+  assert.equal(body.voters[0].voterKey, "0501234567");
+  assert.deepEqual(body.voters[0].albums, ["אלבום"]);
+});
+
 test("the voters panel returns an email instead of the opaque Google subject", async () => {
   const { worker, db, env, cookie } = await setup();
   seedAlbum(db);

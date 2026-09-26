@@ -162,7 +162,7 @@ export default function AdminPage() {
     <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
       <p className="nav-group">אתר הסקר</p><Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav><Nav active={tab === "preview"} onClick={() => setTab("preview")}>תצוגה מקדימה</Nav><Nav active={tab === "surveys"} onClick={() => setTab("surveys")}>סקרים</Nav><Nav active={tab === "settings"} onClick={() => setTab("settings")}>הגדרות הסקר</Nav><Nav active={tab === "albums"} onClick={() => setTab("albums")}>אלבומים ושירים</Nav><Nav active={tab === "artists"} onClick={() => setTab("artists")}>זמרים</Nav><Nav active={tab === "ivr"} onClick={() => setTab("ivr")}>קריינות לקו</Nav><Nav active={tab === "results"} onClick={() => setTab("results")}>תוצאות</Nav><Nav active={tab === "voters"} onClick={() => setTab("voters")}>מצביעים</Nav><Nav active={tab === "analytics"} onClick={() => setTab("analytics")}>נתונים מתקדמים</Nav><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><p className="nav-group">אתר התוכניות</p>{(Object.keys(PROGRAM_TABS) as ProgramTab[]).map((key) => <Nav key={key} active={tab === key} onClick={() => go(key)}>{PROGRAM_TABS[key]}</Nav>)}<p className="nav-group">כללי</p><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
-    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ ...PROGRAM_TABS, preview: "תצוגה מקדימה", surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", access: "הרשאות", results: "תוצאות", voters: "מצביעים", analytics: "נתונים מתקדמים", subscribers: "רשימת תפוצה" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}{user.email}</span></header>
+    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{tab === "dashboard" ? "מרכז הניהול" : ({ ...PROGRAM_TABS, preview: "תצוגה מקדימה", surveys: "סקרים", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", settings: "הגדרות הסקר", archives: "ארכיון וגיבויים", access: "הרשאות", results: "תוצאות", voters: "מצביעים", analytics: "נתונים מתקדמים", subscribers: "רשימת תפוצה" } as Record<string, string>)[tab]}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}<bdi dir="ltr">{user.email}</bdi></span></header>
       {!isProgramTab(tab) && <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>}
       {tab === "dashboard" && <Dashboard data={data} onNavigate={go} onChanged={load} onMessage={notify} />}
       {tab === "preview" && data && <PreviewPanel data={data} />}
@@ -566,14 +566,15 @@ function VotersPanel() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const fetchPage = useCallback(async (p: number) => {
-    setLoading(true);
+    setLoading(true); setError("");
     try {
       const response = await fetch(`/api/admin/voters?page=${p}`, { cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(data.voters)) throw new Error(data.error || `טעינת המצביעים נכשלה (${response.status}).`);
       setVoters(data.voters); setPage(data.page); setHasMore(data.hasMore);
-    } catch {} finally { setLoading(false); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "טעינת המצביעים נכשלה."); } finally { setLoading(false); }
   }, []);
   useEffect(() => {
     const request = window.setTimeout(() => { void fetchPage(1); }, 0);
@@ -582,7 +583,7 @@ function VotersPanel() {
   const channelLabel = (ch: string) => ch === "phone" ? "טלפון" : ch === "site" ? "אתר" : ch;
   return <AdminSection title="מצביעים">
     <p className="panel-help">כל ההצבעות שנקלטו בסקר הנוכחי, מהחדשה לישנה.</p>
-    {loading ? <p className="loading">טוען…</p> : !voters.length ? <p className="panel-help">אין הצבעות עדיין.</p> : <>
+    {loading ? <p className="loading">טוען…</p> : error ? <p className="panel-help">{error} <button type="button" onClick={() => fetchPage(page)}>לנסות שוב</button></p> : !voters.length ? <p className="panel-help">אין הצבעות עדיין.</p> : <>
       <div className="voters-list">{voters.map((v) => <article key={v.id} className="voter-card">
         <div className="voter-header">
           <span className="voter-key">{v.channel === "site" ? (v.voterEmail || "כתובת המייל לא נשמרה בהצבעה ישנה") : v.voterKey}</span>
