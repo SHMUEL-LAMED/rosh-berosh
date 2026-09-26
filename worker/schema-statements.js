@@ -254,6 +254,14 @@ const TABLES = [
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     PRIMARY KEY (user_sub, episode_id, at_seconds)
   )`,
+  // סקרים באתר התוכניות: שורה לכל אפשרות שמאזין בחר (ההגדרה עצמה ב־program_settings, "polls")
+  `CREATE TABLE IF NOT EXISTS program_poll_votes (
+    poll_id TEXT NOT NULL,
+    user_sub TEXT NOT NULL,
+    option_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (poll_id, user_sub, option_id)
+  )`,
 ];
 
 const COLUMNS = [
@@ -322,6 +330,7 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS program_likes_episode_idx ON program_likes(episode_id)",
   "CREATE INDEX IF NOT EXISTS program_comments_episode_idx ON program_comments(episode_id,status,created_at)",
   "CREATE INDEX IF NOT EXISTS program_moments_episode_idx ON program_moments(episode_id)",
+  "CREATE INDEX IF NOT EXISTS program_poll_votes_user_idx ON program_poll_votes(user_sub,poll_id)",
 ];
 
 const SEEDS = [

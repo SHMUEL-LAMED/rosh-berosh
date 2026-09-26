@@ -20,7 +20,7 @@ const EXPECTED_TABLES = [
   "auth_sessions", "site_ballot_progress", "media_uploads", "subscribers",
   "program_episodes", "program_settings", "program_events", "program_messages", "program_versions",
   "program_user_data", "program_likes", "program_push", "program_transcripts", "program_transcription_jobs",
-  "program_comments", "program_moments",
+  "program_comments", "program_moments", "program_poll_votes",
 ];
 
 function fakeDb({ existingColumns = {}, fail = () => false } = {}) {
