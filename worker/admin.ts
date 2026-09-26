@@ -672,9 +672,14 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       const [ivrPrompts, ivrRecorders, managers, readiness, surveys] = await Promise.all([readIvrPrompts(env), readIvrRecorders(env), readAdminEmails(env), pollReadiness(env, surveyId), listSurveys(env)]);
       const activeSurvey = surveys.surveys.find((item) => item.id === surveyId) ?? null;
       let suspicious: { fingerprint: string; count: number; voters: string[]; blocked: boolean }[] = [];
+      // שם המצביע: השמור בהצבעה, אחרת מהסשן האחרון שלו, ורק אז המייל. המפריד הוא תו בקרה כדי ששם עם פסיק לא יתפצל.
+      const sessionField = (field: string) => `(SELECT s.${field} FROM auth_sessions s WHERE s.user_sub=b.voter_key ORDER BY s.created_at DESC LIMIT 1)`;
+      const duplicates = (voter: string) => env.DB.prepare(`SELECT b.fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(${voter}, char(31)) AS voters, CASE WHEN bf.fingerprint IS NULL THEN 0 ELSE 1 END AS blocked FROM ballots b LEFT JOIN blocked_fingerprints bf ON bf.survey_id=b.survey_id AND bf.fingerprint=b.fingerprint WHERE b.survey_id=? AND b.fingerprint IS NOT NULL AND b.fingerprint != '' GROUP BY b.fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50`).bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string; blocked: number }>();
       try {
-        const dupFp = await env.DB.prepare("SELECT b.fingerprint, COUNT(*) AS cnt, GROUP_CONCAT(COALESCE(b.voter_name,b.voter_email,b.voter_key), ', ') AS voters, CASE WHEN bf.fingerprint IS NULL THEN 0 ELSE 1 END AS blocked FROM ballots b LEFT JOIN blocked_fingerprints bf ON bf.survey_id=b.survey_id AND bf.fingerprint=b.fingerprint WHERE b.survey_id=? AND b.fingerprint IS NOT NULL AND b.fingerprint != '' GROUP BY b.fingerprint HAVING cnt > 1 ORDER BY cnt DESC LIMIT 50").bind(surveyId).all<{ fingerprint: string; cnt: number; voters: string; blocked: number }>();
-        suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split(", "), blocked: Boolean(r.blocked) }));
+        let dupFp;
+        try { dupFp = await duplicates(`COALESCE(b.voter_name,${sessionField("name")},b.voter_email,${sessionField("email")},b.voter_key)`); }
+        catch (error) { console.error("suspicious names error", error); dupFp = await duplicates("b.voter_key"); }
+        suspicious = dupFp.results.map((r) => ({ fingerprint: r.fingerprint, count: r.cnt, voters: r.voters.split("\u001f"), blocked: Boolean(r.blocked) }));
       } catch { /* fingerprint column may not exist yet */ }
       return json({ albums: albums.results, songs: songs.results, artists: artists.results, votes: ballots.results[0] ?? { total: 0, phone: 0, site: 0 }, voteTimeline: { hourly: hourlyVotes.results, daily: dailyVotes.results }, settings: settings.results[0] ?? DEFAULT_SETTINGS, readiness, ivrPrompts, ivrRecorders, managers, fixedManagers: configuredAdminEmails(env), yemotConnected: Boolean(env.YEMOT_TOKEN), ttsAvailable: ttsConfigured(env), results: { albums: albumResults.results, songs: songResults.results, artists: artistResults.results }, surveys: surveys.surveys, activeSurvey, suspicious });
     } catch (error) {
