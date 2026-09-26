@@ -210,8 +210,8 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
     const user = await readSession(request, env).catch(() => null);
     const known = user ? { email: user.email, isAdmin: user.isAdmin } : null;
     const intro = known
-      ? `מחוברים לאתר הסקר כ־<span class="who">${escapeHtml(known.email)}</span>.`
-      : "התחברו עם חשבון Google כדי לפתוח את האזור האישי. מנהלי אתר הסקר מקבלים גם גישה לניהול.";
+      ? `מחוברים כ־<span class="who">${escapeHtml(known.email)}</span>.`
+      : "התחברו עם חשבון Google כדי לפתוח את האזור האישי.";
     const html = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>כניסה לראש בראש</title><script src="https://accounts.google.com/gsi/client" async defer></script><style>${LOGIN_STYLE}</style></head><body><main class="card"><h1>כניסה לראש בראש</h1><p>${intro}</p><div id="google"></div><p id="status"></p></main><script>const known=${JSON.stringify(known).replace(/</g, "\\u003c")};${LOGIN_SCRIPT}</script></body></html>`;
     return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; script-src 'unsafe-inline' https://accounts.google.com/gsi/client; frame-src https://accounts.google.com/gsi/; connect-src 'self' https://accounts.google.com/gsi/; style-src 'unsafe-inline' https://accounts.google.com/gsi/style; img-src data: https://*.googleusercontent.com" } });
   }
@@ -250,7 +250,7 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
     const headers = new Headers(request.headers);
     headers.delete("authorization");
     const user = await readSession(new Request(request.url, { method: request.method, headers }), env);
-    if (!user) return json({ error: "לא מחוברים לאתר הסקר." }, 401);
+    if (!user) return json({ error: "לא מחוברים." }, 401);
     const token = await createSession(env, user);
     return json({ token, user: publicUser(user) });
   }
