@@ -1,5 +1,6 @@
 import { createSession, GOOGLE_CLIENT_ID, readSession, sessionCookie, type SessionUser, verifyGoogleCredential } from "./auth";
 import seed from "./program-seed.json";
+import { pollsApi } from "./program-polls";
 import { latestVersion, PROGRAM_SITE, programToolsApi, publicSettings, readSetting, recordDownload, settingsStatements, versionStatements } from "./program-tools";
 import { DRIVE_DOWNLOAD, DRIVE_ID, driveIdOf, loadEpisode, programAudioKey, safeMediaKey, audioKeysOf } from "./program-audio";
 import { isPublic, israelWallClock } from "./program-schedule.js";
@@ -191,7 +192,7 @@ async function catalog(env: Env, includeHidden = false, origin = "") {
       } catch { return []; }
     }),
     // ההגדרות הציבוריות של אתר התוכניות (ההודעה בדף הבית ודף העדכונים)
-    settings: await publicSettings(env, origin),
+    settings: await publicSettings(env, origin, includeHidden),
   };
 }
 
@@ -554,6 +555,8 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
   if (push) return push;
   const ai = await programAiApi(request, env, { reply, admin, safeId });
   if (ai) return ai;
+  const polls = await pollsApi(request, env, { reply, admin });
+  if (polls) return polls;
   const tools = await programToolsApi(request, env, { reply, admin, safeId });
   if (tools) return tools;
   return reply(request, { error: "הנתיב לא נמצא." }, 404);
