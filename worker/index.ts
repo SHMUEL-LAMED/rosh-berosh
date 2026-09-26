@@ -34,7 +34,7 @@ interface Env {
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
 type EdgeCacheStorage = CacheStorage & { default?: Cache };
 type BallotTiming = { startedAt?: number; albumsDoneAt?: number; songsDoneAt?: number; artistsDoneAt?: number; sessions?: number; clientNow?: number };
-type Submission = { voterKey?: string; voterEmail?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string; timing?: BallotTiming };
+type Submission = { voterKey?: string; voterEmail?: string; voterName?: string; albumIds?: string[]; songIdsByAlbum?: Record<string, string | string[]>; artistIds?: string[]; channel?: "site" | "phone"; fingerprint?: string; timing?: BallotTiming };
 
 // זמני ההצבעה מגיעים מהלקוח (האתר או הקו) ולכן נבדקים: חותמת חייבת להיות
 // בעבר ולא לפני יותר משנה, וסיום שלב אינו יכול להקדים את ההתחלה. ערך פסול
@@ -288,6 +288,9 @@ async function submitBallot(request: Request, env: Env): Promise<Response> {
   try {
     await env.DB.batch(statements);
     if (channel === "site") {
+      // השם נשמר בנפרד ובלי לעצור: אם העמודה עוד לא קיימת, ההצבעה עצמה כבר נשמרה.
+      const voterName = String(body.voterName ?? "").trim().slice(0, 120);
+      if (voterName) await env.DB.prepare("UPDATE ballots SET voter_name=? WHERE id=?").bind(voterName, ballotId).run().catch((error) => console.error("voter name error", error));
       await env.DB.prepare("DELETE FROM site_ballot_progress WHERE survey_id=? AND user_sub=?").bind(surveyId, voterKey).run().catch((error) => console.error("progress cleanup error", error));
     }
     return json({ ok: true, ballotId }, 201);
@@ -627,7 +630,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     }
     const user = await readSession(request, env);
     if (!user) return json({ error: "יש להתחבר באמצעות Google." }, 401);
-    return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub, voterEmail: user.email }) }), env);
+    return submitBallot(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...original, voterKey: user.sub, voterEmail: user.email, voterName: user.name }) }), env);
   }
   if (url.pathname === "/_vinext/image") {
     return handleImageOptimization(request, {
