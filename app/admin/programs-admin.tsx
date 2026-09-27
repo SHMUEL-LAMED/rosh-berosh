@@ -2,8 +2,8 @@
 
 /* ניהול אתר התוכניות — חלק רגיל של דף הניהול, באותו עיצוב ובאותה כניסה.
    הכול עובד על טיוטה שנשמרת אוטומטית בשרת (/api/program/draft), ו"פרסום"
-   מעביר אותה לאתר התוכניות (/api/program/catalog). ארבעה חלקים: תוכניות,
-   הודעה ועדכונים, מאזינים, פרסום. הטיפוסים והעזרים ב־programs-core, הבינה
+   מעביר אותה לאתר התוכניות (/api/program/catalog). חמישה חלקים: תוכניות,
+   אורחים (programs-guests), הודעה ועדכונים, מאזינים, פרסום. הטיפוסים והעזרים ב־programs-core, הבינה
    המלאכותית ב־programs-ai, המאזינים ב־programs-listeners, העבודות ב־programs-jobs. */
 
 import type { ChangeEvent, DragEvent } from "react";
@@ -19,8 +19,9 @@ import { AiCard, aiRun, ProofreadCard, summaryPatch } from "./programs-ai";
 import { ProgramsAds } from "./programs-ads";
 import { CommentsCard, commentsError, CountSettings, DeepStats, EpisodeTable, minutesText, PushCard } from "./programs-listeners";
 import { runJob, stopJob, useJob } from "./programs-jobs";
+import { GuestsSection } from "./programs-guests";
 
-export type ProgramSection = "programs" | "ads" | "site" | "listeners" | "publish";
+export type ProgramSection = "programs" | "guests" | "ads" | "site" | "listeners" | "publish";
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
 type PatchEpisode = (id: string, fields: Partial<Episode> | ((episode: Episode) => Partial<Episode>)) => void;
 type Common = { data: Catalog; change(next: Catalog): void; mutate: Mutate; patchEpisode: PatchEpisode; onMessage(message: string): void };
@@ -105,6 +106,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   return <div className="prog-admin">
     {statusBar}
     {section === "programs" && <ProgramsSection {...common} surveys={surveys} selected={selected} onSelect={setSelected} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} />}
+    {section === "guests" && <GuestsSection data={data} mutate={mutate} onMessage={onMessage} />}
     {section === "ads" && <ProgramsAds episodes={data.episodes} patchEpisode={patchEpisode} onMessage={onMessage} />}
     {section === "site" && <SiteSection {...common} />}
     {section === "listeners" && <ListenersSection data={data} onMessage={onMessage} />}
@@ -147,11 +149,13 @@ function ProgramsSection({ data, change, patchEpisode, onMessage, surveys, live,
   return <div className="prog-workspace">
     <aside className="admin-panel prog-list">
       <button type="button" className="prog-primary" onClick={create}>+ תוכנית חדשה</button>
+      <div className="prog-find" data-tour="prog-find">
       <input className="prog-search" type="search" placeholder="חיפוש תוכנית…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="חיפוש תוכנית" />
       <div className="prog-filters">
         <select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="סינון"><option value="all">כל התוכניות</option><option value="visible">מוצגות באתר</option><option value="hidden">מוסתרות</option><option value="scheduled">מתוזמנות</option><option value="noaudio">בלי הקלטה</option><option value="nocover">בלי תמונה</option></select>
         <small>{shown.length === data.episodes.length ? `${shown.length} תוכניות` : `${shown.length} מתוך ${data.episodes.length}`}</small>
         <Switch on={bulk} onClick={() => { setBulk(!bulk); setPicked(new Set()); }}>בחירה מרובה</Switch>
+      </div>
       </div>
       {bulk && <div className="prog-bulk">
         <small>{picked.size ? `נבחרו ${picked.size}` : "לחצו על תוכניות כדי לבחור"}</small>
@@ -326,7 +330,7 @@ function SiteSection({ data, change, onMessage }: Common) {
   const counts = data.episodes.reduce<Record<string, number>>((acc, e) => { acc[e.season] = (acc[e.season] || 0) + 1; return acc; }, {});
   const setSeason = (i: number, fields: Partial<Season>) => change({ ...data, seasons: data.seasons.map((s, j) => (j === i ? { ...s, ...fields } : s)) });
   return <>
-    <Section title="הודעה בראש האתר" aside={<strong className={`prog-badge${banner.enabled ? " ok" : " off"}`}>{banner.enabled ? "● מוצגת עכשיו" : "○ לא מוצגת"}</strong>}>
+    <Section id="tour-banner" title="הודעה בראש האתר" aside={<strong className={`prog-badge${banner.enabled ? " ok" : " off"}`}>{banner.enabled ? "● מוצגת עכשיו" : "○ לא מוצגת"}</strong>}>
       <p className="panel-help">פס הודעה בראש הדפים — למשל „התוכנית הבאה ביום חמישי” או ברכה לחג. נעלם לבד בתאריך שתבחרו.</p>
       <div className="prog-form">
         <label className="wide"><span>ההודעה</span><input value={banner.text} maxLength={300} placeholder="למשל: התוכנית הבאה — יום חמישי ב־20:00" onChange={(e) => setBanner({ text: e.target.value })} /></label>
@@ -411,7 +415,7 @@ function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(messag
       <DeepStats key={cfg ? `${cfg.since}:${cfg.minSeconds}` : "all"} stats={stats} data={data} />
       {cfg && <CountSettings config={cfg} onSaved={() => setTick((v) => v + 1)} onMessage={onMessage} />}
     </Section>
-    <Section title="הודעות מהמאזינים" aside={messages.unread ? <strong className="prog-badge warn">{messages.unread} חדשות</strong> : undefined}>
+    <Section id="tour-messages" title="הודעות מהמאזינים" aside={messages.unread ? <strong className="prog-badge warn">{messages.unread} חדשות</strong> : undefined}>
       {messages.messages.length ? <div className="prog-messages">{messages.messages.map((m) => <article key={m.id} className={m.readAt ? "" : "unread"}>
         <header><b>{m.name || "מאזין/ה"}</b>{m.email && <a href={`mailto:${m.email}`}>{m.email}</a>}<small>{when(m.createdAt)}{m.episodeId ? ` · על "${name(m.episodeId)}"` : ""}</small></header>
         <p>{m.text}</p>
@@ -552,7 +556,7 @@ function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin,
   const check = (kind: "audio" | "media", title: string, hint: string) => { const r = checks[kind]; return <article><div><span><b>{title}</b><small>{r ? (r.running ? `בודקים… ${r.done}/${r.total}` : r.problems.length ? `${r.problems.length} בעיות:` : `✓ הכול תקין (${r.total} נבדקו)`) : hint}</small>{r && !r.running && !!r.problems.length && <ul className="prog-problems">{r.problems.map((p, i) => <li key={i}>{p.text}</li>)}</ul>}</span></div><button type="button" className="prog-btn" disabled={r?.running} onClick={() => runCheck(kind)}>{r?.running ? "בודקים…" : r ? "↻ בדיקה חוזרת" : "▶ להתחיל בדיקה"}</button></article>; };
 
   return <>
-    <Section title={changes?.any ? "יש שינויים שמחכים לפרסום" : "הכול מפורסם"}>
+    <Section id="tour-publish" title={changes?.any ? "יש שינויים שמחכים לפרסום" : "הכול מפורסם"}>
       <p className="panel-help">{changes?.any ? "עד הפרסום, השינויים נראים רק כאן (ולמי שקיבל קישור תצוגה מקדימה)." : "אתר התוכניות מציג בדיוק את מה שיש כאן."}</p>
       {!!list.length && <ul className="prog-changes">{list.map((x) => <li key={x}>{x}</li>)}</ul>}
       {!!health.must.length && <div className="prog-must"><b>לפני שמפרסמים, צריך לתקן:</b><ul>{health.must.map((p) => <li key={p.id}><button type="button" className="prog-link" onClick={() => onOpen(p.id)}>{p.text}</button></li>)}</ul></div>}

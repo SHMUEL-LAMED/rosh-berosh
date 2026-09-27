@@ -147,6 +147,23 @@
 @media(max-width:700px){.prog-hbars>div{grid-template-columns:100px 1fr 44px}}
 .prog-mail-offer{display:grid;gap:10px;margin-top:14px;padding:14px 16px;border:1px solid #cdb97a;border-radius:14px;background:linear-gradient(180deg,#fffaf0,#fbf3dc)}.prog-mail-offer p{margin:0;line-height:1.6;color:#4b4234}.prog-mail-offer b{color:#5c4a12}
 
+/* ---------- אורחים (programs-guests.tsx) ---------- */
+.guest-av{display:grid;place-items:center;flex:none;border-radius:50%;object-fit:cover;color:#fff;font-weight:900;line-height:1;box-shadow:0 2px 8px rgba(40,30,10,.15)}
+.prog-item.guest-item{grid-template-columns:34px 1fr}
+.guest-editor-top{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px}
+.guest-editor-top .prog-field{flex:1;min-width:200px}
+.guest-episodes{display:grid;gap:6px;margin:0 0 12px;padding:0;list-style:none}
+.guest-episodes li{display:flex;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid #ece3ca;border-radius:11px;background:#fffdf7}
+.guest-episodes small{color:var(--muted);white-space:nowrap}
+.guest-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.guest-tools select{min-height:40px;padding:6px 10px;border:1px solid #dcd4b8;border-radius:11px;background:#fff;font:inherit;max-width:100%}
+.guest-suggestions{display:grid;gap:8px;max-height:420px;overflow:auto;margin:10px 0 14px;padding:0;list-style:none}
+.guest-suggestions li{display:grid;gap:6px;padding:10px 12px;border:1px solid #ece3ca;border-radius:12px;background:#fffdf7}
+.guest-suggestions li>div{display:flex;flex-wrap:wrap;gap:6px 14px}
+.guest-suggestions .prog-check.doubt{color:#8a6d1f}
+.guest-suggestions .prog-check small{color:var(--muted);font-weight:500}
+.prog-find{display:grid;gap:10px}
+
 /* Review and adjust ad cuts before creating a new audio file. */
 .prog-ad-range { margin: 14px 0; padding: 16px; border: 1px solid #bccad8; border-radius: 12px; background: #f8fbfd; }
 .prog-ad-range p { white-space: pre-wrap; line-height: 1.6; }

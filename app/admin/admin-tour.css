@@ -1,0 +1,23 @@
+/* סיור ההדרכה בניהול (admin-tour.tsx): מסך מוחשך, "חור" מואר סביב האזור, וכרטיס הסבר */
+.admin-tour{position:fixed;inset:0;z-index:1000;pointer-events:none}
+.admin-tour-block{position:absolute;inset:0;pointer-events:auto;cursor:default}
+.admin-tour-dim{position:absolute;inset:0;background:rgba(20,16,8,.58)}
+.admin-tour-hole{position:fixed;border-radius:16px;box-shadow:0 0 0 3px #d4b060,0 0 0 9999px rgba(20,16,8,.58);transition:top .25s ease,left .25s ease,width .25s ease,height .25s ease}
+.admin-tour-card{position:fixed;width:min(380px,calc(100vw - 32px));padding:20px 22px 18px;border-radius:18px;background:#fffdf7;border:1px solid #e4d8c4;box-shadow:0 18px 50px rgba(30,22,6,.35);color:#2a2418;pointer-events:auto;transition:top .25s ease,left .25s ease;animation:admin-tour-in .22s ease}
+.admin-tour-card h2{margin:4px 0 8px;font-size:21px;line-height:1.25}
+.admin-tour-card p{margin:0;line-height:1.65;color:#4c4332;font-size:15px}
+.admin-tour-card .admin-tour-count{font-size:12px;font-weight:800;letter-spacing:.04em;color:#a0802b}
+.admin-tour-progress{display:flex;gap:4px;margin-bottom:10px}
+.admin-tour-progress i{flex:1;height:4px;border-radius:9px;background:#ece3ca}
+.admin-tour-progress i.done{background:#d9c07b}.admin-tour-progress i.on{background:#b89530}
+.admin-tour-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
+.admin-tour-actions button{min-height:40px;padding:8px 14px;border:1px solid #dcd4b8;border-radius:11px;background:#fff;color:#5c4a12;font:inherit;font-weight:750;cursor:pointer}
+.admin-tour-actions .admin-tour-next{border-color:transparent;background:linear-gradient(90deg,#2f3a78,#b89530);color:#fff}
+.admin-tour-actions .admin-tour-skip{margin-inline-start:auto;border-color:transparent;background:transparent;color:#8a7d62;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.admin-tour-actions button:focus-visible{outline:3px solid #d4b060;outline-offset:2px}
+.nav-tour{display:flex;align-items:center;gap:8px}
+@keyframes admin-tour-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.admin-tour-hole,.admin-tour-card{transition:none;animation:none}}
+/* החלק "אתר התוכניות" בתפריט עטוף באלמנט אחד, כדי שהסיור יאיר את כולו — באותה פריסה כמו שאר התפריט */
+.admin-side nav .nav-section{display:grid;gap:7px}
+@media(max-width:800px){.admin-side nav .nav-section{display:flex;flex:0 0 auto;gap:7px}}

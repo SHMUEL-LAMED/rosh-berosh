@@ -327,6 +327,21 @@ export async function programAiApi(request: Request, env: Env, h: Helpers): Prom
     }
   }
 
+  /* האורחים שהבינה המלאכותית מצאה בסיכומים של כל התוכניות, בבקשה אחת — להשלמת שדה
+     האורחים בניהול. `pending`: תוכניות שהתמלול שלהן הושלם אבל עוד אין להן סיכום. */
+  if (path === "/ai/guests" && request.method === "GET") {
+    const rows = (await env.DB.prepare("SELECT episode_id,parts_done,parts_total,summary_json FROM program_transcripts").all<{ episode_id: string; parts_done: number; parts_total: number; summary_json: string | null }>()).results;
+    const items: Array<{ episodeId: string; guests: string[] }> = [], pending: string[] = [];
+    for (const row of rows) {
+      const done = Number(row.parts_total) > 0 && Number(row.parts_done) >= Number(row.parts_total);
+      let summary: { guests?: unknown } | null = null;
+      try { summary = row.summary_json ? JSON.parse(row.summary_json) : null; } catch { summary = null; }
+      if (summary) items.push({ episodeId: row.episode_id, guests: Array.isArray(summary.guests) ? summary.guests.map(String).filter(Boolean).slice(0, 20) : [] });
+      else if (done) pending.push(row.episode_id);
+    }
+    return h.reply(request, { items, pending });
+  }
+
   if (path.startsWith("/ai/transcript/") && request.method === "GET") {
     const episodeId = h.safeId(decodeURIComponent(path.slice("/ai/transcript/".length)));
     const row = await env.DB.prepare("SELECT text,parts_done,parts_total,summary_json,updated_at FROM program_transcripts WHERE episode_id=?").bind(episodeId)
