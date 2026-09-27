@@ -2,8 +2,8 @@
 
 /* ניהול אתר התוכניות — חלק רגיל של דף הניהול, באותו עיצוב ובאותה כניסה.
    הכול עובד על טיוטה שנשמרת אוטומטית בשרת (/api/program/draft), ו"פרסום"
-   מעביר אותה לאתר התוכניות (/api/program/catalog). ארבעה חלקים: תוכניות,
-   הודעה ועדכונים, מאזינים, פרסום. הטיפוסים והעזרים ב־programs-core, הבינה
+   מעביר אותה לאתר התוכניות (/api/program/catalog). חמישה חלקים: תוכניות,
+   אורחים (programs-guests), הודעה ועדכונים, מאזינים, פרסום. הטיפוסים והעזרים ב־programs-core, הבינה
    המלאכותית ב־programs-ai, המאזינים ב־programs-listeners, העבודות ב־programs-jobs. */
 
 import type { ChangeEvent, DragEvent } from "react";
@@ -18,8 +18,9 @@ import { FilePick, Section, Status, Switch } from "./programs-ui";
 import { AiCard, aiRun, ProofreadCard, summaryPatch } from "./programs-ai";
 import { CommentsCard, commentsError, CountSettings, DeepStats, EpisodeTable, minutesText, PushCard } from "./programs-listeners";
 import { runJob, stopJob, useJob } from "./programs-jobs";
+import { GuestsSection } from "./programs-guests";
 
-export type ProgramSection = "programs" | "site" | "listeners" | "publish";
+export type ProgramSection = "programs" | "guests" | "site" | "listeners" | "publish";
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
 type PatchEpisode = (id: string, fields: Partial<Episode> | ((episode: Episode) => Partial<Episode>)) => void;
 type Common = { data: Catalog; change(next: Catalog): void; mutate: Mutate; patchEpisode: PatchEpisode; onMessage(message: string): void };
@@ -104,6 +105,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   return <div className="prog-admin">
     {statusBar}
     {section === "programs" && <ProgramsSection {...common} surveys={surveys} selected={selected} onSelect={setSelected} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} />}
+    {section === "guests" && <GuestsSection data={data} mutate={mutate} onMessage={onMessage} />}
     {section === "site" && <SiteSection {...common} />}
     {section === "listeners" && <ListenersSection data={data} onMessage={onMessage} />}
     {section === "publish" && <PublishSection {...common} origin={origin} changes={changes} base={base} onOpen={open} onPublished={(published, versionId) => { base.current = versionId; dataRef.current = published; setOrigin(published); setData(published); setSync(""); }} onDiscard={() => setReload((v) => v + 1)} />}
