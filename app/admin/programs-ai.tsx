@@ -84,7 +84,7 @@ export function AiCard({ episode, onPatch, onMessage }: { episode: Episode; onPa
   };
   const apply = () => { if (!st.summary) return; onPatch(summaryPatch(episode, st.summary)); onMessage("התיאור והסיכום נכנסו לתוכנית. בדקו, ואז „פרסום התוכניות”."); };
   const sum = st.summary;
-  return <section className="admin-panel prog-panel prog-ai">
+  return <section className="admin-panel prog-panel prog-ai" data-tour="ed-ai">
     <header className="prog-panel-head"><h2>תיאור וסיכום מההקלטה</h2><strong className="prog-badge">AI</strong></header>
     <p className="panel-help">ההקלטה מתומללת אוטומטית ברקע אחרי הפרסום, בלי ללחוץ על כפתור. אפשר לצאת מהדף וההתקדמות תישמר. התמלול גלוי למנהלים בלבד.</p>
     {automatic?.automatic && <p className="panel-help" role="status">{automatic.partsTotal ? `תומללו ${automatic.partsDone} מתוך ${automatic.partsTotal} חלקים.` : "התמלול ממתין לתחילת העיבוד."}{automatic.automatic.error && ` ניסיון קודם נכשל: ${automatic.automatic.error} המערכת תנסה שוב.`}</p>}

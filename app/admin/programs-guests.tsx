@@ -126,7 +126,7 @@ function GuestEditor({ guest, guests, data, mutate, onMessage, onSelect }: { gue
   };
 
   return <>
-    <Section title={guest.name} aside={<div className="row-actions">{live ? <a className="prog-btn" href={guestPageUrl(guest.name)} target="_blank" rel="noopener">הדף באתר ↗</a> : <small className="panel-help">הדף יופיע באתר כשתהיה תוכנית מוצגת עם האורח</small>}</div>}>
+    <Section id="tour-guest-editor" title={guest.name} aside={<div className="row-actions">{live ? <a className="prog-btn" href={guestPageUrl(guest.name)} target="_blank" rel="noopener">הדף באתר ↗</a> : <small className="panel-help">הדף יופיע באתר כשתהיה תוכנית מוצגת עם האורח</small>}</div>}>
       <div className="guest-editor-top">
         <Avatar guest={{ ...guest, profile }} size={96} />
         <div className="prog-field"><span>תמונה</span>
@@ -145,7 +145,7 @@ function GuestEditor({ guest, guests, data, mutate, onMessage, onSelect }: { gue
       </div>
     </Section>
 
-    <Section title="התוכניות עם האורח" aside={<strong className="prog-badge">{guest.count}</strong>}>
+    <Section id="tour-guest-episodes" title="התוכניות עם האורח" aside={<strong className="prog-badge">{guest.count}</strong>}>
       {guest.spellings.length > 1 && <p className="prog-note">השם נכתב בתוכניות בכמה צורות: {guest.spellings.map((s) => `„${s}”`).join(", ")}. <button type="button" className="prog-btn" onClick={unify}>איחוד לכתיב „{guest.name}”</button></p>}
       {episodes.length ? <ul className="guest-episodes">{episodes.map((e) => <li key={e.id}><b>{label(e)}</b><small>{e.date || "בלי תאריך"}{e.visible ? "" : " · מוסתרת"}</small></li>)}</ul> : <p className="panel-help">האורח לא מופיע כרגע באף תוכנית.</p>}
       <div className="guest-tools">

@@ -21,3 +21,13 @@
 /* החלק "אתר התוכניות" בתפריט עטוף באלמנט אחד, כדי שהסיור יאיר את כולו — באותה פריסה כמו שאר התפריט */
 .admin-side nav .nav-section{display:grid;gap:7px}
 @media(max-width:800px){.admin-side nav .nav-section{display:flex;flex:0 0 auto;gap:7px}}
+/* הבחירה בין הסיור הקצר למקיף */
+.admin-tour-chooser{top:50%;left:50%;transform:translate(-50%,-50%);width:min(460px,calc(100vw - 32px));animation:none}
+.admin-tour-options{display:grid;gap:10px;margin-top:14px}
+.admin-tour-options button{display:grid;gap:3px;padding:14px 16px;border:1px solid #e4d8c4;border-radius:14px;background:#fff;text-align:right;font:inherit;color:#2a2418;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.admin-tour-options button:hover,.admin-tour-options button:focus-visible{border-color:#b89530;box-shadow:0 0 0 3px rgba(184,149,48,.18);outline:none}
+.admin-tour-options b{font-size:17px}.admin-tour-options span{font-size:12px;font-weight:800;color:#a0802b}.admin-tour-options small{color:#6d6448;font-size:14px}
+.admin-tour-card .admin-tour-note{margin-top:12px;font-size:13px;color:#8a7d62}
+.section-help{display:inline-flex;align-items:center;gap:6px;margin-inline-start:12px;padding:6px 12px;border:1px solid #dcd4b8;border-radius:99px;background:#fff;color:#806515;font:inherit;font-size:14px;font-weight:800;vertical-align:middle;cursor:pointer}
+.section-help:hover{border-color:#b89530;background:#fbf6e6}
+.section-help i{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#b89530;color:#fff;font-style:normal;font-size:13px}

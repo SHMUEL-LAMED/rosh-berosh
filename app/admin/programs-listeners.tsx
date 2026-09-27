@@ -124,7 +124,7 @@ export function CommentsCard({ data, comments, onChange, onMessage }: { data: Ca
     try { await api("/api/program/comments", { method: "DELETE", body: JSON.stringify({ id }) }); withList(comments.comments.filter((c) => c.id !== id)); }
     catch (error) { onMessage(errorText(error, "המחיקה נכשלה.")); }
   };
-  return <Section title="תגובות באתר" aside={comments.pending ? <strong className="prog-badge warn">{comments.pending} ממתינות</strong> : undefined}>
+  return <Section id="tour-comments" title="תגובות באתר" aside={comments.pending ? <strong className="prog-badge warn">{comments.pending} ממתינות</strong> : undefined}>
     <p className="panel-help">תגובה מופיעה באתר רק אחרי שאישרתם אותה. אפשר לענות בשם המגישים, ולסמן „תגובה נבחרת” שתופיע ראשונה. תגובה על רגע בתוכנית מופיעה גם כסימן על פס ההתקדמות.</p>
     {comments.error && <p className="prog-error">{comments.error}</p>}
     <div className="prog-segmented" role="group" aria-label="סינון תגובות">{FILTERS.map(([k, t]) => <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}>{t}{k !== "all" ? ` (${count(k)})` : ""}</button>)}</div>
@@ -159,7 +159,7 @@ export function PushCard({ data, count, onCount, onMessage }: { data: Catalog; c
     } catch (error) { onMessage(`השליחה לא הצליחה: ${errorText(error, "")}`); }
     setBusy(false);
   };
-  return <Section title="התראות לטלפון" aside={count != null ? <strong className="prog-badge">{n2(count)} מכשירים</strong> : undefined}>
+  return <Section id="tour-push" title="התראות לטלפון" aside={count != null ? <strong className="prog-badge">{n2(count)} מכשירים</strong> : undefined}>
     <p className="panel-help">{count != null ? `${n2(count)} מכשירים ביקשו לקבל התראות. ` : "מאזינים מפעילים התראות באזור האישי. "}בפרסום של תוכנית חדשה נשלחת התראה אוטומטית (אפשר לכבות את זה ליד כפתור הפרסום). כאן אפשר לשלוח הודעה משלכם.</p>
     <div className="prog-form">
       <label className="wide"><span>כותרת</span><input value={title} maxLength={80} placeholder="למשל: התוכנית החדשה עלתה!" onChange={(e) => setTitle(e.target.value)} /></label>

@@ -70,11 +70,11 @@ export function ProgramsAds({ episodes, patchEpisode, onMessage }: { episodes: E
     } catch (cause) { setError(errorText(cause, "החיתוך נכשל. המקור נשאר ללא שינוי.")); }
     finally { setBusy(false); }
   };
-  return <section className="admin-panel"><h2>ניקוי פרסומות מהתוכניות</h2>
+  return <section className="admin-panel" data-tour="ads"><h2>ניקוי פרסומות מהתוכניות</h2>
     <p className="panel-help">הסריקה מסמנת משפטים שנשמעים כמו פרסומת. הזמנים מהתמלול הישן משוערים: האזינו לכל הצעה, כוונו את הגבולות וסמנו לחיתוך. אפשר להוסיף קטע ידנית. ההקלטה המקורית נשמרת.</p>
     <button type="button" className="prog-btn" onClick={() => void scan()} disabled={loading}>{loading ? "מחפשים בתמלולים…" : `סריקה חוזרת · ${suggestions.length} חשודים`}</button>
     {error && <p role="alert" className="prog-error">{error}</p>}
-    <label className="prog-field">תוכנית <select value={selectedId} onChange={(event) => choose(event.target.value)}><option value="">בחרו תוכנית לבדיקה</option>{episodes.filter((item) => streamUrl(item)).sort((a, b) => (b.number || 0) - (a.number || 0)).map((item) => <option value={item.id} key={item.id}>{item.number ? `תוכנית ${item.number} · ` : ""}{item.title} · {counts[item.id] || 0} חשודים</option>)}</select></label>
+    <label className="prog-field" data-tour="ads-pick">תוכנית <select value={selectedId} onChange={(event) => choose(event.target.value)}><option value="">בחרו תוכנית לבדיקה</option>{episodes.filter((item) => streamUrl(item)).sort((a, b) => (b.number || 0) - (a.number || 0)).map((item) => <option value={item.id} key={item.id}>{item.number ? `תוכנית ${item.number} · ` : ""}{item.title} · {counts[item.id] || 0} חשודים</option>)}</select></label>
     {episode && <><audio key={episode.audio} ref={audio} controls preload="metadata" src={streamUrl(episode)} style={{ width: "100%", marginBlock: 16 }} />
       <div><button type="button" className="prog-btn" disabled={!!transcribing} onClick={() => void transcribe()}>{transcribing || "תמלול ובדיקת פרסומות בתוכנית הזו"}</button></div>
       <p className="panel-help">לחצו ״האזנה״ ליד קטע כדי לקפוץ אליו. ״עכשיו״ מעתיק את מיקום הנגן לשדה הזמן. הזמנים בשניות.</p>
