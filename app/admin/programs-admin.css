@@ -162,3 +162,4 @@
 .guest-suggestions li>div{display:flex;flex-wrap:wrap;gap:6px 14px}
 .guest-suggestions .prog-check.doubt{color:#8a6d1f}
 .guest-suggestions .prog-check small{color:var(--muted);font-weight:500}
+.prog-find{display:grid;gap:10px}
