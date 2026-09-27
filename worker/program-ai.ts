@@ -354,6 +354,29 @@ export async function programAiApi(request: Request, env: Env, h: Helpers): Prom
     return h.reply(request, { text: row.text, partsDone: Number(row.parts_done), partsTotal: Number(row.parts_total), summary, updatedAt: new Date(Number(row.updated_at) * 1000).toISOString(), automatic: job ? { attempts: job.attempts, error: job.last_error, nextAt: job.next_at } : null });
   }
 
+  if (path === "/ai/ad-candidates" && request.method === "GET") {
+    // Older transcripts have no word timestamps. Return a deliberately broad
+    // review window; the editor must listen and set exact boundaries.
+    const rows = await env.DB.prepare("SELECT t.episode_id,t.parts_json,t.parts_total,e.data_json FROM program_transcripts t JOIN program_episodes e ON e.id=t.episode_id WHERE t.parts_total>0").all<{ episode_id: string; parts_json: string | null; parts_total: number; data_json: string }>();
+    const cues = /ימות המשיח|השיחה מוקלטת|פרסומת|בחסות|הודעה לציבור|שלוחה.*פרסום|לפרטים.*חייגו|לרכישה.*חייגו|מבצע מיוחד|לפרטים נוספים/i;
+    const suggestions: Array<{ episodeId: string; title: string; start: number; end: number; text: string; part: number }> = [];
+    for (const row of rows.results || []) {
+      let parts: unknown, episode: Record<string, unknown>;
+      try { parts = JSON.parse(row.parts_json || '[]'); episode = JSON.parse(row.data_json); } catch { continue; }
+      if (!Array.isArray(parts)) continue;
+      const duration = Number(episode.duration) || 0;
+      if (!duration) continue;
+      parts.forEach((partText, i) => {
+        if (typeof partText !== 'string') return;
+        const match = cues.exec(partText);
+        if (!match) return;
+        const center = duration * (i + Math.min(.95, (match.index + .5 * match[0].length) / Math.max(1, partText.length))) / Number(row.parts_total);
+        suggestions.push({ episodeId: row.episode_id, title: String(episode.title || row.episode_id), start: Math.max(0, Math.round(center - 45)), end: Math.min(duration, Math.round(center + 45)), text: partText.slice(Math.max(0, match.index - 90), match.index + 160), part: i });
+      });
+    }
+    return h.reply(request, { suggestions });
+  }
+
   /** התמלול המלא של התוכנית, או null כשהוא עוד לא הושלם. */
   const finishedTranscript = async (episodeId: string) => {
     const row = await env.DB.prepare("SELECT text,parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(episodeId)

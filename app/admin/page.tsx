@@ -27,11 +27,11 @@ type Survey = { id: string; name: string; active: number; createdAt: number; vot
 type SuspiciousVote = { fingerprint: string; count: number; voters: string[]; blocked: boolean };
 type TimelinePoint = { bucket: number; channel: "site" | "phone"; votes: number };
 type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; fixedManagers?: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; voteTimeline: { hourly: TimelinePoint[]; daily: TimelinePoint[] }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
-type ProgramTab = "prog-programs" | "prog-guests" | "prog-site" | "prog-listeners" | "prog-publish";
+type ProgramTab = "prog-programs" | "prog-guests" | "prog-ads" | "prog-site" | "prog-listeners" | "prog-publish";
 type Tab = "dashboard" | "preview" | "surveys" | ProgramTab | "albums" | "artists" | "ivr" | "settings" | "access" | "results" | "analytics" | "archives" | "voters" | "subscribers";
 // אתר התוכניות (GitHub Pages): הניהול שלו מוטמע כאן כלשונית, עם כניסה משותפת.
-const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "אורחים", "prog-site": "הודעה ועדכונים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
-const TABS: Tab[] = ["dashboard", "preview", "surveys", "prog-programs", "prog-guests", "prog-site", "prog-listeners", "prog-publish", "albums", "artists", "ivr", "settings", "access", "results", "analytics", "archives", "voters", "subscribers"];
+const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "אורחים", "prog-ads": "ניקוי פרסומות", "prog-site": "הודעה ועדכונים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
+const TABS: Tab[] = ["dashboard", "preview", "surveys", "prog-programs", "prog-guests", "prog-ads", "prog-site", "prog-listeners", "prog-publish", "albums", "artists", "ivr", "settings", "access", "results", "analytics", "archives", "voters", "subscribers"];
 const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");
 // הלשונית הפתוחה נשמרת בכתובת (#prog-programs), כדי שקישור מאתר התוכניות ייפתח ישר בחלק הנכון
 const tabFromHash = (): Tab => { if (typeof window === "undefined") return "dashboard"; const value = window.location.hash.slice(1) as Tab; return TABS.includes(value) ? value : "dashboard"; };

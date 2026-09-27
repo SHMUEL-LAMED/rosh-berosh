@@ -163,3 +163,10 @@
 .guest-suggestions .prog-check.doubt{color:#8a6d1f}
 .guest-suggestions .prog-check small{color:var(--muted);font-weight:500}
 .prog-find{display:grid;gap:10px}
+
+/* Review and adjust ad cuts before creating a new audio file. */
+.prog-ad-range { margin: 14px 0; padding: 16px; border: 1px solid #bccad8; border-radius: 12px; background: #f8fbfd; }
+.prog-ad-range p { white-space: pre-wrap; line-height: 1.6; }
+.prog-ad-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.prog-ad-actions input[type="number"] { width: 95px; direction: ltr; }
+.prog-ad-actions button { min-height: 38px; }

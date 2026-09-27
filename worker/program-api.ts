@@ -6,6 +6,7 @@ import { DRIVE_DOWNLOAD, DRIVE_ID, driveIdOf, loadEpisode, programAudioKey, safe
 import { isPublic, israelWallClock } from "./program-schedule.js";
 import { NOTIFIED_KEY, notifiedStatement, notifyEpisodes, programPushApi } from "./program-push";
 import { programAiApi, type AiBinding } from "./program-ai";
+import { cutMp3, validateCuts } from "./program-mp3-cut";
 import { runTextFixes } from "./program-text-fixes";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string };
@@ -445,6 +446,29 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
       catch (error) { console.error("program publish push error", error); }
     }
     return reply(request, { ok: true, episodes: body.episodes.length, removed: removed.length, versionId, notified: queued });
+  }
+  if (url.pathname === "/api/program/audio/cut" && request.method === "POST") {
+    if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
+    const input = await request.json<{ episodeId?: string; sourceKey?: string; cuts?: unknown; duration?: number }>().catch(() => null);
+    const id = safeId(input?.episodeId), episode = await loadEpisode(env, id);
+    if (!episode || !input?.sourceKey || !audioKeysOf(episode.data, url.origin).includes(input.sourceKey)) return reply(request, { error: "ההקלטה השתנתה. רעננו את העמוד." }, 409);
+    const source = await env.MEDIA.head(input.sourceKey);
+    if (!source || source.size > UPLOAD_LIMITS.audio || !input.sourceKey.toLowerCase().endsWith('.mp3')) return reply(request, { error: "חיתוך זמין להקלטות MP3 השמורות באתר, עד 1GB." }, 400);
+    let cuts;
+    try { cuts = validateCuts(input.cuts, Number(input.duration)); }
+    catch (error) { return reply(request, { error: (error as Error).message }, 400); }
+    const key = `program/${id}/edited-${crypto.randomUUID()}.mp3`;
+    try {
+      const result = await cutMp3(env.MEDIA, input.sourceKey, source.size, cuts, key);
+      if (Math.abs(result.duration - Number(input.duration)) > Math.max(15, Number(input.duration) * .04)) {
+        await env.MEDIA.delete(key);
+        return reply(request, { error: "אורך קובץ המקור לא תואם לנגן. לא הוחלפה הקלטה; רעננו ובדקו את הזמנים." }, 409);
+      }
+      return reply(request, { url: `${url.origin}/media/${key}`, key, duration: result.duration - result.removedSeconds, sourceKey: input.sourceKey });
+    } catch (error) {
+      console.error('program audio cut failed', id, error);
+      return reply(request, { error: error instanceof Error ? error.message : 'חיתוך ההקלטה נכשל.' }, 500);
+    }
   }
   if (url.pathname === "/api/program/upload" && request.method === "POST") {
     if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
