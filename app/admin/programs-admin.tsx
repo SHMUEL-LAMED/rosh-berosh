@@ -148,7 +148,7 @@ function ProgramsSection({ data, change, patchEpisode, onMessage, surveys, live,
 
   return <div className="prog-workspace">
     <aside className="admin-panel prog-list">
-      <button type="button" className="prog-primary" onClick={create}>+ תוכנית חדשה</button>
+      <button type="button" className="prog-primary" data-tour="prog-new" onClick={create}>+ תוכנית חדשה</button>
       <div className="prog-find" data-tour="prog-find">
       <input className="prog-search" type="search" placeholder="חיפוש תוכנית…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="חיפוש תוכנית" />
       <div className="prog-filters">
@@ -167,7 +167,7 @@ function ProgramsSection({ data, change, patchEpisode, onMessage, surveys, live,
           <button type="button" className="danger" onClick={() => { if (confirm(`למחוק ${picked.size} תוכניות?`)) removeIds([...picked]); }}>מחיקה</button>
         </>}
       </div>}
-      <div className="prog-items" role="listbox" aria-label="תוכניות">
+      <div className="prog-items" data-tour="prog-items" role="listbox" aria-label="תוכניות">
         {shown.map((e) => {
           const on = bulk ? picked.has(e.id) : selected === e.id;
           return <button key={e.id} type="button" role="option" aria-selected={on} className={`prog-item${on ? " selected" : ""}${e.visible ? "" : " muted"}`} onClick={() => { if (bulk) { const next = new Set(picked); if (next.has(e.id)) next.delete(e.id); else next.add(e.id); setPicked(next); } else onSelect(e.id); }}>
@@ -256,21 +256,21 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
     onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
     onDrop={onDrop}>
     {dragging && <div className="prog-drop-hint" aria-hidden="true">שחררו כאן — הקלטה או תמונה לתוכנית „{label(episode)}”</div>}
-    <Section title={label(episode)} aside={<div className="row-actions">
+    <Section title={label(episode)} aside={<div className="row-actions" data-tour="ed-actions">
       {live ? <a href={`${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(episode.slug)}`} target="_blank" rel="noopener">צפייה באתר ↗</a> : <button type="button" onClick={() => onMessage("התוכנית עוד לא באתר. היא תופיע אחרי „פרסום התוכניות”.")}>צפייה באתר ↗</button>}
       <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={() => openMailDraft(episode.id, onMessage)}>✉ מייל למאזינים</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={() => (history ? setHistory(null) : loadHistory())}>{history ? "הסתרת הגרסאות" : "גרסאות קודמות"}</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
     </div>}>
-      <div className="prog-form">
+      <div className="prog-form" data-tour="ed-details">
         <label className="wide"><span>שם התוכנית</span><input value={episode.title} placeholder="למשל: שירי הסתיו" onChange={(e) => onPatch({ title: e.target.value })} /></label>
         <label><span>תאריך השידור</span><input type="date" value={episode.date} onChange={(e) => onPatch({ date: e.target.value })} /></label>
         <label><span>מספר התוכנית</span><input type="number" value={episode.number ?? ""} onChange={(e) => onPatch({ number: e.target.value === "" ? null : Number(e.target.value) })} /></label>
         <label><span>עונה</span><select value={episode.season} onChange={(e) => (e.target.value === "__new" ? newSeason() : onPatch({ season: e.target.value }))}><option value="">בלי עונה</option>{data.seasons.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}<option value="__new">+ עונה חדשה…</option></select></label>
-        <label><span>אורחים</span><input value={episode.guests.join(", ")} placeholder="שמות, מופרדים בפסיק" onChange={(e) => onPatch({ guests: splitList(e.target.value) })} /></label>
-        <label className="wide"><span>על התוכנית</span><textarea value={episode.description} placeholder="כמה משפטים על מה שהיה בתוכנית." onChange={(e) => onPatch({ description: e.target.value })} /></label>
-        <label><span>מקושרת למצעד (לא חובה)</span><select value={episode.surveyId} onChange={(e) => onPatch({ surveyId: e.target.value })}><option value="">בלי מצעד</option>{surveys.map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? " · הפעיל" : ""}{s.open ? " · ההצבעה פתוחה" : ""}</option>)}{episode.surveyId && !surveys.some((s) => s.id === episode.surveyId) && <option value={episode.surveyId}>מצעד שנמחק</option>}</select><small>דף התוכנית יציג קישור להצבעה כשהמצעד פתוח.</small></label>
-        <label><span>פרסום מתוזמן (לא חובה)</span><input type="datetime-local" value={episode.publishAt} onChange={(e) => onPatch({ publishAt: e.target.value })} /><small>{episode.publishAt ? (scheduled(episode) ? `תופיע באתר ב־${when(episode.publishAt)}.` : "המועד עבר — מוצגת כרגיל.") : "ריק = מופיעה מיד אחרי הפרסום."}</small></label>
+        <label data-tour="ed-guests"><span>אורחים</span><input value={episode.guests.join(", ")} placeholder="שמות, מופרדים בפסיק" onChange={(e) => onPatch({ guests: splitList(e.target.value) })} /></label>
+        <label className="wide" data-tour="ed-desc"><span>על התוכנית</span><textarea value={episode.description} placeholder="כמה משפטים על מה שהיה בתוכנית." onChange={(e) => onPatch({ description: e.target.value })} /></label>
+        <label data-tour="ed-survey"><span>מקושרת למצעד (לא חובה)</span><select value={episode.surveyId} onChange={(e) => onPatch({ surveyId: e.target.value })}><option value="">בלי מצעד</option>{surveys.map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? " · הפעיל" : ""}{s.open ? " · ההצבעה פתוחה" : ""}</option>)}{episode.surveyId && !surveys.some((s) => s.id === episode.surveyId) && <option value={episode.surveyId}>מצעד שנמחק</option>}</select><small>דף התוכנית יציג קישור להצבעה כשהמצעד פתוח.</small></label>
+        <label data-tour="ed-schedule"><span>פרסום מתוזמן (לא חובה)</span><input type="datetime-local" value={episode.publishAt} onChange={(e) => onPatch({ publishAt: e.target.value })} /><small>{episode.publishAt ? (scheduled(episode) ? `תופיע באתר ב־${when(episode.publishAt)}.` : "המועד עבר — מוצגת כרגיל.") : "ריק = מופיעה מיד אחרי הפרסום."}</small></label>
       </div>
-      <div className="prog-switches">
+      <div className="prog-switches" data-tour="ed-switches">
         <Switch on={episode.visible} onClick={() => onPatch({ visible: !episode.visible })}>{episode.visible ? "מוצגת באתר" : "מוסתרת מהאתר"}</Switch>
         <Switch on={episode.featured} onClick={() => onFeatured(!episode.featured)}>המומלצת בדף הבית</Switch>
         {episode.publishAt && <button type="button" onClick={() => onPatch({ publishAt: "" })}>ביטול התזמון</button>}
@@ -282,7 +282,7 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
       </div>}
     </Section>
 
-    <Section title="ההקלטה" aside={episode.duration ? <strong className="prog-badge">{fmtDuration(episode.duration)}</strong> : undefined}>
+    <Section id="tour-ed-audio" title="ההקלטה" aside={episode.duration ? <strong className="prog-badge">{fmtDuration(episode.duration)}</strong> : undefined}>
       <p className={`prog-note ${stream ? "ok" : ""}`}>{stream ? "✓ יש הקלטה לתוכנית הזו. המאזינים שומעים אותה בנגן של האתר." : "עדיין אין הקלטה. העלו קובץ, גררו אותו לכאן או הדביקו קישור."}</p>
       {stream && <audio className="prog-audio" controls preload="metadata" src={stream} onLoadedMetadata={(e) => { const d = e.currentTarget.duration; if (!episode.duration && Number.isFinite(d)) onPatch({ duration: Math.round(d) }); }} />}
       <div className="prog-form">
@@ -291,7 +291,7 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
       </div>
     </Section>
 
-    <Section title="התמונה">
+    <Section id="tour-ed-cover" title="התמונה">
       <div className="prog-cover">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {episode.cover ? <img src={episode.cover} alt="" /> : <div className="prog-cover-empty">♫<small>בלי תמונה האתר מציג עטיפה צבעונית משלו</small></div>}
@@ -304,7 +304,7 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
       </div>
     </Section>
 
-    <details className="admin-panel prog-more">
+    <details className="admin-panel prog-more" data-tour="ed-more">
       <summary><span>עוד פרטים</span><small>מילות חיפוש, כתובת הדף וקישורים — לא חובה</small></summary>
       <div className="prog-form single">
         <label><span>מילות חיפוש</span><input value={episode.tags.join(", ")} placeholder="למשל: מצעד, ראיון, חנוכה" onChange={(e) => onPatch({ tags: splitList(e.target.value) })} /><small>עוזרות למאזינים למצוא את התוכנית. מופרדות בפסיק.</small></label>
@@ -343,7 +343,7 @@ function SiteSection({ data, change, onMessage }: Common) {
       {banner.enabled && banner.text && <div className="shared-banner prog-banner-preview"><span aria-hidden="true">✦</span><p>{banner.text}</p>{banner.link && <a>{banner.linkLabel || "לפרטים"} ←</a>}</div>}
     </Section>
 
-    <Section title="דף העדכונים" aside={<strong className="prog-badge">{updates.length}</strong>}>
+    <Section id="tour-updates" title="דף העדכונים" aside={<strong className="prog-badge">{updates.length}</strong>}>
       <p className="panel-help">הודעות קצרות למאזינים בדף „עדכונים” באתר התוכניות. החדש למעלה; אפשר לנעוץ עדכון חשוב.</p>
       <button type="button" className="prog-primary" onClick={() => setUpdates([{ id: `u-${Date.now().toString(36)}`, date: today(), title: "", text: "", link: "", pinned: false }, ...updates])}>+ עדכון חדש</button>
       <div className="prog-updates">{updates.map((u, i) => <article key={u.id} className={u.pinned ? "pinned" : ""}>
@@ -353,7 +353,7 @@ function SiteSection({ data, change, onMessage }: Common) {
       </article>)}{!updates.length && <p className="panel-help">עדיין אין עדכונים.</p>}</div>
     </Section>
 
-    <Section title="פרטי קשר">
+    <Section id="tour-contacts" title="פרטי קשר">
       <p className="panel-help">מה שמופיע בדף הבית של אתר התוכניות בכרטיסים „גם בטלפון” ו„הקול שלכם”. שדה ריק לא מוצג. מתפרסם יחד עם התוכניות.</p>
       <div className="prog-form">
         <label><span>טלפון ראשי</span><input dir="ltr" inputMode="tel" maxLength={30} value={contacts.phone} onChange={(e) => setContacts({ phone: e.target.value })} /></label>
@@ -365,7 +365,7 @@ function SiteSection({ data, change, onMessage }: Common) {
       </div>
     </Section>
 
-    <Section title="עונות" aside={<strong className="prog-badge">{data.seasons.length}</strong>}>
+    <Section id="tour-seasons" title="עונות" aside={<strong className="prog-badge">{data.seasons.length}</strong>}>
       <p className="panel-help">עונה היא קבוצה של תוכניות — לפי שנה, תקופה או מגישים. בארכיון אפשר לסנן לפי עונה. מחיקת עונה לא מוחקת תוכניות.</p>
       <div className="prog-seasons">{data.seasons.map((s, i) => <div key={s.id}><input value={s.title} placeholder="שם העונה" onChange={(e) => setSeason(i, { title: e.target.value })} /><input type="number" value={s.year ?? ""} placeholder="שנה" onChange={(e) => setSeason(i, { year: e.target.value ? Number(e.target.value) : null })} /><input value={s.note} placeholder="הערה" onChange={(e) => setSeason(i, { note: e.target.value })} /><small>{counts[s.id] || 0} תוכניות</small><button type="button" className="danger" onClick={() => { if (confirm(`למחוק את העונה "${s.title}"?`)) change({ ...data, seasons: data.seasons.filter((_, j) => j !== i), episodes: data.episodes.map((e) => (e.season === s.id ? { ...e, season: "" } : e)) }); }}>✕</button></div>)}</div>
       <button type="button" className="prog-btn" onClick={() => { const y = new Date().getFullYear(); let id = String(y), n = 2; while (data.seasons.some((s) => s.id === id)) id = `${y}-${n++}`; change({ ...data, seasons: [...data.seasons, { id, title: `עונת ${y}`, year: y, note: "" }] }); }}>+ עונה חדשה</button>
@@ -400,7 +400,7 @@ function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(messag
   const cfg = stats.config, from = cfg ? fmtDate(cfg.since) : "";
   const top = (rows: Stats["recent"]) => rows.filter((r) => Number(r.plays)).slice(0, 10);
   return <>
-    <Section title="מי מאזין" aside={<button type="button" className="prog-btn" onClick={() => { setTick((v) => v + 1); onMessage("המספרים עודכנו."); }}>↻ רענון</button>}>
+    <Section id="tour-stats" title="מי מאזין" aside={<button type="button" className="prog-btn" onClick={() => { setTick((v) => v + 1); onMessage("המספרים עודכנו."); }}>↻ רענון</button>}>
       {cfg && <p className="panel-help">סופרים מ־{from}. האזנה נספרת אחרי {minutesText(Math.round(cfg.minSeconds / 60))} האזנה; האזנה מלאה — שמעו 90% מהתוכנית.</p>}
       <div className={`stat-grid prog-stats${cfg ? " six" : ""}`}><article><small>האזנות בשבוע האחרון</small><b>{n2(stats.week.plays)}</b></article><article><small>מאזינים בשבוע האחרון</small><b>{n2(stats.week.listeners)}</b></article><article><small>{cfg ? `האזנות מאז ${from}` : "האזנות מאז ההתחלה"}</small><b>{n2(stats.totals.plays)}</b></article>{cfg && <><article><small>האזנות מלאות</small><b>{n2(stats.totals.full)}</b></article><article><small>הורדות</small><b>{n2(stats.totals.downloads)}</b></article></>}<article><small>שעות האזנה</small><b>{n2(Math.round((Number(stats.totals.seconds) || 0) / 3600))}</b></article></div>
       <h3>30 הימים האחרונים</h3>
@@ -424,7 +424,7 @@ function ListenersSection({ data, onMessage }: { data: Catalog; onMessage(messag
     </Section>
     <CommentsCard data={data} comments={comments} onChange={setComments} onMessage={onMessage} />
     <PushCard data={data} count={pushCount} onCount={setPushCount} onMessage={onMessage} />
-    {subs && <Section title="רשימת התפוצה"><p className="panel-help">{n2(subs.active)} נרשמים פעילים, מהם {n2(subs.fromProgram)} דרך אתר התוכניות. הרשימה המלאה בלשונית „רשימת תפוצה”.</p></Section>}
+    {subs && <Section id="tour-subs" title="רשימת התפוצה"><p className="panel-help">{n2(subs.active)} נרשמים פעילים, מהם {n2(subs.fromProgram)} דרך אתר התוכניות. הרשימה המלאה בלשונית „רשימת תפוצה”.</p></Section>}
   </>;
 }
 
@@ -574,7 +574,7 @@ function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin,
       </div>}
     </Section>
 
-    <Section title="בדיקת תקינות" aside={<strong className="prog-badge">{health.groups.length + health.dup.length ? `${health.groups.length + health.dup.length} נושאים` : "✓ תקין"}</strong>}>
+    <Section id="tour-health" title="בדיקת תקינות" aside={<strong className="prog-badge">{health.groups.length + health.dup.length ? `${health.groups.length + health.dup.length} נושאים` : "✓ תקין"}</strong>}>
       {health.dup.length > 0 && <div className="prog-must soft"><b>כפילויות:</b><ul>{health.dup.map((d) => <li key={d}>{d}</li>)}</ul></div>}
       {health.groups.length ? <><div className="prog-groups">{health.groups.map(({ group, items }) => <HealthGroup key={group.key} group={group} items={items} onFix={() => runFix(group.fix!, items)} />)}</div><p className="panel-help">אלה הצעות בלבד — הן לא חוסמות פרסום. לחיצה על שורה מציגה את התוכניות; הכפתור לצדה מתקן את כולן בבת אחת (ברקע, ואפשר לעצור).</p></> : <p className="panel-help">✓ לכל התוכניות יש שם, תאריך, תיאור, הקלטה, אורך ותמונה, ואין כפילויות.</p>}
       <div className="admin-list">{check("audio", "בדיקת ההקלטות", "עובר על כל ההקלטות ומוודא שהן נטענות בנגן.")}{check("media", "בדיקת תמונות וקישורים", "מוודא שהתמונות נטענות ושהקישורים עונים.")}</div>
@@ -582,12 +582,12 @@ function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin,
 
     <ProofreadCard data={data} origin={origin} mutate={mutate} onMessage={onMessage} onOpen={onOpen} />
 
-    <Section title="גרסאות קודמות" aside={<button type="button" className="prog-btn" onClick={loadVersions}>{versions ? "↻ רענון" : "הצגת הגרסאות"}</button>}>
+    <Section id="tour-versions" title="גרסאות קודמות" aside={<button type="button" className="prog-btn" onClick={loadVersions}>{versions ? "↻ רענון" : "הצגת הגרסאות"}</button>}>
       <p className="panel-help">כל פרסום נשמר אוטומטית. שחזור מחזיר גרסה לטיוטה, ואז מפרסמים. גם הגיבוי של לשונית „ארכיון וגיבויים” כולל את אתר התוכניות.</p>
       {versions && (versions.length ? <div className="admin-list">{versions.map((v, i) => <article key={v.id}><div><span><b>{when(v.createdAt)}{i === 0 ? " · הגרסה שבאתר" : ""}</b><small>{n2(v.episodes)} תוכניות{v.by ? ` · ${v.by}` : ""}</small></span></div><button type="button" onClick={() => restoreVersion(v)}>שחזור</button></article>)}</div> : <p className="panel-help">עדיין אין גרסאות — הראשונה תישמר בפרסום הבא.</p>)}
     </Section>
 
-    <details className="admin-panel prog-more">
+    <details className="admin-panel prog-more" data-tour="pub-tools">
       <summary><span>כלים מתקדמים</span><small>תצוגה מקדימה, קובץ גיבוי, שחזור והעברת הקלטות</small></summary>
       <div className="admin-list">
         <article><div><span><b>קישור לתצוגה מקדימה</b><small>מישהו אחר יכול לראות את האתר עם הטיוטה לפני הפרסום. עובד עד הפרסום הבא.</small>{preview && <input dir="ltr" readOnly value={preview} onFocus={(e) => e.currentTarget.select()} />}</span></div><button type="button" onClick={makePreview}>יצירת קישור</button></article>
