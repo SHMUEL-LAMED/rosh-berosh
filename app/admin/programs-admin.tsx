@@ -16,10 +16,11 @@ import {
 } from "./programs-core";
 import { FilePick, Section, Status, Switch } from "./programs-ui";
 import { AiCard, aiRun, ProofreadCard, summaryPatch } from "./programs-ai";
+import { ProgramsAds } from "./programs-ads";
 import { CommentsCard, commentsError, CountSettings, DeepStats, EpisodeTable, minutesText, PushCard } from "./programs-listeners";
 import { runJob, stopJob, useJob } from "./programs-jobs";
 
-export type ProgramSection = "programs" | "site" | "listeners" | "publish";
+export type ProgramSection = "programs" | "ads" | "site" | "listeners" | "publish";
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
 type PatchEpisode = (id: string, fields: Partial<Episode> | ((episode: Episode) => Partial<Episode>)) => void;
 type Common = { data: Catalog; change(next: Catalog): void; mutate: Mutate; patchEpisode: PatchEpisode; onMessage(message: string): void };
@@ -104,6 +105,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   return <div className="prog-admin">
     {statusBar}
     {section === "programs" && <ProgramsSection {...common} surveys={surveys} selected={selected} onSelect={setSelected} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} />}
+    {section === "ads" && <ProgramsAds episodes={data.episodes} patchEpisode={patchEpisode} onMessage={onMessage} />}
     {section === "site" && <SiteSection {...common} />}
     {section === "listeners" && <ListenersSection data={data} onMessage={onMessage} />}
     {section === "publish" && <PublishSection {...common} origin={origin} changes={changes} base={base} onOpen={open} onPublished={(published, versionId) => { base.current = versionId; dataRef.current = published; setOrigin(published); setData(published); setSync(""); }} onDiscard={() => setReload((v) => v + 1)} />}

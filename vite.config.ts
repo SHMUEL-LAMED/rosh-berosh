@@ -36,6 +36,7 @@ if (
 
 const localBindingConfig = {
   main: "./worker/index.ts",
+  limits: { cpu_ms: 300000 }, // bounded MP3 frame scan for long program recordings
   compatibility_flags: ["nodejs_compat"],
   d1_databases: d1
     ? [
