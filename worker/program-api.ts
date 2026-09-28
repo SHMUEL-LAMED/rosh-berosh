@@ -8,6 +8,7 @@ import { NOTIFIED_KEY, notifiedStatement, notifyEpisodes, programPushApi } from 
 import { programAiApi, type AiBinding } from "./program-ai";
 import { cutMp3, validateCuts } from "./program-mp3-cut";
 import { runTextFixes } from "./program-text-fixes";
+import { backfillProgramPeople } from "./program-people-backfill";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string };
 const ORIGIN = "https://shmuel-lamed.github.io";
@@ -174,6 +175,7 @@ async function catalog(env: Env, includeHidden = false, origin = "") {
   await seedOnce(env);
   await backfillSeedR2Metadata(env);
   await runTextFixes(env);   // תיקוני כתיב חד־פעמיים בשמות ובתיאורים
+  await backfillProgramPeople(env);
   const [episodes, settings] = await env.DB.batch([
     env.DB.prepare(`SELECT id,data_json FROM program_episodes ${includeHidden ? "" : "WHERE visible=1"} ORDER BY date DESC,number DESC`),
     env.DB.prepare("SELECT key,value_json FROM program_settings"),

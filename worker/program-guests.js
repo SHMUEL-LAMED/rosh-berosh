@@ -42,7 +42,7 @@ export function normalizeGuests(raw) {
 export function collectGuests(episodes, profiles = []) {
   const map = new Map();
   for (const episode of episodes) {
-    for (const raw of Array.isArray(episode.guests) ? episode.guests : []) {
+    for (const raw of [...(Array.isArray(episode.guests) ? episode.guests : []), ...(Array.isArray(episode.panelists) ? episode.panelists : [])]) {
       const key = guestKey(raw); if (!key) continue;
       const name = String(raw).replace(/\s+/g, " ").trim();
       const guest = map.get(key) || { key, spellings: new Map(), episodeIds: [] };

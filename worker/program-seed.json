@@ -1312,7 +1312,10 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "אלחנן ענבל",
+        "יהודה בורן"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1322,7 +1325,12 @@
           "url": "https://drive.google.com/file/d/182Wyof8-CqrcMVl1HPfzPuquxm8bze9K/view"
         }
       ],
-      "sourceFileBytes": 80883553
+      "sourceFileBytes": 80883553,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1i7sD0TJPpGZeyODR5_TM8UdiKSIrfPow",
@@ -1338,7 +1346,10 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "קובי בלום",
+        "מיכאל לוי"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1348,7 +1359,11 @@
           "url": "https://drive.google.com/file/d/1i7sD0TJPpGZeyODR5_TM8UdiKSIrfPow/view"
         }
       ],
-      "sourceFileBytes": 221470851
+      "sourceFileBytes": 221470851,
+      "hosts": [
+        "דודי זינגר"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1Ls1b4JNoGKZOeF2qmfylx_d9U-s1hlvg",
@@ -1374,7 +1389,14 @@
           "url": "https://drive.google.com/file/d/1Ls1b4JNoGKZOeF2qmfylx_d9U-s1hlvg/view"
         }
       ],
-      "sourceFileBytes": 180451130
+      "sourceFileBytes": 180451130,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": [
+        "אבישי לביא"
+      ]
     },
     {
       "id": "drive-1W1PJnzhJ7IiEd7ESYnSv4R8gyxInEjNz",
@@ -1390,7 +1412,9 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "יוסי שטארק"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1400,7 +1424,12 @@
           "url": "https://drive.google.com/file/d/1W1PJnzhJ7IiEd7ESYnSv4R8gyxInEjNz/view"
         }
       ],
-      "sourceFileBytes": 224850978
+      "sourceFileBytes": 224850978,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1Ar7uG1H0Ki1rxEbGuNNEW85gO20TeCa1",
@@ -1426,7 +1455,12 @@
           "url": "https://drive.google.com/file/d/1Ar7uG1H0Ki1rxEbGuNNEW85gO20TeCa1/view"
         }
       ],
-      "sourceFileBytes": 287162995
+      "sourceFileBytes": 287162995,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1wNb6ixsK70i9wwxZvQVaZkTQRvuqV1ik",
@@ -1442,7 +1476,9 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "דודי זינגר"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1452,7 +1488,12 @@
           "url": "https://drive.google.com/file/d/1wNb6ixsK70i9wwxZvQVaZkTQRvuqV1ik/view"
         }
       ],
-      "sourceFileBytes": 265030654
+      "sourceFileBytes": 265030654,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1_USXJngQnB7oz8UhRPboea-TM8hxndy_",
@@ -1478,7 +1519,12 @@
           "url": "https://drive.google.com/file/d/1_USXJngQnB7oz8UhRPboea-TM8hxndy_/view"
         }
       ],
-      "sourceFileBytes": 213174210
+      "sourceFileBytes": 213174210,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1QMsVWKkYcgOi1izBUEO4RZ3IC0uzSUqJ",
@@ -1504,7 +1550,12 @@
           "url": "https://drive.google.com/file/d/1QMsVWKkYcgOi1izBUEO4RZ3IC0uzSUqJ/view"
         }
       ],
-      "sourceFileBytes": 297993321
+      "sourceFileBytes": 297993321,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1yD8tpcPJ9NR4-fkweCjstxnSoNBQaGWS",
@@ -1531,7 +1582,12 @@
           "url": "https://drive.google.com/file/d/1yD8tpcPJ9NR4-fkweCjstxnSoNBQaGWS/view"
         }
       ],
-      "sourceFileBytes": 18484967
+      "sourceFileBytes": 18484967,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1nNBYcQ0rLmpSsVB6zc-6ggihQjsCd8Nk",
@@ -1547,7 +1603,9 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "ירמי סלייטר"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1557,7 +1615,12 @@
           "url": "https://drive.google.com/file/d/1nNBYcQ0rLmpSsVB6zc-6ggihQjsCd8Nk/view"
         }
       ],
-      "sourceFileBytes": 74102718
+      "sourceFileBytes": 74102718,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1zvkOgEfMXRxr1KCoWqFphEcWBRpUxAbr",
@@ -1583,7 +1646,12 @@
           "url": "https://drive.google.com/file/d/1zvkOgEfMXRxr1KCoWqFphEcWBRpUxAbr/view"
         }
       ],
-      "sourceFileBytes": 63585379
+      "sourceFileBytes": 63585379,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-183xrfGQNn_hZc9wdbMBac1R_acR1w_PK",
@@ -1609,7 +1677,12 @@
           "url": "https://drive.google.com/file/d/183xrfGQNn_hZc9wdbMBac1R_acR1w_PK/view"
         }
       ],
-      "sourceFileBytes": 49116394
+      "sourceFileBytes": 49116394,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1d802qX8yjvQrEv0bS9xhrCdyapOxoL8V",
@@ -1626,7 +1699,11 @@
         "תוכניות",
         "מצעד"
       ],
-      "guests": [],
+      "guests": [
+        "משה קליין",
+        "משה פלד",
+        "אלחנן ענבל"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1636,7 +1713,15 @@
           "url": "https://drive.google.com/file/d/1d802qX8yjvQrEv0bS9xhrCdyapOxoL8V/view"
         }
       ],
-      "sourceFileBytes": 147215845
+      "sourceFileBytes": 147215845,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": [
+        "שלמה גולדברג",
+        "דודי זינגר"
+      ]
     },
     {
       "id": "drive-14t4nszjURquA9jWwAScsaFBJ0pPXX2IB",
@@ -1652,7 +1737,9 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "רונן צור"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1662,7 +1749,12 @@
           "url": "https://drive.google.com/file/d/14t4nszjURquA9jWwAScsaFBJ0pPXX2IB/view"
         }
       ],
-      "sourceFileBytes": 94691307
+      "sourceFileBytes": 94691307,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1s67iix8WKJFR859LPoAAnQNC3KQFqEDm",
@@ -1741,7 +1833,12 @@
           "url": "https://drive.google.com/file/d/1f-mc6a56Hw5MsBvWvKck1CDhbp8iAjdA/view"
         }
       ],
-      "sourceFileBytes": 72204584
+      "sourceFileBytes": 72204584,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-19Trk3ZVWkWPdGkNmtyCpPRCTVrjBPcRl",
@@ -1767,7 +1864,12 @@
           "url": "https://drive.google.com/file/d/19Trk3ZVWkWPdGkNmtyCpPRCTVrjBPcRl/view"
         }
       ],
-      "sourceFileBytes": 54477747
+      "sourceFileBytes": 54477747,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1iViyBsEn7b9tcDlSPF54ZFsXwYGduqqi",
@@ -1793,7 +1895,12 @@
           "url": "https://drive.google.com/file/d/1iViyBsEn7b9tcDlSPF54ZFsXwYGduqqi/view"
         }
       ],
-      "sourceFileBytes": 70796119
+      "sourceFileBytes": 70796119,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1Hdqhh33vBDisE6dAE17Lqc1fXzlxR61c",
@@ -1809,7 +1916,9 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "משה קליין"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1819,7 +1928,12 @@
           "url": "https://drive.google.com/file/d/1Hdqhh33vBDisE6dAE17Lqc1fXzlxR61c/view"
         }
       ],
-      "sourceFileBytes": 76638746
+      "sourceFileBytes": 76638746,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1I0bPHofL14B6IWAM8_Xpwx9D4ENNbABb",
@@ -1845,7 +1959,12 @@
           "url": "https://drive.google.com/file/d/1I0bPHofL14B6IWAM8_Xpwx9D4ENNbABb/view"
         }
       ],
-      "sourceFileBytes": 84997384
+      "sourceFileBytes": 84997384,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1j6CAgVVO058flwSaP4rSkBV6GkfKikYR",
@@ -1871,7 +1990,12 @@
           "url": "https://drive.google.com/file/d/1j6CAgVVO058flwSaP4rSkBV6GkfKikYR/view"
         }
       ],
-      "sourceFileBytes": 71778982
+      "sourceFileBytes": 71778982,
+      "hosts": [
+        "מיכאל לוי",
+        "קובי בלום"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1QEIjHfXr-eoy946hHT1SwGvvwjSExio3",
@@ -1897,7 +2021,13 @@
           "url": "https://drive.google.com/file/d/1QEIjHfXr-eoy946hHT1SwGvvwjSExio3/view"
         }
       ],
-      "sourceFileBytes": 151886329
+      "sourceFileBytes": 151886329,
+      "hosts": [
+        "קובי בלום",
+        "ארי וייזר",
+        "חיים וינר"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4",
@@ -1924,7 +2054,12 @@
           "url": "https://drive.google.com/file/d/1zYtLR6CVkcM4mQZJ1fmf56jrLe1lBJy4/view"
         }
       ],
-      "sourceFileBytes": 85228622
+      "sourceFileBytes": 85228622,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": []
     },
     {
       "id": "drive-1-d-Y4TFP0PJ7_yQzt5iisOAC8MsOy5ll",
@@ -1940,7 +2075,9 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "יאיר שטיין"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1950,7 +2087,16 @@
           "url": "https://drive.google.com/file/d/1-d-Y4TFP0PJ7_yQzt5iisOAC8MsOy5ll/view"
         }
       ],
-      "sourceFileBytes": 49278801
+      "sourceFileBytes": 49278801,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "מיכאל לוי",
+        "ארי וייזר",
+        "אבישי לביא"
+      ]
     },
     {
       "id": "drive-1IDhfNccSk5WBt59EMgUFZNSsNk1mL_kM",
@@ -1966,7 +2112,10 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "פיני איינהורן",
+        "גיא מרוז"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -1976,7 +2125,14 @@
           "url": "https://drive.google.com/file/d/1IDhfNccSk5WBt59EMgUFZNSsNk1mL_kM/view"
         }
       ],
-      "sourceFileBytes": 196132845
+      "sourceFileBytes": 196132845,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "אבישי לביא"
+      ]
     },
     {
       "id": "drive-1PjNbMbGrvvJSYUlEvmClQ50yeUfJILc0",
@@ -2002,7 +2158,14 @@
           "url": "https://drive.google.com/file/d/1PjNbMbGrvvJSYUlEvmClQ50yeUfJILc0/view"
         }
       ],
-      "sourceFileBytes": 189728422
+      "sourceFileBytes": 189728422,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "אבישי לביא"
+      ]
     },
     {
       "id": "drive-13_7LgBbqXjIrv89WIzxF04dTRHYAFnzS",
@@ -2028,7 +2191,14 @@
           "url": "https://drive.google.com/file/d/13_7LgBbqXjIrv89WIzxF04dTRHYAFnzS/view"
         }
       ],
-      "sourceFileBytes": 192214664
+      "sourceFileBytes": 192214664,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "אבישי לביא"
+      ]
     },
     {
       "id": "drive-1mOa64Q_eFX9o6ihZvAxb8AT0wNr2yZa-",
@@ -2044,7 +2214,10 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "שלמה גליק",
+        "מיכאל מלכיאלי"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -2054,7 +2227,14 @@
           "url": "https://drive.google.com/file/d/1mOa64Q_eFX9o6ihZvAxb8AT0wNr2yZa-/view"
         }
       ],
-      "sourceFileBytes": 151873827
+      "sourceFileBytes": 151873827,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "אבישי לביא"
+      ]
     },
     {
       "id": "drive-16PLdPxDNRyfOeLwjs2AOs3-1Ly2gm_f0",
@@ -2080,7 +2260,15 @@
           "url": "https://drive.google.com/file/d/16PLdPxDNRyfOeLwjs2AOs3-1Ly2gm_f0/view"
         }
       ],
-      "sourceFileBytes": 212481332
+      "sourceFileBytes": 212481332,
+      "hosts": [
+        "מיכאל לוי",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "אבישי לביא",
+        "חיים וינר"
+      ]
     },
     {
       "id": "drive-1oVYAxh34nIhCWcnEoSbVbK5_XAdmvpqt",
@@ -2106,7 +2294,14 @@
           "url": "https://drive.google.com/file/d/1oVYAxh34nIhCWcnEoSbVbK5_XAdmvpqt/view"
         }
       ],
-      "sourceFileBytes": 137628260
+      "sourceFileBytes": 137628260,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "אבישי לביא"
+      ]
     },
     {
       "id": "drive-1wqttlT9iiG5OACxhuyyiy96eYPiUKv1k",
@@ -2132,7 +2327,18 @@
           "url": "https://drive.google.com/file/d/1wqttlT9iiG5OACxhuyyiy96eYPiUKv1k/view"
         }
       ],
-      "sourceFileBytes": 234642992
+      "sourceFileBytes": 234642992,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "דודי זינגר",
+        "שלמה גליק",
+        "ארי וייזר",
+        "אבישי לביא",
+        "חיים וינר"
+      ]
     },
     {
       "id": "drive-1PS6NoycIkPXmG7Sd6NtW9WQpaFUitlvl",
@@ -2148,7 +2354,9 @@
       "tags": [
         "תוכניות"
       ],
-      "guests": [],
+      "guests": [
+        "מנחם קולדצקי"
+      ],
       "featured": false,
       "visible": true,
       "tracks": [],
@@ -2158,7 +2366,14 @@
           "url": "https://drive.google.com/file/d/1PS6NoycIkPXmG7Sd6NtW9WQpaFUitlvl/view"
         }
       ],
-      "sourceFileBytes": 145828631
+      "sourceFileBytes": 145828631,
+      "hosts": [
+        "קובי בלום",
+        "ירמי סלייטר"
+      ],
+      "panelists": [
+        "מיכאל לוי"
+      ]
     },
     {
       "id": "drive-1pLy7zaRS3bphll2pa8CTcURcJ7Rf1Upm",
