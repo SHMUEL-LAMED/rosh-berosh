@@ -10,7 +10,7 @@ import { importSubscribers } from "./subscribers-admin";
 import { israelHour, isPublic, israelWallClock } from "./program-schedule.js";
 import { loadEpisode } from "./program-audio";
 import { draftWithPolls, normalizePolls, publicPolls } from "./program-polls";
-import { normalizeGuests } from "./program-guests.js";
+import { normalizeGuests, withPublishedPhotos } from "./program-guests.js";
 import { normalizeHosts, publicHosts } from "./program-hosts.js";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
@@ -123,6 +123,12 @@ export async function publicSettings(env: Env, origin = "", includeHidden = fals
   ]);
   const values = new Map(rows.results.map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
   return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), contacts: normalizeContacts(values.get("contacts")), polls: publicPolls(normalizePolls(values.get("polls")), includeHidden), guests: normalizeGuests(values.get("guests")), hosts: publicHosts(values.get("hosts")), survey };
+}
+
+/** טיוטה שאינה מכירה תמונות פרופיל שכבר באתר — נשמרה לפני שנוספו, או מלשונית שנפתחה לפני כן — מוחזרת
+    ונשמרת איתן (withPublishedPhotos), כדי שהניהול יציג אותן והפרסום הבא ממנה לא ימחק אותן. */
+export async function draftWithGuestPhotos<T>(env: Env, data: T): Promise<T> {
+  return withPublishedPhotos(data, normalizeGuests(await readSetting(env, "guests"))) as T;
 }
 
 /** משפטי הכתיבה של ההגדרות שהגיעו עם פרסום הקטלוג. */
@@ -364,15 +370,16 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     if (!user) return forbidden();
     if (method === "GET") {
       const draft = await readSetting<{ data: unknown; updatedAt: string; by: string }>(env, "draft");
-      // טיוטה ישנה שנשמרה בלי הסקרים — מוחזרת עם הסקרים שמפורסמים, כדי שאף ניהול לא יטען אותה כ"אין סקרים"
-      return h.reply(request, { draft: draft ? { ...draft, data: await draftWithPolls(env, draft.data) } : null });
+      // טיוטה ישנה שנשמרה בלי הסקרים — מוחזרת עם הסקרים שמפורסמים, כדי שאף ניהול לא יטען אותה כ"אין סקרים";
+      // וטיוטה שאינה מכירה את תמונות הפרופיל שבאתר — איתן
+      return h.reply(request, { draft: draft ? { ...draft, data: await draftWithPolls(env, await draftWithGuestPhotos(env, draft.data)) } : null });
     }
     if (method === "PUT") {
       const { data, ifUpdatedAt } = await body<{ data?: { seasons?: unknown[]; episodes?: unknown[] }; ifUpdatedAt?: unknown }>();
       if (!data || !Array.isArray(data.episodes) || !Array.isArray(data.seasons) || data.episodes.length > 2000) return h.reply(request, { error: "הטיוטה אינה תקינה." }, 400);
       // טיוטה שנשלחה בלי settings.polls (ניהול שאינו מכיר סקרים) שומרת את הסקרים של הטיוטה הקודמת, או את המפורסמים
       const previous = await readSetting<{ data: unknown }>(env, "draft");
-      const draft = { data: await draftWithPolls(env, data, previous?.data), updatedAt: new Date().toISOString(), by: user.email };
+      const draft = { data: await draftWithPolls(env, await draftWithGuestPhotos(env, data), previous?.data), updatedAt: new Date().toISOString(), by: user.email };
       // תנאי מוקדם (לא חובה): הלקוח שולח את updatedAt של הטיוטה שעליה עבד. אם
       // מאז מנהל אחר שמר טיוטה, לא נכתב דבר ומוחזרת הטיוטה השמורה (409), כדי
       // ששני מכשירים לא ידרסו זה את זה בשקט. בלי השדה — שמירה רגילה, כמו קודם.
@@ -413,7 +420,7 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     if (!token || !preview || preview.token !== token) return h.reply(request, { error: "קישור התצוגה המקדימה אינו בתוקף." }, 404);
     const draft = await readSetting<{ data: unknown; updatedAt: string }>(env, "draft");
     if (!draft) return h.reply(request, { error: "אין טיוטה כרגע." }, 404);
-    return h.reply(request, { data: await draftWithPolls(env, draft.data), updatedAt: draft.updatedAt });
+    return h.reply(request, { data: await draftWithPolls(env, await draftWithGuestPhotos(env, draft.data)), updatedAt: draft.updatedAt });
   }
 
   /* ---------- גרסאות (גיבוי אוטומטי בכל פרסום) ---------- */
