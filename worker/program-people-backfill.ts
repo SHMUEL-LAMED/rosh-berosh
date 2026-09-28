@@ -46,7 +46,7 @@ export async function backfillProgramPeople(env: { DB: D1Database }) {
   await env.DB.batch(statements);
 }
 
-const CORRECTIONS_MARKER = 'program-people-2026-09-v5';
+const CORRECTIONS_MARKER = 'program-people-2026-09-v6';
 const EPISODE_77_ID = 'drive-1i7sD0TJPpGZeyODR5_TM8UdiKSIrfPow';
 const EPISODE_88_ID = 'drive-1-d-Y4TFP0PJ7_yQzt5iisOAC8MsOy5ll';
 const VERIFIED_PROFILE_PHOTOS: Record<string, string> = {
@@ -58,7 +58,6 @@ const VERIFIED_PROFILE_PHOTOS: Record<string, string> = {
   'ירמי סלייטר': 'https://rosh-berosh.smwlyqswkwt232.workers.dev/api/program/profile-photo/yermi-slater',
   'מיכאל מלכיאלי': 'https://rosh-berosh.smwlyqswkwt232.workers.dev/api/program/profile-photo/michael-malkieli',
   'מנחם קולדצקי': 'https://rosh-berosh.smwlyqswkwt232.workers.dev/api/program/profile-photo/menachem-koldetzky',
-  'משה פלד': 'https://rosh-berosh.smwlyqswkwt232.workers.dev/api/program/profile-photo/moshe-feld',
   'משה קליין': 'https://rosh-berosh.smwlyqswkwt232.workers.dev/api/program/profile-photo/moshe-klein',
   'פיני איינהורן': 'https://rosh-berosh.smwlyqswkwt232.workers.dev/api/program/profile-photo/pini-einhorn',
   'רונן צור': 'https://rosh-berosh.smwlyqswkwt232.workers.dev/api/program/profile-photo/ronen-tzur',
@@ -129,6 +128,8 @@ function correctedGuestProfiles(raw: unknown) {
   }
   const shlomoGlick = merged.findIndex((item) => guestKey(item.name) === guestKey('שלמה גליק'));
   if (shlomoGlick >= 0) merged[shlomoGlick] = { ...merged[shlomoGlick], photo: '' };
+  const mosheFeld = merged.findIndex((item) => guestKey(item.name) === guestKey('משה פלד'));
+  if (mosheFeld >= 0) merged[mosheFeld] = { ...merged[mosheFeld], photo: '' };
   return merged;
 }
 
