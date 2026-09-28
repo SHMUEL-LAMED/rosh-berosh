@@ -108,7 +108,14 @@ function GuestEditor({ guest, guests, data, mutate, onMessage, onSelect }: { gue
     onMessage("האורח הוסר. הפרסום יעדכן את האתר.");
   };
   const addToEpisode = (id: string) => {
-    mutate((cur) => ({ ...cur, episodes: cur.episodes.map((e) => (e.id === id && !e.guests.some((g) => guestKey(g) === guest.key) ? { ...e, guests: [...e.guests, guest.name] } : e)) }));
+    const asPanelist = profile.role === "חבר פאנל";
+    mutate((cur) => ({ ...cur, episodes: cur.episodes.map((e) => {
+      if (e.id !== id) return e;
+      const target = asPanelist ? e.panelists : e.guests;
+      const other = asPanelist ? e.guests : e.panelists;
+      if (target.some((name) => guestKey(name) === guest.key) || other.some((name) => guestKey(name) === guest.key)) return e;
+      return asPanelist ? { ...e, panelists: [...e.panelists, guest.name] } : { ...e, guests: [...e.guests, guest.name] };
+    }) }));
     setAddTo("");
   };
   const pickPhoto = async (event: ChangeEvent<HTMLInputElement>) => {
