@@ -13,7 +13,7 @@ export const DEFAULT_HOSTS = [
   { name: "מיכאל לוי", role: "מייסד התוכנית", bio: "", photo: "", links: [], seasons: ["levi", "trio"], current: false },
   { name: "ארי וייזר", role: "מגיש בגרסת השלישייה", bio: "", photo: "", links: [], seasons: ["trio"], current: false },
   { name: "חיים וינר", role: "מגיש בגרסת השלישייה", bio: "", photo: "", links: [], seasons: ["trio"], current: false },
-  { name: "שלמה גולדברג", role: "מגיש ארכיון קו המכלול", bio: "", photo: "", links: [], seasons: ["legacy"], current: false },
+  { name: "שלמה גולדברג", role: "מייסד ראש בראש", bio: "", photo: "", links: [], seasons: ["legacy"], current: false },
 ];
 
 const clean = (value, max) => String(value ?? "").replace(/\r\n?/g, "\n").trim().slice(0, max);
