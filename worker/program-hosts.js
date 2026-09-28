@@ -9,7 +9,7 @@ export const HOST_LIMITS = { hosts: 20, name: 80, role: 80, bio: 2000, links: 6,
 /** מה שהאתר הציג עד היום בפסקה "מאחורי המיקרופון" — נקודת התחלה לעריכה בניהול */
 export const DEFAULT_HOSTS = [
   { name: "קובי בלום", role: "מגיש", bio: "", photo: "", links: [], seasons: ["slater", "levi", "trio"], current: true },
-  { name: "ירמי סלייטר", role: "מגיש", bio: "", photo: "", links: [], seasons: ["slater", "trio"], current: true },
+  { name: "ירמי סלייטר", role: "מגיש", bio: "", photo: "https://rosh-berosh.smwlyqswkwt232.workers.dev/api/program/profile-photo/yermi-slater", links: [], seasons: ["slater", "trio"], current: true },
   { name: "מיכאל לוי", role: "מייסד התוכנית", bio: "", photo: "", links: [], seasons: ["levi", "trio"], current: false },
   { name: "ארי וייזר", role: "מגיש בגרסת השלישייה", bio: "", photo: "", links: [], seasons: ["trio"], current: false },
   { name: "חיים וינר", role: "מגיש בגרסת השלישייה", bio: "", photo: "", links: [], seasons: ["trio"], current: false },
