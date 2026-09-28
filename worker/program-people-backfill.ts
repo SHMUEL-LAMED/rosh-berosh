@@ -97,7 +97,7 @@ function correctedHosts(raw: unknown) {
   if (!Array.isArray(raw) || raw.length === 0) return raw;
   const shlomo = DEFAULT_HOSTS.find((host) => host.name === 'שלמה גולדברג');
   const yirmi = DEFAULT_HOSTS.find((host) => host.name === 'ירמי סלייטר');
-  let list = raw
+  const list = raw
     .filter((host): host is Record<string, unknown> => !!host && typeof host === 'object' && !Array.isArray(host))
     .filter((host) => guestKey(host.name) !== guestKey('דודי זינגר'))
     .map((host) => {
