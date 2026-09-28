@@ -5,6 +5,7 @@ import { clearSessionCookie, createSession, destroySession, GOOGLE_CLIENT_ID, is
 import { adminApi } from "./admin";
 import { subscribersAdminApi } from "./subscribers-admin";
 import { ivrAdminApi } from "./ivr-admin";
+import { IVR_LINE_SETTINGS_PATH, lineSettingsAdminApi, lineSettingsForIvrResponse } from "./ivr-line-settings-api";
 import { ensureRuntimeSchema } from "./schema";
 import { deleteIvrAudioIfUnreferenced, readIvrPrompts, readIvrRecorders, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
@@ -423,6 +424,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const handled = await subscribersAdminApi(request, env);
     if (handled) return handled;
   }
+  if (url.pathname.startsWith("/api/admin/ivr-line-settings")) {
+    const handled = await lineSettingsAdminApi(request, env);
+    if (handled) return handled;
+  }
   if (url.pathname.startsWith("/api/admin/")) {
     const response = await adminApi(request, env);
     if (request.method !== "GET" && response.ok) invalidateCatalogCache(request, ctx);
@@ -433,6 +438,12 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (url.pathname === "/api/ivr/catalog" && request.method === "GET") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
     return cachedIvrCatalog(request, env, ctx);
+  }
+  // הגדרות הקו (מספר ההעברה, זמני ההמתנה והחזרות) שנקבעו במסך הניהול. השירות
+  // שומר אותן בזיכרון לדקה, ולכן הנתיב אינו עובר במטמון הקצה.
+  if (url.pathname === IVR_LINE_SETTINGS_PATH && request.method === "GET") {
+    if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+    return lineSettingsForIvrResponse(env);
   }
   // קו הניהול הטלפוני, כמו קו ההצבעה, אינו מריץ כאן את בניית הסכמה המלאה: היא
   // עשרות משפטים ברצף על מסד קר, וימות המשיח מנתקת לפני שהמנהל שומע תפריט.
