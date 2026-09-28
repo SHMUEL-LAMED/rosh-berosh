@@ -32,8 +32,11 @@ export async function backfillProgramPeople(env: { DB: D1Database }) {
   }
   const settings = (await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('hosts','guests')").all<{ key: string; value_json: string }>()).results;
   const values = new Map(settings.map((r) => { try { return [r.key, JSON.parse(r.value_json)]; } catch { return [r.key, null]; } }));
-  const hosts = Array.isArray(values.get('hosts')) ? values.get('hosts') as Array<{ name: string }> : [];
-  const newHosts = [...hosts, ...DEFAULT_HOSTS.filter((h) => !hosts.some((v) => guestKey(v.name) === guestKey(h.name)))];
+  const savedHosts = values.get('hosts');
+  const hosts = Array.isArray(savedHosts) ? savedHosts as Array<{ name: string }> : [];
+  // מערך ריק שנשמר בניהול הוא בחירה מפורשת להסתיר מגישים.
+  const newHosts = Array.isArray(savedHosts) && hosts.length === 0 ? hosts :
+    [...hosts, ...DEFAULT_HOSTS.filter((h) => !hosts.some((v) => guestKey(v.name) === guestKey(h.name)))];
   const guests = Array.isArray(values.get('guests')) ? values.get('guests') as Array<{ name: string }> : [];
   const newGuests = [...guests, ...SINGER_PROFILES.filter((g) => !guests.some((v) => guestKey(v.name) === guestKey(g.name)))];
   for (const [key, value] of [['hosts', newHosts], ['guests', newGuests]] as const) {
