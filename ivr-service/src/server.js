@@ -1,8 +1,9 @@
 const express = require("express");
 const { createHash } = require("crypto");
 const { YemotRouter } = require("yemot-router2");
-const { normalizePhone, phone, resolvePostVoteTransfer } = require("./phone");
-const { SEC_WAIT, TRANSFER_KEY, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput, transferOnEmptyEntry } = require("./menu-input");
+const { normalizePhone, phone } = require("./phone");
+const { TRANSFER_KEY, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput, transferOnEmptyEntry, votingReadOptions } = require("./menu-input");
+const { createLineSettingsLoader } = require("./line-settings");
 const { sanitizeProgress, restoreTiming, markStageDone } = require("./progress");
 const RECORDABLE_SYSTEM_PROMPTS = require("./ivr-system-prompts.json");
 const { ADMIN_SECTIONS, adminReadOptions, resolveAdminCode, sectionShortcut } = require("./admin-menu");
@@ -13,9 +14,6 @@ const RECORDINGS_YEMOT_TOKEN = String(process.env.RECORDINGS_YEMOT_TOKEN || "").
 const RECORDINGS_YEMOT_API_BASE = String(process.env.RECORDINGS_YEMOT_API_BASE || "https://www.call2all.co.il/ym/api").replace(/\/$/, "");
 const RECORDINGS_FOLDER = String(process.env.RECORDINGS_FOLDER || "").trim().replace(/\/$/, "");
 const PORT = process.env.PORT || 3000;
-// כל מי שמסיים בקו ההצבעה מועבר חזרה לקו הראשי: גם מי שהצביע עכשיו וגם מי
-// שכבר הצביע בעבר ושומע שוב את הודעת "כבר הצבעתם".
-const POST_VOTE_TRANSFER = resolvePostVoteTransfer(process.env.POST_VOTE_TRANSFER);
 const DEPLOYED_COMMIT = String(process.env.RENDER_GIT_COMMIT || "").trim();
 // האתר רץ על Cloudflare Workers מול D1, ובקשה ראשונה אחרי חוסר פעילות
 // יכולה לקחת יותר משמונה שניות. פסק זמן קצר מדי ניתק את המתקשר מיד.
@@ -31,11 +29,14 @@ if (!IVR_SECRET) { console.error("חסר IVR_SECRET"); process.exit(1); }
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
+// הגדרות הקו נטענות בתחילת שיחה, במקביל לקטלוג או לבדיקת ההרשאה. בקשה אחת
+// קצרה בלי ניסיונות חוזרים: אם האתר מתעכב, השיחה ממשיכה עם הערכים האחרונים.
+const LINE_SETTINGS_TIMEOUT_MS = 4000;
 
 async function api(path, options = {}) {
-  const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
+  const { timeoutMs = REQUEST_TIMEOUT_MS, retries: retryLimit, ...fetchOptions } = options;
   const method = String(fetchOptions.method || "GET").toUpperCase();
-  const retries = method === "GET" || method === "HEAD" ? MAX_RETRIES : 0;
+  const retries = retryLimit ?? (method === "GET" || method === "HEAD" ? MAX_RETRIES : 0);
   const logPath = new URL(path, "http://ivr.local").pathname;
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -58,6 +59,39 @@ async function api(path, options = {}) {
   throw lastError;
 }
 
+// ---------- הגדרות הקו ----------
+// מספר ההעברה, זמני ההמתנה ומספר החזרות נקבעים במסך הניהול באתר (ראו
+// line-settings.js לסדר העדיפות מול משתני הסביבה). כל שיחה מקבלת אותם פעם
+// אחת בתחילתה ושומרת אותם על אובייקט השיחה, כך ששינוי באמצע שיחה לא משנה
+// את התפריטים שהמתקשר כבר שומע.
+async function fetchLineSettings() {
+  let response, result;
+  try {
+    ({ response, result } = await api("/api/ivr/line-settings", { timeoutMs: LINE_SETTINGS_TIMEOUT_MS, retries: 0 }));
+  } catch (error) {
+    // אתר שעוד לא פרס את הנתיב עונה 404 בדף HTML. זו אינה תקלה: פשוט אין בו הגדרות.
+    if (/returned 404 /.test(error.message)) return null;
+    throw error;
+  }
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(result?.error || `line settings returned ${response.status}`);
+  return result?.settings || null;
+}
+
+const lineSettings = createLineSettingsLoader({
+  fetchSettings: fetchLineSettings,
+  onError: (error) => console.error("line settings request failed, keeping previous values:", error.message),
+});
+
+async function applyLineSettings(call) {
+  call.lineSettings = await lineSettings.get();
+  return call.lineSettings;
+}
+
+function settingsOf(call) {
+  return call?.lineSettings || lineSettings.peek();
+}
+
 function text(data) { return { type: "text", data }; }
 function number(data) { return { type: "digits", data: String(data) }; }
 function file(data) { return { type: "file", data }; }
@@ -75,19 +109,25 @@ function lines(...parts) {
 function keypad(label, code) {
   return [text(label), text("הקישו"), number(code)];
 }
-function finishCall(call) { return POST_VOTE_TRANSFER ? call.routing_yemot(POST_VOTE_TRANSFER) : call.hangup(); }
+// כל מי שמסיים בקו ההצבעה מועבר חזרה לקו הראשי: גם מי שהצביע עכשיו וגם מי
+// שכבר הצביע בעבר ושומע שוב את הודעת "כבר הצבעתם". בלי יעד (ההעברה כובתה
+// באתר או ב-POST_VOTE_TRANSFER=off) השיחה מסתיימת בניתוק.
+function finishCall(call) {
+  const target = settingsOf(call).postVoteTransfer;
+  return target ? call.routing_yemot(target) : call.hangup();
+}
 
 // הקשה על סולמית בכל תפריט בקו ההצבעה מעבירה לקו הראשי. תפריטי הניהול
 // בשלוחת ההקלטות אינם עוברים כאן בכוונה: שם הסולמית מסיימת הקשת מספר.
-function transferOnHash(options) {
-  return transferOnEmptyEntry(options, POST_VOTE_TRANSFER);
+function transferOnHash(call, options) {
+  return transferOnEmptyEntry(options, settingsOf(call).postVoteTransfer);
 }
 
 // routing_yemot זורק ExitError ומסיים את השיחה, ולכן אפשר לקרוא לזה גם
 // מעומק תפריט הבחירה בלי להחזיר ערך מיוחד דרך כל שרשרת הקריאות.
 function transferToLine(call, prompts) {
   call.id_list_message(prompt(prompts, "system:transferring", "מעבירים אתכם לקו הראשי"), { prependToNextAction: true });
-  return call.routing_yemot(POST_VOTE_TRANSFER);
+  return call.routing_yemot(settingsOf(call).postVoteTransfer);
 }
 
 // ימות המשיח מחזירה אותו ערך גם עבור סולמית וגם כאשר נגמר זמן ההמתנה בלי
@@ -97,7 +137,7 @@ async function confirmTransfer(call, prompts) {
   const answer = await call.read(
     prompt(prompts, "system:confirm_transfer", "להעברה לקו הראשי הקישו 1 לחזרה להצבעה הקישו 2"),
     "tap",
-    { min_digits: 1, max_digits: 1, digits_allowed: ["1", "2"], sec_wait: SEC_WAIT, typing_playback_mode: "No" },
+    votingReadOptions({ min_digits: 1, max_digits: 1, digits_allowed: ["1", "2"], typing_playback_mode: "No" }, settingsOf(call)),
   );
   if (answer !== "1") return false;
   transferToLine(call, prompts);
@@ -136,7 +176,7 @@ const KINDS_MISSING_DIGIT = new Set(["album", "song", "artist"]);
 
 async function chooseOne(call, messages, items, label, kind, prompts, menuPromptKey = "", allowFinish = false) {
   if (!items.length) return null;
-  const input = continuousMenuInput(items.length, allowFinish);
+  const input = continuousMenuInput(items.length, allowFinish, settingsOf(call));
   const full = [...messages];
   const continuousMenu = menuPromptKey ? prompts.get(menuPromptKey) : null;
   if (continuousMenu?.yemotPath) {
@@ -153,7 +193,7 @@ async function chooseOne(call, messages, items, label, kind, prompts, menuPrompt
       }
     });
   }
-  const answer = await call.read(full, "tap", transferOnHash(input.read));
+  const answer = await call.read(full, "tap", transferOnHash(call, input.read));
   if (answer === TRANSFER_KEY) {
     await confirmTransfer(call, prompts);
     return undefined;
@@ -228,12 +268,12 @@ async function adminChoice(call, intro, items) {
     if (back) messages.push(...keypad(back.label, 0));
     const digits = choices.map((item) => item.digit);
     if (back) digits.push(0);
-    const answer = await call.read(messages, "tap", menuReadOptions(digits));
+    const answer = await call.read(messages, "tap", menuReadOptions(digits, settingsOf(call)));
     return items.find((item) => String(item.digit) === String(answer)) || null;
   }
 
   // בקו הניהול מקישים את המספר הטבעי: פריט 1 הוא "1" ולא "01".
-  const input = naturalMenuInput(choices.length, Boolean(back));
+  const input = naturalMenuInput(choices.length, Boolean(back), settingsOf(call));
   const messages = lines(intro);
   choices.forEach((item, index) => messages.push(...keypad(item.label, input.code(index))));
   if (back) messages.push(...keypad(back.label, input.finishCode));
@@ -368,17 +408,16 @@ async function phoneAdminAction(callerPhone, action) {
 async function confirmAction(call, messages) {
   const content = Array.isArray(messages) ? [...messages] : lines(messages);
   content.push(...keypad("לאישור", 1), ...keypad("לביטול", 0));
-  const answer = await call.read(content, "tap", menuReadOptions([0, 1]));
+  const answer = await call.read(content, "tap", menuReadOptions([0, 1], settingsOf(call)));
   return String(answer) === "1";
 }
 
 async function readNumberWithHash(call, message, maxDigits = 2) {
-  const answer = await call.read([...lines(message), text("לסיום הקישו סולמית"), text("לביטול הקישו"), number(0), text("וסולמית")], "tap", {
+  const answer = await call.read([...lines(message), text("לסיום הקישו סולמית"), text("לביטול הקישו"), number(0), text("וסולמית")], "tap", votingReadOptions({
     min_digits: 1,
     max_digits: maxDigits,
-    sec_wait: SEC_WAIT,
     typing_playback_mode: "No",
-  });
+  }, settingsOf(call)));
   return String(answer || "");
 }
 
@@ -390,7 +429,7 @@ async function readNumberWithHash(call, message, maxDigits = 2) {
 async function speakBack(call, messages) {
   const content = Array.isArray(messages) ? [...messages] : lines(messages);
   content.push(...keypad("לחזרה", 0));
-  await call.read(content, "tap", menuReadOptions([0]));
+  await call.read(content, "tap", menuReadOptions([0], settingsOf(call)));
 }
 
 async function pickItem(call, intro, items, toLabel) {
@@ -925,7 +964,7 @@ async function readAdminCode(call, lead, section, { explain = false } = {}) {
     ADMIN_SECTIONS.forEach((sectionItem) => messages.push(...keypad(sectionItem.spoken || sectionItem.label, sectionShortcut(sectionItem))));
   }
   messages.push(...keypad("לסיום השיחה", "99"));
-  return String(await call.read(messages, "tap", adminReadOptions()) || "");
+  return String(await call.read(messages, "tap", adminReadOptions(settingsOf(call))) || "");
 }
 
 router.get("/recordings", async (call) => {
@@ -937,6 +976,7 @@ router.get("/recordings", async (call) => {
     call.id_list_message([text("לא ניתן לנהל ממספר חסוי נא להתקשר ממספר מזוהה")], { prependToNextAction: true });
     return call.hangup();
   }
+  const settingsReady = applyLineSettings(call);
   // תקלת רשת בבדיקת ההרשאה הפילה קודם את השיחה כולה דרך מטפל השגיאות הכללי,
   // ולכן הקו נשמע "לא עובד". מבדילים בין מספר שאינו מורשה לבין שרת שלא ענה.
   let access;
@@ -957,6 +997,7 @@ router.get("/recordings", async (call) => {
     return call.hangup();
   }
   clearAdminOverview(callerPhone);
+  await settingsReady;
 
   let lead = recordingConfigured()
     ? "ברוכים הבאים לקו הניהול והקלטת הקריינויות"
@@ -997,9 +1038,12 @@ router.get("/recordings", async (call) => {
 async function runVotingFlow(call, { preview = false, voterPhone = phone(call) } = {}) {
   // עד כאן כל תקלה - סוד לא תואם, שגיאת שרת או אתר שלא עונה - נשמעה למתקשר
   // בדיוק כמו "ההצבעה אינה פתוחה", והשיחה נותקה מיד בלי שום דרך לדעת מה קרה.
+  // הגדרות הקו נטענות במקביל לקטלוג ואינן מוסיפות המתנה לפני התפריט.
+  const settingsReady = applyLineSettings(call);
   let response, catalog;
   try {
     ({ response, result: catalog } = await api("/api/ivr/catalog"));
+    await settingsReady;
   } catch (error) {
     console.error("catalog request failed", error.message);
     return call.id_list_message([text("יש תקלה זמנית בחיבור למערכת ההצבעה נא לנסות שוב בעוד כמה דקות")]);
@@ -1170,7 +1214,7 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
       continue;
     }
     const fallback = "לבחירת אלבומים הקישו 1 לבחירת שירים מתוך האלבומים שבחרתם הקישו 2 לבחירת זמרים הקישו 3";
-    const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", transferOnHash({ min_digits: 1, max_digits: 1, digits_allowed: allowed, sec_wait: SEC_WAIT, typing_playback_mode: "No" }));
+    const answer = await call.read([...menuLead, ...prompt(prompts, "system:main_menu", fallback)], "tap", transferOnHash(call, votingReadOptions({ min_digits: 1, max_digits: 1, digits_allowed: allowed, typing_playback_mode: "No" }, settingsOf(call))));
     if (answer === TRANSFER_KEY) {
       await confirmTransfer(call, prompts);
       continue;
@@ -1221,7 +1265,7 @@ async function runVotingFlow(call, { preview = false, voterPhone = phone(call) }
     const answer = await call.read(
       [...review, ...prompt(prompts, "system:confirm_vote", "לאישור ההצבעה הקישו 1 לבדיקת הבחירות הקישו 2")],
       "tap",
-      { min_digits: 1, max_digits: 1, digits_allowed: ["1", "2"], sec_wait: SEC_WAIT, typing_playback_mode: "No" },
+      votingReadOptions({ min_digits: 1, max_digits: 1, digits_allowed: ["1", "2"], typing_playback_mode: "No" }, settingsOf(call)),
     );
     if (answer === "1") break;
     if (answer !== "2") continue;
@@ -1283,13 +1327,19 @@ app.get("/healthz", (_request, response) => {
 // "הקו לא עובד" אפשר לאבחן מכאן בלי להתקשר: כאן רואים אם האתר בכלל עונה,
 // אם הסוד המשותף מתקבל, ואם ההצבעה פתוחה.
 app.get("/diag", async (_request, response) => {
+  // הערכים שהקו משתמש בהם עכשיו, ולצד כל אחד מקורו: site (מסך הניהול), env
+  // (משתנה סביבה בשרת) או default.
+  const line = await lineSettings.get();
   const diagnosis = {
     site: SITE_API_BASE_URL,
     commit: DEPLOYED_COMMIT || null,
     commitShort: DEPLOYED_COMMIT ? DEPLOYED_COMMIT.slice(0, 7) : null,
-    secWait: SEC_WAIT,
+    secWait: line.votingWaitSeconds,
+    adminSecWait: line.adminWaitSeconds,
+    menuRepeats: line.menuRepeats,
     requestTimeoutMs: REQUEST_TIMEOUT_MS,
-    postVoteTransfer: POST_VOTE_TRANSFER || null,
+    postVoteTransfer: line.postVoteTransfer || null,
+    lineSettingsSources: line.sources,
   };
   try {
     const { response: siteResponse, result } = await api("/api/ivr/catalog");
@@ -1312,4 +1362,8 @@ app.get("/diag", async (_request, response) => {
   }
   response.json(diagnosis);
 });
-app.listen(PORT, () => console.log(`IVR listening on ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`IVR listening on ${PORT}`);
+  // טעינה ראשונה מיד בהפעלה, כדי שגם השיחה הראשונה לא תחכה להגדרות.
+  void lineSettings.refresh();
+});

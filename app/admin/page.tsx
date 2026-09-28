@@ -12,6 +12,7 @@ import { AnalyticsPanel } from "./analytics-panel";
 import { downloadResultsXlsx, downloadAllResultsXlsx } from "./xlsx-export";
 import systemPrompts from "../../ivr-service/src/ivr-system-prompts.json";
 import { PhonePreview } from "./phone-preview";
+import { IvrLineSettings } from "./ivr-line-settings";
 import { openEpisode, ProgramsAdmin, type ProgramSection } from "./programs-admin";
 import { InboxBoard, QuickSearch, useInbox, type SearchItem } from "./admin-home";
 import { AdminTour, FULL_TOUR, markTourSeen, SECTION_TITLES, SECTION_TOURS, SHORT_TOUR, sectionTour, TourChooser, tourSeen } from "./admin-tour";
@@ -316,6 +317,7 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
   };
   const orderPreview = (label: string, items: { id: string; name: string }[]) => <details className="prompt-order-details"><summary>הצגת סדר {label} להקלטה</summary><ol>{items.map((item, index) => <li key={item.id}><b>{itemCode(index, items.length)}.</b> {item.name}</li>)}</ol></details>;
   return <AdminSection title="קריינות הקו הטלפוני">
+    <IvrLineSettings onMessage={onMessage} />
     <div className={`connection-banner ${data.yemotConnected ? "connected" : "disconnected"}`}><b>{data.yemotConnected ? "החיבור לימות המשיח מוגדר" : "החיבור לימות המשיח עדיין לא מוגדר"}</b><span>{data.yemotConnected ? "קבצים חדשים יישלחו גם לקו." : "הקבצים נשמרים באתר בלבד עד להוספת YEMOT_TOKEN בסביבת Cloudflare."}</span></div>
     <p className="panel-help ivr-intro">המסך מחולק לפי סוג הקלטה. כל תפריט רציף נשמר בקובץ אחד בלבד — אלבומים, זמרים וגם שירי כל אלבום.</p>
     <div className="ivr-overview" aria-label="סיכום קריינויות"><span><b>1</b> קובץ לכל רשימה</span><span><b>{activeAlbums.length}</b> אלבומים פעילים</span><span><b>{activeArtists.length}</b> זמרים פעילים</span><span><b>{data.ivrRecorders?.length || 0}</b> מקליטים מורשים</span></div>

@@ -1,26 +1,42 @@
+const { resolveLineSettings, withMenuRepeats } = require("./line-settings");
+
+// ההגדרות לפי משתני הסביבה בלבד, כפי שהיו עד שנוספה ההגדרה מהאתר. כל פונקציה
+// כאן מקבלת את הגדרות השיחה (מהאתר, ראו line-settings.js) ונופלת לאלה כשלא
+// הועברו.
+const ENV_TIMING = resolveLineSettings(null, process.env);
+
 // כמה שניות ימות המשיח ממתינים להקשה לפני שהם מוותרים ומנתקים. ברירת המחדל
 // של המערכת היא 7 שניות, קצר מדי לתפריט שמקריא רשימה שלמה, ולכן המתקשר נותק
-// באמצע. אפשר לכוונן דרך IVR_SEC_WAIT.
-const SEC_WAIT = Math.min(Math.max(Number(process.env.IVR_SEC_WAIT) || 20, 7), 60);
+// באמצע. נקבע במסך הניהול באתר, ובלעדיו ב-IVR_SEC_WAIT (ברירת מחדל 20).
+const SEC_WAIT = ENV_TIMING.votingWaitSeconds;
 
-function menuReadOptions(digits) {
-  return {
+// תפריט של ספרה אחת. משמש גם את שאלות האישור והרשימות הקצרות בקו הניהול,
+// ולכן גם שם ההמתנה היא זו של תפריטי ההצבעה, כפי שהיה תמיד.
+function menuReadOptions(digits, timing = ENV_TIMING) {
+  return withMenuRepeats({
     min_digits: 1,
     max_digits: 1,
     digits_allowed: digits,
-    sec_wait: SEC_WAIT,
+    sec_wait: timing.votingWaitSeconds,
     typing_playback_mode: "No",
-  };
+  }, timing.menuRepeats);
+}
+
+// תפריט הקשה כללי בקו ההצבעה (תפריט השלבים, אישור ההצבעה, אישור ההעברה):
+// אותה המתנה ואותן חזרות כמו רשימות ההצבעה.
+function votingReadOptions(options, timing = ENV_TIMING) {
+  return withMenuRepeats({ ...options, sec_wait: timing.votingWaitSeconds }, timing.menuRepeats);
 }
 
 // אחרי הקשה ראשונה הקו ממתין רק את הזמן הזה כדי לראות אם באה עוד ספרה, וכך
-// אפשר להקיש 1 ולא 01. סולמית מסיימת מיד. אפשר לכוונן דרך IVR_MENU_SEC_WAIT.
-const MENU_SEC_WAIT = Math.min(Math.max(Number(process.env.IVR_MENU_SEC_WAIT) || 5, 2), 20);
+// אפשר להקיש 1 ולא 01. סולמית מסיימת מיד. נקבע במסך הניהול באתר, ובלעדיו
+// ב-IVR_MENU_SEC_WAIT (ברירת מחדל 5).
+const MENU_SEC_WAIT = ENV_TIMING.adminWaitSeconds;
 
 // תפריטי קו הניהול: המספר נאמר ומוקש כמספר טבעי, בלי ריפוד באפסים. בקו
 // ההצבעה נשאר אורך קבוע, כי הקריינויות המוקלטות של התפריטים אומרות את
 // הקודים המרופדים ("הקישו אפס אחת"), והחלפה כאן הייתה סותרת אותן.
-function naturalMenuInput(itemCount, allowFinish = false) {
+function naturalMenuInput(itemCount, allowFinish = false, timing = ENV_TIMING) {
   const width = String(itemCount).length;
   const digitsAllowed = Array.from({ length: itemCount }, (_, index) => String(index + 1));
   if (allowFinish) digitsAllowed.unshift("0");
@@ -28,13 +44,13 @@ function naturalMenuInput(itemCount, allowFinish = false) {
     width,
     finishCode: "0",
     code: (index) => String(index + 1),
-    read: {
+    read: withMenuRepeats({
       min_digits: 1,
       max_digits: width,
       digits_allowed: digitsAllowed,
-      sec_wait: MENU_SEC_WAIT,
+      sec_wait: timing.adminWaitSeconds,
       typing_playback_mode: "No",
-    },
+    }, timing.menuRepeats),
   };
 }
 
@@ -46,7 +62,7 @@ function menuCode(index, width) {
   return String(index + 1).padStart(width, "0");
 }
 
-function continuousMenuInput(itemCount, allowFinish = false) {
+function continuousMenuInput(itemCount, allowFinish = false, timing = ENV_TIMING) {
   const width = menuCodeWidth(itemCount);
   const finishCode = "0".repeat(width);
   const digitsAllowed = Array.from({ length: itemCount }, (_, index) => menuCode(index, width));
@@ -54,13 +70,13 @@ function continuousMenuInput(itemCount, allowFinish = false) {
   return {
     width,
     finishCode,
-    read: {
+    read: withMenuRepeats({
       min_digits: width,
       max_digits: width,
       digits_allowed: digitsAllowed,
-      sec_wait: SEC_WAIT,
+      sec_wait: timing.votingWaitSeconds,
       typing_playback_mode: "No",
-    },
+    }, timing.menuRepeats),
   };
 }
 
@@ -76,4 +92,4 @@ function transferOnEmptyEntry(options, transferTarget) {
   return transferTarget ? { ...options, allow_empty: true, empty_val: TRANSFER_KEY } : options;
 }
 
-module.exports = { MENU_SEC_WAIT, SEC_WAIT, TRANSFER_KEY, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput, transferOnEmptyEntry };
+module.exports = { ENV_TIMING, MENU_SEC_WAIT, SEC_WAIT, TRANSFER_KEY, continuousMenuInput, menuCode, menuCodeWidth, menuReadOptions, naturalMenuInput, transferOnEmptyEntry, votingReadOptions };

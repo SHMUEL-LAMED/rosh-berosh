@@ -112,7 +112,8 @@ const ADMIN_SECTIONS = [
   },
 ];
 
-const { MENU_SEC_WAIT } = require("./menu-input");
+const { ENV_TIMING } = require("./menu-input");
+const { withMenuRepeats } = require("./line-settings");
 
 const MAIN_MENU_CODE = "00";
 const HANGUP_CODE = "99";
@@ -144,8 +145,9 @@ function adminShortcuts() {
   return ADMIN_SECTIONS.map(sectionShortcut);
 }
 
-function adminReadOptions() {
-  return { min_digits: 1, max_digits: 2, digits_allowed: [...adminShortcuts(), ...adminCodes()], sec_wait: MENU_SEC_WAIT, typing_playback_mode: "No" };
+// `timing` הן הגדרות השיחה (מהאתר, ראו line-settings.js); בלעדיהן משתני הסביבה.
+function adminReadOptions(timing = ENV_TIMING) {
+  return withMenuRepeats({ min_digits: 1, max_digits: 2, digits_allowed: [...adminShortcuts(), ...adminCodes()], sec_wait: timing.adminWaitSeconds, typing_playback_mode: "No" }, timing.menuRepeats);
 }
 
 // ניתוב הקוד שהוקש: נושא, פעולה, חזרה לתפריט הראשי או סיום שיחה.
