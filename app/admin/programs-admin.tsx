@@ -23,6 +23,7 @@ import { GuestsSection } from "./programs-guests";
 import { HostsSection } from "./programs-hosts";
 import { PollsSection } from "./programs-polls";
 import { withPolls } from "../../worker/program-polls-shared.js";
+import { withPublishedPhotos } from "../../worker/program-guests.js";
 
 export type ProgramSection = "programs" | "guests" | "ads" | "site" | "polls" | "listeners" | "publish";
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
@@ -75,7 +76,10 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
         if (!active) return;
         const pub = normCatalog(published);
         base.current = draft?.data && draft.data.baseVersion !== undefined ? draft.data.baseVersion ?? null : published.versionId ?? null;
-        const loaded = draft?.data ? normCatalog(draft.data) : pub;
+        // טיוטה שאינה מכירה תמונות פרופיל שכבר באתר (נשמרה לפני שנוספו, או מלשונית שנפתחה לפני כן) ממשיכה איתן —
+        // כדי שהניהול יציג אותן והפרסום מכאן לא ימחק אותן. השרת משלים אותן גם בטיוטה שהוא מחזיר; כאן גם מול הקטלוג
+        // שנטען עכשיו, כי ההכנות החד־פעמיות רצות בבקשת הקטלוג, במקביל לבקשת הטיוטה.
+        const loaded = withPublishedPhotos(draft?.data ? normCatalog(draft.data) : pub, pub.settings.guests) as Catalog;
         // טיוטה ישנה בלי הסקרים ממשיכה עם הסקרים שבאתר — כדי שהשמירה והפרסום מכאן לא יאבדו אותם
         const next = { ...loaded, settings: withPolls(loaded.settings, pub.settings.polls) };
         dataRef.current = next;

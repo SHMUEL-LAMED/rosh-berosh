@@ -38,6 +38,50 @@ export function normalizeGuests(raw) {
   return out;
 }
 
+/** טיוטה מול הפרופילים שבאתר: תמונה שכבר מפורסמת אינה נעלמת בגלל טיוטה שאינה מכירה אותה.
+    טיוטה שנשמרה לפני שנוספו התמונות (או מלשונית שנפתחה לפני כן) מחזיקה פרופילים בלי `photo` —
+    בניהול נראה כאילו אין תמונות, והפרסום הבא ממנה היה מוחק אותן מהאתר. לכן:
+    פרופיל בטיוטה בלי תמונה מקבל את התמונה של אותו אורח מהפרופילים המפורסמים (`published`), ואורח
+    שמופיע בתוכניות שבטיוטה ואין לו בה פרופיל בכלל מקבל את הפרופיל המפורסם כמו שהוא. אורח שהוסר
+    מהתוכניות אינו חוזר; טיוטה בלי `settings` (פרסום שלה אינו נוגע בהגדרות) נשארת כמו שהיא.
+    תמונה שהוסרה בטיוטה מתפרסמת כהסרה ב"פרסום"; עד אז, טעינה מחדש מחזירה אותה.
+    מחזירה את אותו אובייקט כשאין מה להשלים. */
+export function withPublishedPhotos(data, published) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const settings = data.settings;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return data;
+  const photos = new Map();
+  for (const profile of Array.isArray(published) ? published : []) {
+    if (!profile || typeof profile !== "object") continue;
+    const key = guestKey(profile.name), photo = String(profile.photo ?? "").trim();
+    if (key && photo && !photos.has(key)) photos.set(key, { ...profile, photo });
+  }
+  if (!photos.size) return data;
+  const have = new Set();
+  let changed = false;
+  const guests = (Array.isArray(settings.guests) ? settings.guests : []).map((profile) => {
+    if (!profile || typeof profile !== "object" || Array.isArray(profile)) return profile;
+    const key = guestKey(profile.name);
+    have.add(key);
+    if (String(profile.photo ?? "").trim() || !photos.has(key)) return profile;
+    changed = true;
+    return { ...profile, photo: photos.get(key).photo };
+  });
+  const inEpisodes = new Set();
+  for (const episode of Array.isArray(data.episodes) ? data.episodes : []) {
+    for (const raw of [...(Array.isArray(episode?.guests) ? episode.guests : []), ...(Array.isArray(episode?.panelists) ? episode.panelists : [])]) {
+      const key = guestKey(raw);
+      if (key) inEpisodes.add(key);
+    }
+  }
+  for (const [key, profile] of photos) {
+    if (have.has(key) || !inEpisodes.has(key)) continue;
+    guests.push(profile);
+    changed = true;
+  }
+  return changed ? { ...data, settings: { ...settings, guests } } : data;
+}
+
 /** כל האורחים בקטלוג (כולל תוכניות מוסתרות — זה בשביל הניהול), עם הכתיב הנפוץ ביותר. */
 export function collectGuests(episodes, profiles = []) {
   const map = new Map();
