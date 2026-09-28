@@ -38,7 +38,7 @@ const PROFILE_PHOTO_SOURCES: Record<string, string> = {
   "yermi-slater": "https://www.emess.co.il/resize/?width=800&height=450&url=/uploads/2025/02/%D7%99%D7%A8%D7%9E%D7%99-%D7%A1%D7%9C%D7%99%D7%99%D7%98%D7%A8-%D7%94%D7%A7%D7%95%D7%9C-%D7%94%D7%97%D7%93%D7%A9.png",
   "michael-malkieli": "https://storage.bhol.co.il/articles/153885_tumb_800X480.jpg",
   "menachem-koldetzky": "https://secure.gravatar.com/avatar/cc0a0a85cbd29a3813e291ee85b9253e6f0f8e4932bbf19781ddcc27890bc3e9?s=500&d=mm&r=g",
-  "moshe-feld": "https://www.hamichlol.org.il/w/upload/michlol/thumb/b/b3/%D7%A6%D7%99%D7%9C%D7%95%D7%9D_-_%D7%93%D7%A0%D7%99%D7%90%D7%9C_%D7%90%D7%9C%D7%A1%D7%98%D7%A8.jpg/250px-%D7%A6%D7%99%D7%9C%D7%95%D7%9D_-_%D7%93%D7%A0%D7%99%D7%90%D7%9C_%D7%90%D7%9C%D7%A1%D7%98%D7%A8.jpg",
+  "moshe-feld": "https://hngn.co.il/server/api/images/singers/%D7%9E%D7%A9%D7%94%20%D7%A4%D7%9C%D7%93.png",
   "moshe-klein": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/%D7%9E%D7%A9%D7%94_%D7%A7%D7%9C%D7%99%D7%99%D7%9F_%28%D7%96%D7%9E%D7%A8%29.JPG/500px-%D7%9E%D7%A9%D7%94_%D7%A7%D7%9C%D7%99%D7%99%D7%9F_%28%D7%96%D7%9E%D7%A8%29.JPG",
   "pini-einhorn": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/%D7%A4%D7%99%D7%A0%D7%99_%D7%91%D7%AA%D7%A4%D7%99%D7%9C%D7%94.jpg/500px-%D7%A4%D7%99%D7%A0%D7%99_%D7%91%D7%AA%D7%A4%D7%99%D7%9C%D7%94.jpg",
   "ronen-tzur": "https://upload.wikimedia.org/wikipedia/commons/b/bf/Ronen_Tzur_%28cropped%29.png",
