@@ -222,3 +222,11 @@
 .prog-ad-submit button{padding:11px 16px;border:0;border-radius:10px;background:#b58a31;color:#fff;font-weight:850;white-space:nowrap}
 .prog-ad-done{margin-top:20px;padding:20px;border:1px solid #9dccac;border-radius:13px;background:#f0faf3}.prog-ad-done strong{color:#136044}.prog-ad-done p{line-height:1.5}
 @media(max-width:800px){.prog-ad-layout{grid-template-columns:1fr}.prog-ad-programs{border-left:0;border-bottom:1px solid #e9e1d1}.prog-ad-program-list{display:flex;overflow:auto;max-height:none}.prog-ad-program-list button{min-width:160px;width:auto}.prog-ad-workspace{padding:18px 15px 90px}.prog-ad-heading{padding:18px 15px;flex-wrap:wrap}.prog-ad-boundaries{grid-template-columns:1fr}.prog-ad-submit{margin:20px -15px -90px;padding:12px 15px;flex-wrap:wrap}.prog-ad-submit button{width:100%}}
+/* המגישים (programs-hosts.tsx) */
+.host-list{display:grid;gap:8px;margin:10px 0 14px}
+.host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px;border:1px solid #e5dccb;border-radius:14px;background:#fffdf8}
+.host-row.open{border-color:#c49a2e}
+.host-row-head{display:flex;align-items:center;gap:12px;min-width:0;padding:4px;border:0;background:none;font:inherit;text-align:start;cursor:pointer}
+.host-row-head span{display:grid;gap:2px;min-width:0;flex:1}.host-row-head small{color:var(--muted);font-size:12px}
+.host-row-head i{font-style:normal;color:var(--muted)}
+.host-editor{grid-column:1/-1;display:grid;gap:14px;padding:8px 4px 4px;border-top:1px solid #efe6d4}

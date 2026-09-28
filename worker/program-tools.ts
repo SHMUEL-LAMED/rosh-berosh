@@ -11,6 +11,7 @@ import { israelHour, isPublic, israelWallClock } from "./program-schedule.js";
 import { loadEpisode } from "./program-audio";
 import { normalizePolls, publicPolls } from "./program-polls";
 import { normalizeGuests } from "./program-guests.js";
+import { normalizeHosts, publicHosts } from "./program-hosts.js";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
 type Helpers = {
@@ -116,9 +117,9 @@ export async function activeSurveyStatus(env: Env, origin: string) {
 
 /** מה מתפרסם לציבור יחד עם הקטלוג. הסקרים: לציבור רק הפעילים שכבר התחילו; מנהלים (includeHidden) — כולם. */
 export async function publicSettings(env: Env, origin = "", includeHidden = false) {
-  const rows = await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates','contacts','polls','guests')").all<{ key: string; value_json: string }>();
+  const rows = await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates','contacts','polls','guests','hosts')").all<{ key: string; value_json: string }>();
   const values = new Map(rows.results.map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
-  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), contacts: normalizeContacts(values.get("contacts")), polls: publicPolls(normalizePolls(values.get("polls")), includeHidden), guests: normalizeGuests(values.get("guests")), survey: await activeSurveyStatus(env, origin) };
+  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), contacts: normalizeContacts(values.get("contacts")), polls: publicPolls(normalizePolls(values.get("polls")), includeHidden), guests: normalizeGuests(values.get("guests")), hosts: publicHosts(values.get("hosts")), survey: await activeSurveyStatus(env, origin) };
 }
 
 /** משפטי הכתיבה של ההגדרות שהגיעו עם פרסום הקטלוג. */
@@ -130,6 +131,8 @@ export function settingsStatements(env: Env, raw: unknown) {
   if ("contacts" in settings) statements.push(settingStatement(env, "contacts", normalizeContacts(settings.contacts)));
   if ("polls" in settings) statements.push(settingStatement(env, "polls", normalizePolls(settings.polls)));
   if ("guests" in settings) statements.push(settingStatement(env, "guests", normalizeGuests(settings.guests)));
+  // רשימת מגישים שנשלחה (גם ריקה — "בלי מגישים באתר") נשמרת; שדה שאינו מערך לא משנה כלום
+  if ("hosts" in settings && Array.isArray(settings.hosts)) statements.push(settingStatement(env, "hosts", normalizeHosts(settings.hosts)));
   return statements;
 }
 

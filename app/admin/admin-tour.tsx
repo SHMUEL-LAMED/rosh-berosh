@@ -82,7 +82,7 @@ export const SECTION_TOURS: Record<string, TourStep[]> = {
   ],
 };
 
-export const SECTION_TITLES: Record<string, string> = { "prog-programs": "התוכניות", "prog-guests": "האורחים", "prog-ads": "ניקוי הפרסומות", "prog-site": "ההודעות לאתר", "prog-listeners": "המאזינים", "prog-publish": "הפרסום" };
+export const SECTION_TITLES: Record<string, string> = { "prog-programs": "התוכניות", "prog-guests": "המגישים והאורחים", "prog-ads": "ניקוי הפרסומות", "prog-site": "ההודעות לאתר", "prog-listeners": "המאזינים", "prog-publish": "הפרסום" };
 
 /** הסבר על חלק אחד (הכפתור „?”) */
 export function sectionTour(tab: string): TourStep[] {

@@ -20,6 +20,7 @@ import { ProgramsAds } from "./programs-ads";
 import { CommentsCard, commentsError, CountSettings, DeepStats, EpisodeTable, minutesText, PushCard } from "./programs-listeners";
 import { runJob, stopJob, useJob } from "./programs-jobs";
 import { GuestsSection } from "./programs-guests";
+import { HostsSection } from "./programs-hosts";
 
 export type ProgramSection = "programs" | "guests" | "ads" | "site" | "listeners" | "publish";
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
@@ -106,7 +107,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   return <div className="prog-admin">
     {statusBar}
     {section === "programs" && <ProgramsSection {...common} surveys={surveys} selected={selected} onSelect={setSelected} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} />}
-    {section === "guests" && <GuestsSection data={data} mutate={mutate} onMessage={onMessage} />}
+    {section === "guests" && <><HostsSection data={data} mutate={mutate} onMessage={onMessage} /><GuestsSection data={data} mutate={mutate} onMessage={onMessage} /></>}
     {section === "ads" && <ProgramsAds episodes={data.episodes} patchEpisode={patchEpisode} onMessage={onMessage} />}
     {section === "site" && <SiteSection {...common} />}
     {section === "listeners" && <ListenersSection data={data} onMessage={onMessage} />}
