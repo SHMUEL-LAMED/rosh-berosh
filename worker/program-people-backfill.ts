@@ -51,13 +51,18 @@ const EPISODE_77_ID = 'drive-1i7sD0TJPpGZeyODR5_TM8UdiKSIrfPow';
 const EPISODE_88_ID = 'drive-1-d-Y4TFP0PJ7_yQzt5iisOAC8MsOy5ll';
 const VERIFIED_PROFILE_PHOTOS: Record<string, string> = {
   'אלחנן ענבל': 'https://www.emess.co.il/upload/pictures/16/16674.jpg',
-  'גיא מרוז': 'https://www.kan.org.il/media/ehnpf3ly/%D7%9C%D7%99%D7%90%D7%95%D7%A8%D7%A8%D7%A8.jpg?height=630&rmode=pad&width=1200',
+  'גיא מרוז': 'https://upload.wikimedia.org/wikipedia/commons/8/87/Meroz.JPG',
+  'דודי זינגר': 'https://img.youtube.com/vi/Pz3iC9Qz23w/maxresdefault.jpg',
   'יהודה בורן': 'https://www.emess.co.il/resize/?height=0&url=%2Fuploads%2F2025%2F02%2F%D7%99%D7%94%D7%95%D7%93%D7%94-%D7%91%D7%95%D7%A8%D7%9F-%D7%94%D7%A7%D7%95%D7%9C-%D7%94%D7%97%D7%93%D7%A9.png&width=800',
+  'יוסי שטארק': 'https://secure.gravatar.com/avatar/1e028649e67f73e8d264623da9b79899db7e31c7d49132d302c7fcb8735553ee?s=500&d=mm&r=g',
+  'ירמי סלייטר': 'https://www.emess.co.il/resize/?width=800&height=450&url=/uploads/2025/02/ירמי-סלייטר-הקול-החדש.png',
   'מיכאל מלכיאלי': 'https://storage.bhol.co.il/articles/153885_tumb_800X480.jpg',
-  'משה פלד': 'https://static.tickchak.co.il/all/liveNew_090TQkp2RmN1U0IXWoJjUBp2cyd2a5c1Ku_k90TQpNjRCVlYGZWMvg1VSdmQIt2StFmR.jpeg_1465b436-6168-4fdb-98ea-b0f1492c5673.jpeg',
-  'משה קליין': 'https://media.kore.co.il/articles/71813_tumb_800X480.jpg',
-  'פיני איינהורן': 'https://images.babli.co.il/2026/02/22/6af67360-0ff0-11f1-9096-adc0e27576ae__h1066_w1600.jpeg',
-  'רונן צור': 'https://image-resizer.walla.cloud/image/2025/8/4/images/1756055590591_picture_1253x1600.webp',
+  'מנחם קולדצקי': 'https://secure.gravatar.com/avatar/cc0a0a85cbd29a3813e291ee85b9253e6f0f8e4932bbf19781ddcc27890bc3e9?s=500&d=mm&r=g',
+  'משה פלד': 'https://www.hamichlol.org.il/w/upload/michlol/thumb/b/b3/%D7%A6%D7%99%D7%9C%D7%95%D7%9D_-_%D7%93%D7%A0%D7%99%D7%90%D7%9C_%D7%90%D7%9C%D7%A1%D7%98%D7%A8.jpg/250px-%D7%A6%D7%99%D7%9C%D7%95%D7%9D_-_%D7%93%D7%A0%D7%99%D7%90%D7%9C_%D7%90%D7%9C%D7%A1%D7%98%D7%A8.jpg',
+  'משה קליין': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/%D7%9E%D7%A9%D7%94_%D7%A7%D7%9C%D7%99%D7%99%D7%9F_%28%D7%96%D7%9E%D7%A8%29.JPG/500px-%D7%9E%D7%A9%D7%94_%D7%A7%D7%9C%D7%99%D7%99%D7%9F_%28%D7%96%D7%9E%D7%A8%29.JPG',
+  'פיני איינהורן': 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/%D7%A4%D7%99%D7%A0%D7%99_%D7%91%D7%AA%D7%A4%D7%99%D7%9C%D7%94.jpg/500px-%D7%A4%D7%99%D7%A0%D7%99_%D7%91%D7%AA%D7%A4%D7%99%D7%9C%D7%94.jpg',
+  'רונן צור': 'https://upload.wikimedia.org/wikipedia/commons/b/bf/Ronen_Tzur_%28cropped%29.png',
+  'שלמה גליק': 'https://bucket1.mit4mit.co.il/uploads/biz/93323/pic/cover/cover.webp?v=3',
 };
 
 /** הסימונים של שתי ההכנות — כשהם במסד, אין צורך להריץ אותן */
