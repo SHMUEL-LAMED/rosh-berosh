@@ -45,3 +45,53 @@ export async function backfillProgramPeople(env: { DB: D1Database }) {
   statements.push(env.DB.prepare('INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES (?,?,unixepoch())').bind(MARKER, JSON.stringify({ at: new Date().toISOString(), episodes: statements.length - 2 })));
   await env.DB.batch(statements);
 }
+
+const CORRECTIONS_MARKER = 'program-people-2026-09-v2';
+
+/** תיקונים שקבע בעל התוכנית: תפקיד מדויק, בלי להמציא הופעה בפרק שלא תועדה. */
+export async function correctProgramPeople(env: { DB: D1Database }) {
+  if (await env.DB.prepare('SELECT 1 FROM program_settings WHERE key=?').bind(CORRECTIONS_MARKER).first()) return;
+  const rows = (await env.DB.prepare('SELECT id,number,data_json FROM program_episodes').all<{ id: string; number: number | null; data_json: string }>()).results;
+  const statements: D1PreparedStatement[] = [];
+  for (const row of rows) {
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(row.data_json); } catch { continue; }
+    const guests = Array.isArray(e.guests) ? e.guests.filter((g): g is string => typeof g === 'string' && guestKey(g) !== guestKey('קובי בלום')) : [];
+    const next = { ...e, guests };
+    if (e.season === 'legacy' && Number.isInteger(row.number)) next.hosts = ['שלמה גולדברג'];
+    if (row.number === 77) {
+      next.hosts = ['מיכאל לוי', 'קובי בלום'];
+      next.guests = guests.filter((g) => guestKey(g) !== guestKey('מיכאל לוי'));
+      next.panelists = [...new Set([...(Array.isArray(e.panelists) ? e.panelists : []), 'דודי זינגר'])];
+    }
+    if (row.number === 88) {
+      next.guests = guests.filter((g) => guestKey(g) !== guestKey('יאיר שטיין'));
+      next.panelists = [...new Set([...(Array.isArray(e.panelists) ? e.panelists : []), 'יאיר שטיין'])];
+    }
+    if (JSON.stringify(next) !== row.data_json) statements.push(env.DB.prepare('UPDATE program_episodes SET data_json=?,updated_at=unixepoch() WHERE id=?').bind(JSON.stringify(next), row.id));
+  }
+  const settings = (await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('hosts','guests')").all<{ key: string; value_json: string }>()).results;
+  const values = new Map(settings.map((r) => { try { return [r.key, JSON.parse(r.value_json)]; } catch { return [r.key, null]; } }));
+  const savedHosts = values.get('hosts');
+  if (Array.isArray(savedHosts) && savedHosts.length) {
+    const withoutDudi = savedHosts.filter((h) => guestKey(h?.name) !== guestKey('דודי זינגר'));
+    const shlomo = DEFAULT_HOSTS.find((h) => h.name === 'שלמה גולדברג');
+    if (shlomo && !withoutDudi.some((h) => guestKey(h?.name) === guestKey(shlomo.name))) withoutDudi.push(shlomo);
+    statements.push(env.DB.prepare("UPDATE program_settings SET value_json=?,updated_at=unixepoch() WHERE key='hosts'").bind(JSON.stringify(withoutDudi)));
+  }
+  const guestProfiles = Array.isArray(values.get('guests')) ? values.get('guests') as Array<{ name: string; role?: string; bio?: string }> : [];
+  const panelistProfiles = [
+    { name: 'דודי זינגר', role: 'חבר פאנל', bio: 'השתתף בפאנל התוכנית.' },
+    { name: 'יאיר שטיין', role: 'חבר פאנל', bio: 'חבר המערכת; השתתף בסקירת המופעים בפרק 88.' },
+    { name: 'יוסי קאהן', role: 'חבר פאנל', bio: '' },
+  ];
+  const merged = [...guestProfiles];
+  for (const profile of panelistProfiles) {
+    const idx = merged.findIndex((g) => guestKey(g.name) === guestKey(profile.name));
+    if (idx < 0) merged.push(profile);
+    else merged[idx] = { ...merged[idx], role: profile.role };
+  }
+  statements.push(env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('guests',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(merged)));
+  statements.push(env.DB.prepare('INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES (?,?,unixepoch())').bind(CORRECTIONS_MARKER, JSON.stringify({ at: new Date().toISOString() })));
+  await env.DB.batch(statements);
+}
