@@ -29,6 +29,9 @@ interface Env {
   // Workers AI (תמלול וסיכום של תוכניות) ומפתח Claude אופציונלי לסיכומים
   AI?: AiBinding;
   ANTHROPIC_API_KEY?: string;
+  // בניית אתר התוכניות עכשיו (GitHub Actions של rosh-berosh-2) — טוקן עם Actions: Read and write
+  GITHUB_TOKEN?: string;
+  PROGRAM_SITE_REPO?: string;
   IMAGES: { input(stream: ReadableStream): { transform(options: Record<string, unknown>): { output(options: { format: string; quality: number }): Promise<{ response(): Response }> } } };
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }

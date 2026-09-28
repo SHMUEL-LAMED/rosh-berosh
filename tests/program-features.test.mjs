@@ -957,3 +957,101 @@ test("uploads say what is wrong, with the same limits in the single and the mult
   assert.deepEqual(await error(await start("episode=ep-1&kind=cover", { contentType: "image/png", size: 16 * 1024 * 1024 })), [400, "התמונה גדולה מ־15MB."]);
   assert.deepEqual(await error(await single("episode=ep-1&kind=audio", "audio/mpeg", 2 * 1024 ** 3)), [400, "הקובץ גדול מ־1GB."]);
 });
+
+test("publishing only one episode leaves the other episodes, the settings and the shared draft as they were", async () => {
+  const { call, admin, db } = await setup();
+  const first = await (await publish(call, admin, [episode("ep-a", { featured: true }), episode("ep-b")], { seasons: [{ id: "s1", title: "עונה א" }], settings: { banner: { text: "הודעה", until: "" } } })).json();
+  const draft = await call("/api/program/draft", { method: "PUT", token: admin, body: { data: { seasons: [], episodes: [episode("ep-a", { title: "טיוטה" })], baseVersion: first.versionId } } });
+  assert.equal(draft.status, 200, await draft.clone().text());
+
+  const one = await publish(call, admin, [episode("ep-c", { featured: true, season: "s2" }), episode("ep-a", { featured: false })], { partial: true, seasons: [{ id: "s1", title: "עונה א" }, { id: "s2", title: "עונה ב" }], baseVersion: first.versionId });
+  assert.equal(one.status, 200, await one.clone().text());
+  const result = await one.json();
+  assert.equal(result.partial, true);
+
+  const before = db.prepare("SELECT COUNT(*) AS n FROM program_episodes").get().n;
+  const live = await (await call("/api/program/catalog", { token: admin })).json();
+  const byId = new Map(live.episodes.map((item) => [item.id, item]));
+  assert.ok(["ep-a", "ep-b", "ep-c"].every((id) => byId.has(id)), "the other episode is untouched");
+  assert.equal(live.episodes.length, before, "nothing is removed by a partial publish");
+  assert.equal(byId.get("ep-c").featured, true);
+  assert.equal(byId.get("ep-a").featured, false, "only one featured episode after publishing a new featured one");
+  assert.equal(byId.get("ep-a").title, "תוכנית ep-a", "the draft's edits to another episode did not go live");
+  assert.equal(live.settings.banner.text, "הודעה", "settings are not touched by a partial publish");
+  assert.equal(live.seasons.length, 2);
+  assert.equal(live.versionId, result.versionId);
+
+  const kept = await (await call("/api/program/draft", { token: admin })).json();
+  assert.equal(kept.draft?.data?.episodes?.[0]?.title, "טיוטה", "the shared draft survives a partial publish");
+
+  // הגרסה שנשמרה מחזיקה את כל הקטלוג, לא רק את התוכנית שנשלחה
+  const version = JSON.parse(db.prepare("SELECT data_json FROM program_versions WHERE id=?").get(result.versionId).data_json);
+  assert.equal(version.episodes.length, before, "the saved version holds the whole catalog");
+  assert.ok(["ep-a", "ep-b", "ep-c"].every((id) => version.episodes.some((item) => item.id === id)));
+  assert.equal(version.settings.banner.text, "הודעה");
+
+  // פרסום מלא אחרי הפרסום החלקי עדיין מוחק את הטיוטה כרגיל
+  const full = await publish(call, admin, [episode("ep-a"), episode("ep-b"), episode("ep-c")], { baseVersion: result.versionId });
+  assert.equal(full.status, 200, await full.clone().text());
+  assert.equal((await (await call("/api/program/draft", { token: admin })).json()).draft, null);
+});
+
+test("a partial publish must name episodes and cannot remove anything", async () => {
+  const { call, admin } = await setup();
+  for (const body of [{ partial: true, episodes: [] }, { partial: true, episodes: [episode("x")], removedIds: ["y"] }, { partial: true }]) {
+    const response = await call("/api/program/catalog", { method: "POST", token: admin, body });
+    assert.equal(response.status, 400, JSON.stringify(body));
+  }
+});
+
+test("the site build endpoint is admin-only, explains a missing token, and dispatches the Pages workflow", async () => {
+  const { call, admin, voter, env } = await setup();
+  assert.equal((await call("/api/program/site-build", { token: voter })).status, 403);
+  const unconfigured = await (await call("/api/program/site-build", { token: admin })).json();
+  assert.equal(unconfigured.configured, false);
+  assert.equal(unconfigured.repo, "SHMUEL-LAMED/rosh-berosh-2");
+  const refused = await call("/api/program/site-build", { method: "POST", token: admin, body: {} });
+  assert.equal(refused.status, 409);
+  assert.match((await refused.json()).error, /GITHUB_TOKEN/);
+
+  env.GITHUB_TOKEN = "gh-test";
+  const seen = [];
+  const restore = withFetch((url, init) => {
+    if (!url.startsWith("https://api.github.com/")) return null;
+    seen.push({ url, method: init.method || "GET", auth: new Headers(init.headers).get("authorization"), body: init.body });
+    if (url.endsWith("/dispatches")) return new Response(null, { status: 204 });
+    return Response.json({ workflow_runs: [{ status: "in_progress", conclusion: null, event: "workflow_dispatch", created_at: "2026-09-28T10:00:00Z", updated_at: "2026-09-28T10:01:00Z", html_url: "https://github.com/x" }] });
+  });
+  try {
+    const started = await call("/api/program/site-build", { method: "POST", token: admin, body: {} });
+    assert.equal(started.status, 200, await started.clone().text());
+    const state = await (await call("/api/program/site-build", { token: admin })).json();
+    assert.equal(state.configured, true);
+    assert.equal(state.last.status, "in_progress");
+    assert.equal(seen[0].url, "https://api.github.com/repos/SHMUEL-LAMED/rosh-berosh-2/actions/workflows/pages.yml/dispatches");
+    assert.equal(seen[0].method, "POST");
+    assert.equal(seen[0].auth, "Bearer gh-test");
+    assert.deepEqual(JSON.parse(seen[0].body), { ref: "main" });
+  } finally { restore(); delete env.GITHUB_TOKEN; }
+});
+
+test("publishing a new public episode starts the site build when a token is set; a refused token is a readable error", async () => {
+  const { call, admin, env, settle } = await setup();
+  env.GITHUB_TOKEN = "gh-test";
+  let dispatched = 0, status = 204;
+  const restore = withFetch((url) => url.endsWith("/dispatches") ? (dispatched++, new Response(null, { status })) : null);
+  try {
+    const first = await (await publish(call, admin, [episode("ep-1")])).json();
+    await settle();
+    assert.equal(first.building, true);
+    assert.equal(dispatched, 1);
+    const again = await (await publish(call, admin, [episode("ep-1", { title: "שם חדש" })])).json();
+    await settle();
+    assert.equal(again.building, false, "an edit to an episode that was already public does not rebuild");
+    assert.equal(dispatched, 1);
+    status = 403;
+    const refused = await call("/api/program/site-build", { method: "POST", token: admin, body: {} });
+    assert.equal(refused.status, 502);
+    assert.match((await refused.json()).error, /הרשאה/);
+  } finally { restore(); delete env.GITHUB_TOKEN; }
+});

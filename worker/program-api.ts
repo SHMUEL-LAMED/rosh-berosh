@@ -9,8 +9,9 @@ import { programAiApi, type AiBinding } from "./program-ai";
 import { cutMp3, validateCuts } from "./program-mp3-cut";
 import { runTextFixes, TEXT_FIXES_KEY } from "./program-text-fixes";
 import { backfillProgramPeople, correctProgramPeople, PEOPLE_MARKERS } from "./program-people-backfill";
+import { siteBuildState, triggerSiteBuild, type SiteBuildEnv } from "./program-site-build";
 
-type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string };
+type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string } & SiteBuildEnv;
 const ORIGIN = "https://shmuel-lamed.github.io";
 // גבולות ההעלאה — אותם גבולות בהעלאה הרגילה ובהעלאה בחלקים (R2 multipart):
 // הקלטה עד 1GB, עטיפה עד 15MB.
@@ -186,6 +187,22 @@ async function catalogSetup(env: Env) {
   await correctProgramPeople(env);
 }
 
+/** הקטלוג המלא אחרי פרסום חלקי, לגרסה שנשמרת: התוכניות שבאתר עם אלה שפורסמו עכשיו במקומן,
+    העונות (החדשות אם נשלחו) וההגדרות השמורות כפי שהן. */
+async function partialSnapshot(env: Env, current: Array<{ id: string; data_json: string }>, upserts: Array<Record<string, unknown> & { id: string }>, seasons: unknown[] | undefined) {
+  const replaced = new Map(upserts.map((episode) => [episode.id, episode]));
+  const episodes: Array<Record<string, unknown>> = current.flatMap((row) => {
+    if (replaced.has(row.id)) return [];
+    try { return [{ ...JSON.parse(row.data_json), id: row.id }]; } catch { return []; }
+  });
+  episodes.push(...upserts);
+  episodes.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (Number(b.number) || 0) - (Number(a.number) || 0));
+  const rows = (await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('seasons','banner','updates','contacts','polls','guests','hosts')").all<{ key: string; value_json: string }>()).results;
+  const saved = new Map(rows.map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
+  const settings = Object.fromEntries(["banner", "updates", "contacts", "polls", "guests", "hosts"].filter((key) => saved.has(key)).map((key) => [key, saved.get(key)]));
+  return { seasons: Array.isArray(seasons) ? seasons : (saved.get("seasons") || []), episodes, settings };
+}
+
 async function catalog(env: Env, includeHidden = false, origin = "") {
   await catalogSetup(env);
   // התוכניות וההגדרות הציבוריות במקביל
@@ -356,13 +373,25 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
       return reply(request, { error: "שמירת ההקלטה ב־R2 נכשלה." }, 500);
     }
   }
+  if (url.pathname === "/api/program/site-build") {
+    if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
+    if (request.method === "GET") return reply(request, await siteBuildState(env));
+    if (request.method === "POST") {
+      const error = await triggerSiteBuild(env);
+      return error ? reply(request, { error }, env.GITHUB_TOKEN ? 502 : 409) : reply(request, { ok: true });
+    }
+  }
   if (url.pathname === "/api/program/catalog" && request.method === "POST") {
     const publisher = await admin(request, env);
     if (!publisher) return reply(request, { error: "אין הרשאת ניהול." }, 403);
-    let body: { seasons?: unknown[]; episodes?: Array<Record<string, unknown>>; removedIds?: string[]; settings?: Record<string, unknown>; baseVersion?: string | null; force?: boolean; notify?: boolean };
+    let body: { seasons?: unknown[]; episodes?: Array<Record<string, unknown>>; removedIds?: string[]; settings?: Record<string, unknown>; baseVersion?: string | null; force?: boolean; notify?: boolean; partial?: boolean };
     try { body = await request.json(); } catch { return reply(request, { error: "בקשה לא תקינה." }, 400); }
     const invalid = () => reply(request, { error: "נתוני התוכניות אינם תקינים." }, 400);
-    if (!Array.isArray(body.episodes) || !Array.isArray(body.seasons) || body.episodes.length > 2000) return invalid();
+    // פרסום חלקי ("פרסם רק את התוכנית הזו"): נשלחות רק התוכניות שמתפרסמות, בלי מחיקות. שאר
+    // התוכניות, העונות (אם לא נשלחו) וההגדרות נשארים כמו שהם, והטיוטה המשותפת לא נמחקת.
+    const partial = body.partial === true;
+    if (partial && (body.removedIds?.length || !Array.isArray(body.episodes) || !body.episodes.length || body.episodes.length > 20)) return invalid();
+    if (!Array.isArray(body.episodes) || (!partial && !Array.isArray(body.seasons)) || (body.seasons !== undefined && !Array.isArray(body.seasons)) || body.episodes.length > 2000) return invalid();
     // כל תוכנית נבדקת לפני שנבנה משפט אחד: אובייקט עם מזהה, כתובת (slug) ושם.
     // תוכנית פגומה מחזירה 400, ולא שגיאת שרת באמצע בניית הפרסום.
     const episodes: Array<Record<string, unknown> & { id: string; slug: string }> = [];
@@ -414,7 +443,7 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
       statements.push(env.DB.prepare("INSERT INTO program_episodes (id,slug,number,date,visible,data_json,updated_at) VALUES (?,?,?,?,?,?,unixepoch()) ON CONFLICT(id) DO UPDATE SET slug=excluded.slug,number=excluded.number,date=excluded.date,visible=excluded.visible,data_json=excluded.data_json,updated_at=unixepoch()")
         .bind(episode.id, episode.slug, episodeNumber(episode.number), String(episode.date || "") || null, episode.visible === false ? 0 : 1, JSON.stringify(episode)));
     }
-    statements.push(env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(body.seasons)));
+    if (Array.isArray(body.seasons)) statements.push(env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('seasons',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(body.seasons)));
     // אחרי פרסום הקטלוג לעולם אינו נזרע שוב מהקובץ, גם אם כל התוכניות נמחקו
     statements.push(seededStatement(env));
     for (const id of removed) {
@@ -432,7 +461,10 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
     statements.push(...settingsStatements(env, body.settings));
     // כל פרסום נשמר כגרסה — גיבוי אוטומטי שאפשר לחזור אליו מאזור הניהול
     const versionId = crypto.randomUUID();
-    statements.push(...versionStatements(env, publisher.email, { seasons: body.seasons, episodes: body.episodes, settings: body.settings }, versionId));
+    // בפרסום חלקי הגרסה עדיין שומרת את כל הקטלוג שבאתר אחרי הפרסום — לא רק את התוכנית שנשלחה —
+    // כדי ששחזור גרסה יחזיר את כל התוכניות, העונות וההגדרות.
+    const snapshot = partial ? await partialSnapshot(env, current, upserts, body.seasons) : { seasons: body.seasons ?? [], episodes: body.episodes, settings: body.settings };
+    statements.push(...versionStatements(env, publisher.email, snapshot, versionId));
     // תוכניות שהפכו עכשיו לציבוריות נרשמות כ"כבר הודיעו", כדי שהבדיקה
     // המתוזמנת לא תשלח עליהן התראה מאוחרת; notify מכניס עליהן התראה לתור.
     const fresh = upserts.filter((episode) => episode.visible !== false && isPublic(episode, true, beforeNow) && !before.has(episode.id));
@@ -446,7 +478,7 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
       statements.push(notifiedStatement(env, [...(Array.isArray(notified) ? notified : before), ...fresh.map((episode) => episode.id), ...silenced]));
     }
     // הטיוטה המשותפת מולאה בפרסום הזה; קישור התצוגה המקדימה כבר אינו נחוץ
-    statements.push(env.DB.prepare("DELETE FROM program_settings WHERE key IN ('draft')"));
+    if (!partial) statements.push(env.DB.prepare("DELETE FROM program_settings WHERE key IN ('draft')"));
     try { await env.DB.batch(statements); }
     catch (error) {
       // כתובת כפולה שנוצרה בינתיים (למשל בפרסום מקביל) — 409 עם הכתובת, לא שגיאת שרת
@@ -458,12 +490,19 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
       return reply(request, { error: "שמירת התוכניות נכשלה." }, 500);
     }
     // ההתראות רק נכנסות לתור; דף הניהול מרוקן אותו בלולאה (/push/drain) וה־cron משלים
+    // תוכנית חדשה עלתה לאתר: דפי השיתוף ומפת האתר נבנים מיד, בלי לחכות לבנייה הלילית
+    let building = false;
+    if (fresh.length && env.GITHUB_TOKEN) {
+      building = true;
+      const build = triggerSiteBuild(env).then((error) => { if (error) console.error("program site build", error); });
+      if (ctx) ctx.waitUntil(build); else await build;
+    }
     let queued = 0;
     if (body.notify === true && fresh.length) {
       try { await notifyEpisodes(env, fresh); queued = fresh.length; }
       catch (error) { console.error("program publish push error", error); }
     }
-    return reply(request, { ok: true, episodes: body.episodes.length, removed: removed.length, versionId, notified: queued });
+    return reply(request, { ok: true, episodes: body.episodes.length, removed: removed.length, versionId, notified: queued, partial, building });
   }
   if (url.pathname === "/api/program/audio/cut" && request.method === "POST") {
     if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);

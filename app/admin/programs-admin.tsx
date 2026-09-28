@@ -41,6 +41,13 @@ function openMailDraft(id: string, onMessage: (message: string) => void) {
 
 /* ---------- הרכיב ---------- */
 
+/** פתיחת תוכנית בעורך מחוץ לחלק הזה (החיפוש המהיר ו"מה מחכה לי"): נשמרת עד שהחלק נטען, ואם כבר נטען — נפתחת מיד */
+let pendingEpisode: string | null = null;
+export function openEpisode(id: string) {
+  pendingEpisode = id;
+  window.dispatchEvent(new CustomEvent("prog-open-episode", { detail: id }));
+}
+
 export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection | null; onMessage(message: string): void }) {
   const [origin, setOrigin] = useState<Catalog | null>(null);
   const [data, setData] = useState<Catalog | null>(null);
@@ -48,7 +55,12 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   const [sync, setSync] = useState<"" | "saving" | "saved" | "error">("");
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [reload, setReload] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() => { const id = pendingEpisode; pendingEpisode = null; return id; });
+  useEffect(() => {
+    const onOpen = (event: Event) => { pendingEpisode = null; setSelected(String((event as CustomEvent<string>).detail)); };
+    window.addEventListener("prog-open-episode", onOpen);
+    return () => window.removeEventListener("prog-open-episode", onOpen);
+  }, []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dataRef = useRef<Catalog | null>(null);
   // הגרסה שבאתר כשהתחילו לערוך — נשלחת בפרסום (baseVersion) כהגנה מדריסה בין מנהלים
@@ -94,6 +106,36 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
     return { added, changed, removed, seasons, settings, any: !!(added || changed || removed.length || seasons || settings) };
   }, [origin, data]);
 
+  /** "פרסם רק את התוכנית הזו": התוכנית מהטיוטה עולה לאתר, וכל השאר (תוכניות אחרות, הודעות, עונות)
+      נשאר בטיוטה בדיוק כמו שהוא. נשלחת רק התוכנית (ועונה חדשה שלה, אם יש), ואם היא סומנה כמומלצת —
+      גם המומלצת הקודמת שבאתר, בלי הסימון, כדי שתמיד תהיה רק אחת. */
+  const publishOne = useCallback(async (id: string, notify: boolean) => {
+    const draft = dataRef.current, pub = origin;
+    const episode = draft?.episodes.find((e) => e.id === id);
+    if (!draft || !pub || !episode) return;
+    if (!episode.title.trim()) { onMessage("לתוכנית אין שם. כתבו שם ואז פרסמו."); return; }
+    const unfeatured = episode.featured ? pub.episodes.filter((e) => e.featured && e.id !== id).map((e) => ({ ...e, featured: false })) : [];
+    const newSeason = episode.season && !pub.seasons.some((s) => s.id === episode.season) ? draft.seasons.filter((s) => s.id === episode.season) : [];
+    const seasons = newSeason.length ? [...pub.seasons, ...newSeason] : undefined;
+    const isLive = (e: Episode) => e.visible && !scheduled(e);
+    const goingLive = isLive(episode) && !pub.episodes.some((o) => o.id === id && isLive(o));
+    onMessage("מפרסמים את התוכנית…");
+    try {
+      const r = await api<{ versionId?: string; notified?: number; building?: boolean }>("/api/program/catalog", { method: "POST", body: JSON.stringify({ partial: true, episodes: [episode, ...unfeatured].map((e) => normEpisode(e, 0)), ...(seasons ? { seasons } : {}), baseVersion: base.current ?? null, notify: notify && goingLive }) });
+      const replaced = new Map([episode, ...unfeatured].map((e) => [e.id, e]));
+      const episodes = [...pub.episodes.map((e) => replaced.get(e.id) || e), ...(pub.episodes.some((e) => e.id === id) ? [] : [episode])];
+      setOrigin(normCatalog(JSON.parse(JSON.stringify({ ...pub, seasons: seasons || pub.seasons, episodes }))));
+      base.current = r.versionId ?? null;
+      // הטיוטה נשארת, רק עם הגרסה החדשה — כדי שהפרסום המלא הבא לא ייעצר כאילו מישהו אחר פרסם
+      await api("/api/program/draft", { method: "PUT", body: JSON.stringify({ data: { ...dataRef.current, baseVersion: base.current } }) }).catch(() => setSync("error"));
+      onMessage(`„${label(episode)}” פורסמה באתר.${r.building ? " דפי השיתוף ומפת האתר נבנים עכשיו." : ""} שאר השינויים עדיין בטיוטה.`);
+      if (r.notified) drainPush().then((n) => { if (n) onMessage(n === 1 ? "נשלחה התראה למכשיר אחד." : `נשלחה התראה ל־${n} מכשירים.`); });
+    } catch (error) {
+      const e = error as ApiError;
+      onMessage(e.conflict ? "מנהל אחר פרסם בינתיים. עברו ללשונית „פרסום התוכניות” כדי לראות מה השתנה לפני שמפרסמים." : `הפרסום לא הצליח: ${errorText(error, "")}`);
+    }
+  }, [origin, onMessage]);
+
   /** פתיחת תוכנית מחלק אחר (למשל מבדיקת האיות): בוחרים אותה ועוברים ללשונית התוכניות */
   const open = useCallback((id: string | null) => { if (id) setSelected(id); window.location.hash = id ? "#prog-programs" : "#prog-site"; }, []);
 
@@ -106,7 +148,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   const common: Common = { data, change, mutate, patchEpisode, onMessage };
   return <div className="prog-admin">
     {statusBar}
-    {section === "programs" && <ProgramsSection {...common} surveys={surveys} selected={selected} onSelect={setSelected} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} />}
+    {section === "programs" && <ProgramsSection {...common} surveys={surveys} selected={selected} onSelect={setSelected} live={new Set(origin.episodes.filter((e) => e.visible).map((e) => e.id))} published={origin} onPublishOne={publishOne} />}
     {section === "guests" && <><HostsSection data={data} mutate={mutate} onMessage={onMessage} /><GuestsSection data={data} mutate={mutate} onMessage={onMessage} /></>}
     {section === "ads" && <ProgramsAds episodes={data.episodes} patchEpisode={patchEpisode} onMessage={onMessage} />}
     {section === "site" && <SiteSection {...common} />}
@@ -117,7 +159,13 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
 
 /* ======================= 1. תוכניות ======================= */
 
-function ProgramsSection({ data, change, patchEpisode, onMessage, surveys, live, selected, onSelect }: Common & { surveys: SurveyRow[]; live: Set<string>; selected: string | null; onSelect(id: string | null): void }) {
+/** האם התוכנית בטיוטה שונה ממה שבאתר: "new" — עוד לא באתר, "changed" — יש בה שינויים, null — זהה */
+function pendingOf(episode: Episode, published: Catalog): "new" | "changed" | null {
+  const live = published.episodes.find((e) => e.id === episode.id);
+  return !live ? "new" : pack(live) !== pack(episode) ? "changed" : null;
+}
+
+function ProgramsSection({ data, change, patchEpisode, onMessage, surveys, live, selected, onSelect, published, onPublishOne }: Common & { surveys: SurveyRow[]; live: Set<string>; selected: string | null; onSelect(id: string | null): void; published: Catalog; onPublishOne(id: string, notify: boolean): Promise<void> }) {
   const [query, setQuery] = useState(""), [filter, setFilter] = useState("all");
   const [bulk, setBulk] = useState(false), [picked, setPicked] = useState<Set<string>>(new Set());
   const sorted = useMemo(() => data.episodes.slice().sort((a, b) => b.date.localeCompare(a.date) || (b.number || 0) - (a.number || 0)), [data.episodes]);
@@ -180,14 +228,15 @@ function ProgramsSection({ data, change, patchEpisode, onMessage, surveys, live,
       </div>
     </aside>
     <div className="prog-editor">
-      {current ? <Editor key={current.id} episode={current} live={live.has(current.id)} data={data} surveys={surveys} onPatch={(fields) => patchEpisode(current.id, fields)} onFeatured={(on) => setEpisodes(data.episodes.map((e) => ({ ...e, featured: on && e.id === current.id })))} onDuplicate={() => duplicate(current)} onDelete={() => { if (confirm(`למחוק את "${label(current)}"?`)) removeIds([current.id]); }} onSeasons={(seasons) => change({ ...data, seasons })} uniqueSlug={uniqueSlug} onMessage={onMessage} />
+      {current ? <Editor key={current.id} episode={current} live={live.has(current.id)} pending={pendingOf(current, published)} onPublishOne={(notify) => onPublishOne(current.id, notify)} data={data} surveys={surveys} onPatch={(fields) => patchEpisode(current.id, fields)} onFeatured={(on) => setEpisodes(data.episodes.map((e) => ({ ...e, featured: on && e.id === current.id })))} onDuplicate={() => duplicate(current)} onDelete={() => { if (confirm(`למחוק את "${label(current)}"?`)) removeIds([current.id]); }} onSeasons={(seasons) => change({ ...data, seasons })} uniqueSlug={uniqueSlug} onMessage={onMessage} />
         : <section className="admin-panel prog-empty"><b>♫</b><h2>בחרו תוכנית מהרשימה</h2><p className="panel-help">או לחצו „+ תוכנית חדשה”. כל שינוי נשמר מיד; כשמסיימים לוחצים „פרסום התוכניות” בתפריט.</p></section>}
     </div>
   </div>;
 }
 
-function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate, onDelete, onSeasons, uniqueSlug, onMessage }: { episode: Episode; live: boolean; data: Catalog; surveys: SurveyRow[]; onPatch(fields: Partial<Episode>): void; onFeatured(on: boolean): void; onDuplicate(): void; onDelete(): void; onSeasons(seasons: Season[]): void; uniqueSlug(base: string, self: string): string; onMessage(message: string): void }) {
+function Editor({ episode, live, pending, onPublishOne, data, surveys, onPatch, onFeatured, onDuplicate, onDelete, onSeasons, uniqueSlug, onMessage }: { episode: Episode; live: boolean; pending: "new" | "changed" | null; onPublishOne(notify: boolean): Promise<void>; data: Catalog; surveys: SurveyRow[]; onPatch(fields: Partial<Episode>): void; onFeatured(on: boolean): void; onDuplicate(): void; onDelete(): void; onSeasons(seasons: Season[]): void; uniqueSlug(base: string, self: string): string; onMessage(message: string): void }) {
   const [audioStatus, setAudioStatus] = useState(""), [coverStatus, setCoverStatus] = useState(""), [busy, setBusy] = useState<"" | "audio" | "cover">("");
+  const [publishing, setPublishing] = useState(false), [notifyOne, setNotifyOne] = useState(true);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -257,6 +306,11 @@ function Editor({ episode, live, data, surveys, onPatch, onFeatured, onDuplicate
     onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
     onDrop={onDrop}>
     {dragging && <div className="prog-drop-hint" aria-hidden="true">שחררו כאן — הקלטה או תמונה לתוכנית „{label(episode)}”</div>}
+    {pending && <div className="prog-one" data-tour="ed-publish-one" role="status">
+      <span><b>{pending === "new" ? "התוכנית הזו עוד לא באתר." : "יש בתוכנית הזו שינויים שעוד לא באתר."}</b><small>אפשר לפרסם רק אותה עכשיו. שאר השינויים בטיוטה לא עולים לאתר.</small></span>
+      {pending === "new" && episode.visible && !scheduled(episode) && <label className="prog-check"><input type="checkbox" checked={notifyOne} onChange={(e) => setNotifyOne(e.target.checked)} /> התראה למאזינים</label>}
+      <button type="button" className="prog-primary" disabled={publishing || !episode.title.trim()} onClick={async () => { setPublishing(true); try { await onPublishOne(notifyOne); } finally { setPublishing(false); } }}>{publishing ? "מפרסמים…" : "פרסם רק את התוכנית הזו ←"}</button>
+    </div>}
     <Section title={label(episode)} aside={<div className="row-actions" data-tour="ed-actions">
       {live ? <a href={`${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(episode.slug)}`} target="_blank" rel="noopener">צפייה באתר ↗</a> : <button type="button" onClick={() => onMessage("התוכנית עוד לא באתר. היא תופיע אחרי „פרסום התוכניות”.")}>צפייה באתר ↗</button>}
       <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={() => openMailDraft(episode.id, onMessage)}>✉ מייל למאזינים</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={() => (history ? setHistory(null) : loadHistory())}>{history ? "הסתרת הגרסאות" : "גרסאות קודמות"}</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
@@ -451,6 +505,38 @@ function HealthGroup({ group, items, onFix }: { group: typeof HEALTH_GROUPS[numb
   </summary><ul className="prog-problems">{items.slice(0, 120).map((e) => <li key={e.id}>{label(e)}</li>)}{items.length > 120 && <li>ועוד {items.length - 120}…</li>}</ul></details>;
 }
 
+type BuildRun = { status: string; conclusion: string | null; event: string; createdAt: string; updatedAt: string; url: string };
+type BuildState = { configured: boolean; repo: string; last: BuildRun | null; error?: string };
+const BUILD_EVENT: Record<string, string> = { schedule: "הבנייה הלילית", push: "עדכון קוד באתר", workflow_dispatch: "הפעלה מהניהול" };
+
+/** בניית אתר התוכניות עכשיו: דפי השיתוף לוואטסאפ ומפת האתר לגוגל נבנים ב־GitHub בכל לילה;
+    מכאן מפעילים את אותה בנייה מיד (והיא רצה לבד אחרי פרסום של תוכנית חדשה). */
+function SiteBuild({ onMessage }: { onMessage(message: string): void }) {
+  const [state, setState] = useState<BuildState | null>(null), [starting, setStarting] = useState(false);
+  const load = useCallback(() => api<BuildState>("/api/program/site-build").then(setState).catch(() => setState(null)), []);
+  useEffect(() => { void load(); }, [load]);
+  const running = !!state?.last && state.last.status !== "completed";
+  useEffect(() => { if (!running) return; const t = setInterval(() => { void load(); }, 8000); return () => clearInterval(t); }, [running, load]);
+  const start = async () => {
+    setStarting(true);
+    try { await api("/api/program/site-build", { method: "POST", body: "{}" }); onMessage("הבנייה התחילה. זה לוקח בערך שתי דקות."); setTimeout(() => { void load(); }, 4000); }
+    catch (error) { onMessage(errorText(error, "הפעלת הבנייה נכשלה.")); }
+    finally { setStarting(false); }
+  };
+  const last = state?.last;
+  const dot = !last ? "" : running ? "run" : last.conclusion === "success" ? "ok" : "bad";
+  const text = !last ? "" : running ? `בונים עכשיו (${BUILD_EVENT[last.event] || last.event}, התחילה ב־${when(last.createdAt)})` : `${last.conclusion === "success" ? "הסתיימה בהצלחה" : last.conclusion === "cancelled" ? "בוטלה (החליפה אותה בנייה חדשה יותר)" : "נכשלה"} · ${when(last.updatedAt)} · ${BUILD_EVENT[last.event] || last.event}`;
+  return <Section id="tour-build" title="בניית האתר">
+    <div className="prog-build">
+      <p className="panel-help">תוכנית שפורסמה מופיעה באתר מיד. דפי השיתוף לוואטסאפ ומפת האתר לגוגל נבנים בנפרד: פעם בלילה, אוטומטית אחרי פרסום של תוכנית חדשה, או עכשיו בכפתור.</p>
+      {state === null ? <p className="panel-help">בודקים את מצב הבנייה…</p> : !state.configured
+        ? <p className="panel-help">הבנייה המיידית עוד לא מחוברת. כדי לחבר אותה צריך להוסיף פעם אחת טוקן של GitHub (GITHUB_TOKEN) בהגדרות הוורקר ב־Cloudflare, עם הרשאת Actions: Read and write למאגר {state.repo}. עד אז הדפים נבנים כרגיל פעם בלילה.</p>
+        : <>{state.error ? <p className="panel-help">{state.error}</p> : last ? <div className="prog-build-state"><i className={dot} aria-hidden="true" /><span>הבנייה האחרונה: {text}</span><a href={last.url} target="_blank" rel="noopener">פרטים ↗</a></div> : <p className="panel-help">עדיין לא רצה בנייה.</p>}
+          <div className="row-actions"><button type="button" className="prog-primary" disabled={starting || running} onClick={start}>{running ? "בונים…" : starting ? "מפעילים…" : "בנה את האתר עכשיו"}</button><button type="button" onClick={() => void load()}>↻ רענון</button></div></>}
+    </div>
+  </Section>;
+}
+
 function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin, changes, base, onOpen, onPublished, onDiscard }: Common & { origin: Catalog; changes: Changes; base: { current: string | null }; onOpen(id: string | null): void; onPublished(published: Catalog, versionId: string | null): void; onDiscard(): void }) {
   const [busy, setBusy] = useState(false), [versions, setVersions] = useState<Version[] | null>(null), [preview, setPreview] = useState("");
   const [notify, setNotify] = useState(true), [conflict, setConflict] = useState<Conflict | null>(null);
@@ -574,6 +660,8 @@ function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin,
         <div className="row-actions"><button type="button" onClick={() => setConflict(null)}>ביטול — לא לפרסם</button><button type="button" className="danger" disabled={busy} onClick={() => publish(true)}>לפרסם בכל זאת ולדרוס</button></div>
       </div>}
     </Section>
+
+    <SiteBuild onMessage={onMessage} />
 
     <Section id="tour-health" title="בדיקת תקינות" aside={<strong className="prog-badge">{health.groups.length + health.dup.length ? `${health.groups.length + health.dup.length} נושאים` : "✓ תקין"}</strong>}>
       {health.dup.length > 0 && <div className="prog-must soft"><b>כפילויות:</b><ul>{health.dup.map((d) => <li key={d}>{d}</li>)}</ul></div>}
