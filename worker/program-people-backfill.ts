@@ -46,7 +46,7 @@ export async function backfillProgramPeople(env: { DB: D1Database }) {
   await env.DB.batch(statements);
 }
 
-const CORRECTIONS_MARKER = 'program-people-2026-09-v7';
+const CORRECTIONS_MARKER = 'program-people-2026-09-v8';
 const EPISODE_77_ID = 'drive-1i7sD0TJPpGZeyODR5_TM8UdiKSIrfPow';
 const EPISODE_88_ID = 'drive-1-d-Y4TFP0PJ7_yQzt5iisOAC8MsOy5ll';
 const VERIFIED_PROFILE_PHOTOS: Record<string, string> = {
@@ -96,15 +96,27 @@ function correctedEpisode(raw: Record<string, unknown>) {
 function correctedHosts(raw: unknown) {
   if (!Array.isArray(raw) || raw.length === 0) return raw;
   const shlomo = DEFAULT_HOSTS.find((host) => host.name === 'שלמה גולדברג');
-  const list = raw
+  const yirmi = DEFAULT_HOSTS.find((host) => host.name === 'ירמי סלייטר');
+  let list = raw
     .filter((host): host is Record<string, unknown> => !!host && typeof host === 'object' && !Array.isArray(host))
     .filter((host) => guestKey(host.name) !== guestKey('דודי זינגר'))
-    .map((host) => guestKey(host.name) === guestKey('שלמה גולדברג')
-      ? { ...host, role: 'מייסד ראש בראש', seasons: [...new Set([...peopleArray(host.seasons), 'legacy'])], current: false }
-      : host);
+    .map((host) => {
+      if (guestKey(host.name) === guestKey('שלמה גולדברג')) {
+        return { ...host, role: 'מייסד ראש בראש', seasons: [...new Set([...peopleArray(host.seasons), 'legacy'])], current: false };
+      }
+      if (yirmi && guestKey(host.name) === guestKey('ירמי סלייטר')) {
+        return { ...host, role: 'מגיש', photo: yirmi.photo, seasons: [...new Set([...peopleArray(host.seasons), ...yirmi.seasons])], current: true };
+      }
+      return host;
+    });
 
-  if (!shlomo || list.some((host) => guestKey(host.name) === guestKey(shlomo.name))) return list.slice(0, HOST_LIMITS.hosts);
-  return [...list.slice(0, Math.max(0, HOST_LIMITS.hosts - 1)), { ...shlomo, role: 'מייסד ראש בראש' }];
+  if (yirmi && !list.some((host) => guestKey(host.name) === guestKey(yirmi.name))) {
+    list.push({ ...yirmi, role: 'מגיש', photo: yirmi.photo, current: true });
+  }
+  if (shlomo && !list.some((host) => guestKey(host.name) === guestKey(shlomo.name))) {
+    list.push({ ...shlomo, role: 'מייסד ראש בראש' });
+  }
+  return list.slice(0, HOST_LIMITS.hosts);
 }
 
 function correctedGuestProfiles(raw: unknown) {
