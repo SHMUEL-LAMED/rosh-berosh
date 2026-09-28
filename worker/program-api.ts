@@ -7,8 +7,8 @@ import { isPublic, israelWallClock } from "./program-schedule.js";
 import { NOTIFIED_KEY, notifiedStatement, notifyEpisodes, programPushApi } from "./program-push";
 import { programAiApi, type AiBinding } from "./program-ai";
 import { cutMp3, validateCuts } from "./program-mp3-cut";
-import { runTextFixes } from "./program-text-fixes";
-import { backfillProgramPeople, correctProgramPeople } from "./program-people-backfill";
+import { runTextFixes, TEXT_FIXES_KEY } from "./program-text-fixes";
+import { backfillProgramPeople, correctProgramPeople, PEOPLE_MARKERS } from "./program-people-backfill";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string };
 const ORIGIN = "https://shmuel-lamed.github.io";
@@ -82,6 +82,8 @@ export function cors(request: Request, response: Response): Response {
     headers.set("access-control-allow-methods", "GET,HEAD,POST,PUT,DELETE,OPTIONS");
     headers.set("access-control-expose-headers", "content-length,content-range,accept-ranges,content-disposition");
     headers.set("vary", "Origin");
+    // בדיקת ה־CORS המקדימה (OPTIONS) נשמרת בדפדפן, ולא נשלחת שוב לפני כל בקשה
+    headers.set("access-control-max-age", "7200");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
   return response;
@@ -171,15 +173,28 @@ function episodeNumber(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
-async function catalog(env: Env, includeHidden = false, origin = "") {
+/** ההכנות החד־פעמיות (זריעה, סימון ההקלטות ב־R2, תיקוני כתיב, שיוך המגישים והאורחים). כשכל הסימונים
+    כבר במסד — שאילתה אחת ודי, במקום בדיקה נפרדת לכל אחת בזו אחר זו בכל טעינה של האתר. */
+async function catalogSetup(env: Env) {
+  const keys = [SEEDED_KEY, R2_BACKFILL_KEY, TEXT_FIXES_KEY, ...PEOPLE_MARKERS];
+  const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM program_settings WHERE key IN (${keys.map(() => "?").join(",")})`).bind(...keys).first<{ n: number }>();
+  if (Number(done?.n) === keys.length) return;
   await seedOnce(env);
   await backfillSeedR2Metadata(env);
   await runTextFixes(env);   // תיקוני כתיב חד־פעמיים בשמות ובתיאורים
   await backfillProgramPeople(env);
   await correctProgramPeople(env);
-  const [episodes, settings] = await env.DB.batch([
-    env.DB.prepare(`SELECT id,data_json FROM program_episodes ${includeHidden ? "" : "WHERE visible=1"} ORDER BY date DESC,number DESC`),
-    env.DB.prepare("SELECT key,value_json FROM program_settings"),
+}
+
+async function catalog(env: Env, includeHidden = false, origin = "") {
+  await catalogSetup(env);
+  // התוכניות וההגדרות הציבוריות במקביל
+  const [[episodes, settings], publicSettingsValue] = await Promise.all([
+    env.DB.batch([
+      env.DB.prepare(`SELECT id,data_json FROM program_episodes ${includeHidden ? "" : "WHERE visible=1"} ORDER BY date DESC,number DESC`),
+      env.DB.prepare("SELECT key,value_json FROM program_settings"),
+    ]),
+    publicSettings(env, origin, includeHidden),
   ]);
   const values = new Map((settings.results as Array<{ key: string; value_json: string }>).map((row) => {
     try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; }
@@ -196,7 +211,7 @@ async function catalog(env: Env, includeHidden = false, origin = "") {
       } catch { return []; }
     }),
     // ההגדרות הציבוריות של אתר התוכניות (ההודעה בדף הבית ודף העדכונים)
-    settings: await publicSettings(env, origin, includeHidden),
+    settings: publicSettingsValue,
   };
 }
 

@@ -47,6 +47,8 @@ export async function backfillProgramPeople(env: { DB: D1Database }) {
 }
 
 const CORRECTIONS_MARKER = 'program-people-2026-09-v2';
+/** הסימונים של שתי ההכנות — כשהם במסד, אין צורך להריץ אותן */
+export const PEOPLE_MARKERS = [MARKER, CORRECTIONS_MARKER];
 
 /** תיקונים שקבע בעל התוכנית: תפקיד מדויק, בלי להמציא הופעה בפרק שלא תועדה. */
 export async function correctProgramPeople(env: { DB: D1Database }) {
