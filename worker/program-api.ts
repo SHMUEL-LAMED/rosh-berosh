@@ -29,6 +29,20 @@ const AUDIO = new Set(["audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg", "aud
 const IMAGE = new Set(["image/jpeg", "image/png", "image/webp"]);
 const R2_BACKFILL_KEY = "program-recordings-r2-v1";
 const seedDriveId = driveIdOf;
+const PROFILE_PHOTO_SOURCES: Record<string, string> = {
+  "alchanan-inbal": "https://www.emess.co.il/upload/pictures/16/16674.jpg",
+  "guy-meroz": "https://upload.wikimedia.org/wikipedia/commons/8/87/Meroz.JPG",
+  "dudi-zinger": "https://img.youtube.com/vi/Pz3iC9Qz23w/maxresdefault.jpg",
+  "yehuda-born": "https://www.emess.co.il/resize/?height=0&url=%2Fuploads%2F2025%2F02%2F%D7%99%D7%94%D7%95%D7%93%D7%94-%D7%91%D7%95%D7%A8%D7%9F-%D7%94%D7%A7%D7%95%D7%9C-%D7%94%D7%97%D7%93%D7%A9.png&width=800",
+  "yossi-stark": "https://secure.gravatar.com/avatar/1e028649e67f73e8d264623da9b79899db7e31c7d49132d302c7fcb8735553ee?s=500&d=mm&r=g",
+  "yermi-slater": "https://www.emess.co.il/resize/?width=800&height=450&url=/uploads/2025/02/%D7%99%D7%A8%D7%9E%D7%99-%D7%A1%D7%9C%D7%99%D7%99%D7%98%D7%A8-%D7%94%D7%A7%D7%95%D7%9C-%D7%94%D7%97%D7%93%D7%A9.png",
+  "michael-malkieli": "https://storage.bhol.co.il/articles/153885_tumb_800X480.jpg",
+  "menachem-koldetzky": "https://secure.gravatar.com/avatar/cc0a0a85cbd29a3813e291ee85b9253e6f0f8e4932bbf19781ddcc27890bc3e9?s=500&d=mm&r=g",
+  "moshe-feld": "https://www.hamichlol.org.il/w/upload/michlol/thumb/b/b3/%D7%A6%D7%99%D7%9C%D7%95%D7%9D_-_%D7%93%D7%A0%D7%99%D7%90%D7%9C_%D7%90%D7%9C%D7%A1%D7%98%D7%A8.jpg/250px-%D7%A6%D7%99%D7%9C%D7%95%D7%9D_-_%D7%93%D7%A0%D7%99%D7%90%D7%9C_%D7%90%D7%9C%D7%A1%D7%98%D7%A8.jpg",
+  "moshe-klein": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/%D7%9E%D7%A9%D7%94_%D7%A7%D7%9C%D7%99%D7%99%D7%9F_%28%D7%96%D7%9E%D7%A8%29.JPG/500px-%D7%9E%D7%A9%D7%94_%D7%A7%D7%9C%D7%99%D7%99%D7%9F_%28%D7%96%D7%9E%D7%A8%29.JPG",
+  "pini-einhorn": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/%D7%A4%D7%99%D7%A0%D7%99_%D7%91%D7%AA%D7%A4%D7%99%D7%9C%D7%94.jpg/500px-%D7%A4%D7%99%D7%A0%D7%99_%D7%91%D7%AA%D7%A4%D7%99%D7%9C%D7%94.jpg",
+  "ronen-tzur": "https://upload.wikimedia.org/wikipedia/commons/b/bf/Ronen_Tzur_%28cropped%29.png",
+};
 
 // The one-time GitHub migration uploaded all 86 recordings to R2, but its API
 // token cannot write this D1 database. Mark the already-uploaded objects from
@@ -236,6 +250,28 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/program/")) return null;
   if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }));
+  if (url.pathname.startsWith("/api/program/profile-photo/") && (request.method === "GET" || request.method === "HEAD")) {
+    const id = safeId(url.pathname.slice("/api/program/profile-photo/".length));
+    const source = PROFILE_PHOTO_SOURCES[id];
+    if (!source) return reply(request, { error: "התמונה לא נמצאה." }, 404);
+    try {
+      const upstream = await fetch(source, { headers: { accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8", "user-agent": "Mozilla/5.0" }, redirect: "follow" });
+      const contentType = (upstream.headers.get("content-type") || "").split(";")[0].toLowerCase();
+      if (!upstream.ok || !contentType.startsWith("image/")) return reply(request, { error: "התמונה אינה זמינה." }, 502);
+      const headers = new Headers({
+        "content-type": contentType,
+        "cache-control": "public, max-age=86400, s-maxage=604800",
+        "x-content-type-options": "nosniff",
+        "access-control-allow-origin": "*",
+      });
+      const length = upstream.headers.get("content-length");
+      if (length) headers.set("content-length", length);
+      return new Response(request.method === "HEAD" ? null : upstream.body, { status: 200, headers });
+    } catch (error) {
+      console.error("profile photo proxy failed", id, error);
+      return reply(request, { error: "טעינת התמונה נכשלה." }, 502);
+    }
+  }
 
   if (url.pathname === "/api/program/login" && request.method === "GET") {
     // The window is opened on this origin, so it carries the voting site's own
