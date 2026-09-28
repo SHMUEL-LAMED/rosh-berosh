@@ -46,9 +46,19 @@ export async function backfillProgramPeople(env: { DB: D1Database }) {
   await env.DB.batch(statements);
 }
 
-const CORRECTIONS_MARKER = 'program-people-2026-09-v3';
+const CORRECTIONS_MARKER = 'program-people-2026-09-v4';
 const EPISODE_77_ID = 'drive-1i7sD0TJPpGZeyODR5_TM8UdiKSIrfPow';
 const EPISODE_88_ID = 'drive-1-d-Y4TFP0PJ7_yQzt5iisOAC8MsOy5ll';
+const VERIFIED_PROFILE_PHOTOS: Record<string, string> = {
+  'אלחנן ענבל': 'https://www.emess.co.il/upload/pictures/16/16674.jpg',
+  'גיא מרוז': 'https://www.kan.org.il/media/ehnpf3ly/%D7%9C%D7%99%D7%90%D7%95%D7%A8%D7%A8%D7%A8.jpg?height=630&rmode=pad&width=1200',
+  'יהודה בורן': 'https://www.emess.co.il/resize/?height=0&url=%2Fuploads%2F2025%2F02%2F%D7%99%D7%94%D7%95%D7%93%D7%94-%D7%91%D7%95%D7%A8%D7%9F-%D7%94%D7%A7%D7%95%D7%9C-%D7%94%D7%97%D7%93%D7%A9.png&width=800',
+  'מיכאל מלכיאלי': 'https://storage.bhol.co.il/articles/153885_tumb_800X480.jpg',
+  'משה פלד': 'https://static.tickchak.co.il/all/liveNew_090TQkp2RmN1U0IXWoJjUBp2cyd2a5c1Ku_k90TQpNjRCVlYGZWMvg1VSdmQIt2StFmR.jpeg_1465b436-6168-4fdb-98ea-b0f1492c5673.jpeg',
+  'משה קליין': 'https://media.kore.co.il/articles/71813_tumb_800X480.jpg',
+  'פיני איינהורן': 'https://images.babli.co.il/2026/02/22/6af67360-0ff0-11f1-9096-adc0e27576ae__h1066_w1600.jpeg',
+  'רונן צור': 'https://image-resizer.walla.cloud/image/2025/8/4/images/1756055590591_picture_1253x1600.webp',
+};
 
 /** הסימונים של שתי ההכנות — כשהם במסד, אין צורך להריץ אותן */
 export const PEOPLE_MARKERS = [MARKER, CORRECTIONS_MARKER];
@@ -107,6 +117,11 @@ function correctedGuestProfiles(raw: unknown) {
     const index = merged.findIndex((item) => guestKey(item.name) === guestKey(profile.name));
     if (index < 0) merged.push(profile);
     else merged[index] = { ...merged[index], role: profile.role };
+  }
+  for (const [name, photo] of Object.entries(VERIFIED_PROFILE_PHOTOS)) {
+    const index = merged.findIndex((item) => guestKey(item.name) === guestKey(name));
+    if (index < 0) merged.push({ name, photo, role: '', bio: '', links: [] });
+    else merged[index] = { ...merged[index], photo };
   }
   return merged;
 }
