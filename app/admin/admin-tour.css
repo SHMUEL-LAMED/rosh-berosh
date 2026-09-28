@@ -19,8 +19,8 @@
 @keyframes admin-tour-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.admin-tour-hole,.admin-tour-card{transition:none;animation:none}}
 /* החלק "אתר התוכניות" בתפריט עטוף באלמנט אחד, כדי שהסיור יאיר את כולו — באותה פריסה כמו שאר התפריט */
-.admin-side nav .nav-section{display:grid;gap:7px}
-@media(max-width:800px){.admin-side nav .nav-section{display:flex;flex:0 0 auto;gap:7px}}
+.admin-side nav .nav-section{display:grid;gap:1px}
+@media(max-width:800px){.admin-side nav .nav-section{display:flex;flex:0 0 auto;gap:1px}}
 /* הבחירה בין הסיור הקצר למקיף */
 .admin-tour-chooser{top:50%;left:50%;transform:translate(-50%,-50%);width:min(460px,calc(100vw - 32px));animation:none}
 .admin-tour-options{display:grid;gap:10px;margin-top:14px}

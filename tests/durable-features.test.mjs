@@ -255,7 +255,9 @@ test("ballots carry voting timing from both channels and the schema stores it", 
 test("the admin has a separate advanced-data tab that leaves results and voters untouched", () => {
   const page = source("app/admin/page.tsx");
   const admin = source("worker/admin.ts");
-  assert.match(page, /setTab\("analytics"\).*?>נתונים מתקדמים</s);
+  // "נתונים מתקדמים" הוא דף בתוך חלק הסקר, לצד "תוצאות" ו"מצביעים"; תת־התפריט של הסקר נבנה מ־SURVEY_TABS
+  assert.match(page, /const SURVEY_TABS: Record<SurveyPage, string> = \{[^}]*results: "תוצאות"[^}]*voters: "מצביעים"[^}]*analytics: "נתונים מתקדמים"/);
+  assert.match(page, /isSurveyTab\(tab\) && \(Object\.keys\(SURVEY_TABS\) as SurveyPage\[\]\)\.map\(\(key\) => <Nav key=\{key\} className="nav-sub" active=\{tab === key\} onClick=\{\(\) => setTab\(key\)\}>\{SURVEY_TABS\[key\]\}<\/Nav>\)/);
   assert.match(page, /tab === "analytics" && <AnalyticsPanel/);
   assert.match(page, /tab === "results" && data && <Results data=\{data\.results\}/);
   assert.match(page, /tab === "voters" && <VotersPanel/);
