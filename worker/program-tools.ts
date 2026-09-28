@@ -117,9 +117,12 @@ export async function activeSurveyStatus(env: Env, origin: string) {
 
 /** מה מתפרסם לציבור יחד עם הקטלוג. הסקרים: לציבור רק הפעילים שכבר התחילו; מנהלים (includeHidden) — כולם. */
 export async function publicSettings(env: Env, origin = "", includeHidden = false) {
-  const rows = await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates','contacts','polls','guests','hosts')").all<{ key: string; value_json: string }>();
+  const [rows, survey] = await Promise.all([
+    env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates','contacts','polls','guests','hosts')").all<{ key: string; value_json: string }>(),
+    activeSurveyStatus(env, origin),
+  ]);
   const values = new Map(rows.results.map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
-  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), contacts: normalizeContacts(values.get("contacts")), polls: publicPolls(normalizePolls(values.get("polls")), includeHidden), guests: normalizeGuests(values.get("guests")), hosts: publicHosts(values.get("hosts")), survey: await activeSurveyStatus(env, origin) };
+  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), contacts: normalizeContacts(values.get("contacts")), polls: publicPolls(normalizePolls(values.get("polls")), includeHidden), guests: normalizeGuests(values.get("guests")), hosts: publicHosts(values.get("hosts")), survey };
 }
 
 /** משפטי הכתיבה של ההגדרות שהגיעו עם פרסום הקטלוג. */
