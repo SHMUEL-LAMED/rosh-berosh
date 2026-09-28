@@ -169,3 +169,119 @@ test("an admin can reset a poll's votes; listeners cannot", async () => {
   assert.equal(st.total, 0);
   assert.deepEqual(st.mine, []);
 });
+
+/* ---------- הניהול המאוחד: שמירה ופרסום אינם מוחקים ואינם משנים סקרים שלא נערכו ---------- */
+
+const catalogAsAdmin = async (call, token) => (await call("/api/program/catalog", { token })).json();
+const getDraft = async (call, token) => (await (await call("/api/program/draft", { token })).json()).draft;
+const putDraft = (call, token, data) => call("/api/program/draft", { method: "PUT", token, body: { data } });
+// הניהול הישן (rosh-berosh-2 store.js) טוען טיוטה בלי השדה כ"אין סקרים" ומפרסם polls: [] — כך נמחקו הסקרים
+const oldAdminPublish = (call, token, draft) => publish(call, token, { settings: { ...draft.settings, polls: draft.settings.polls || [] } });
+
+test("a draft saved without polls (the unified admin before this fix) keeps the polls, so the old admin cannot wipe them", async () => {
+  const { call, admin } = await setup();
+  await publish(call, admin, { settings: { polls: [poll(), poll({ id: "p2", enabled: false, question: "טיוטה" })] } });
+  const before = (await catalogAsAdmin(call, admin)).settings.polls;
+  assert.equal(before.length, 2);
+
+  // שמירת טיוטה בלי settings.polls — מה שהניהול המאוחד שלח עד עכשיו בכל שינוי
+  assert.equal((await putDraft(call, admin, { seasons: [], episodes: [episode("ep-1")], settings: { banner: { enabled: true, text: "שלום" } } })).status, 200);
+  let draft = await getDraft(call, admin);
+  assert.deepEqual(draft.data.settings.polls, before, "the draft gets the published polls instead of none");
+  assert.equal(draft.data.settings.banner.text, "שלום");
+
+  // הניהול הישן טוען את הטיוטה ומפרסם — הסקרים נשארים בדיוק כמו שהיו
+  assert.equal((await oldAdminPublish(call, admin, draft.data)).status, 200);
+  assert.deepEqual((await catalogAsAdmin(call, admin)).settings.polls, before, "publishing the loaded draft does not delete or alter polls");
+
+  // עריכה של סקר בטיוטה (שעוד לא פורסמה) שורדת שמירה בלי השדה
+  const edited = [{ ...before[0], question: "שאלה חדשה" }, before[1]];
+  await putDraft(call, admin, { seasons: [], episodes: [episode("ep-1")], settings: { polls: edited } });
+  await putDraft(call, admin, { seasons: [], episodes: [episode("ep-1")], settings: { banner: { enabled: false } } });
+  draft = await getDraft(call, admin);
+  assert.deepEqual(draft.data.settings.polls, edited, "unpublished poll edits in the previous draft are kept");
+
+  // מחיקה מפורשת של כל הסקרים (polls: []) — נשמרת כמו שהיא
+  await putDraft(call, admin, { seasons: [], episodes: [episode("ep-1")], settings: { polls: [] } });
+  assert.deepEqual((await getDraft(call, admin)).data.settings.polls, []);
+  // טיוטה בלי settings בכלל לא מקבלת הגדרות (פרסום שלה לא נוגע בהן)
+  await putDraft(call, admin, { seasons: [], episodes: [episode("ep-1")] });
+  assert.equal("settings" in (await getDraft(call, admin)).data, false);
+});
+
+test("a stored legacy draft without polls is served with the published polls (draft and preview)", async () => {
+  const { db, call, admin } = await setup();
+  await publish(call, admin, { settings: { polls: [poll()] } });
+  const published = (await catalogAsAdmin(call, admin)).settings.polls;
+  db.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('draft',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json")
+    .run(JSON.stringify({ data: { seasons: [], episodes: [episode("ep-1")], settings: { banner: { enabled: false } } }, updatedAt: "2026-09-01T00:00:00.000Z", by: "admin@example.com" }));
+  assert.deepEqual((await getDraft(call, admin)).data.settings.polls, published);
+  const { preview } = await (await call("/api/program/preview", { method: "POST", token: admin })).json();
+  const shared = await (await call(`/api/program/preview/${preview.token}`)).json();
+  assert.deepEqual(shared.data.settings.polls, published, "the preview link shows the polls too");
+});
+
+test("the unified admin's catalog round-trip keeps polls exactly as they are", async (t) => {
+  const core = await import("../app/admin/programs-core.ts").catch(() => null);
+  if (!core) { t.skip("this Node cannot load TypeScript directly"); return; }
+  const { call, admin } = await setup();
+  await publish(call, admin, { settings: { polls: [poll({ from: "2099-01-01T10:00" }), poll({ id: "off", enabled: false })] } });
+  const loaded = core.normCatalog(await catalogAsAdmin(call, admin));
+  const before = loaded.settings.polls;
+  assert.equal(before.length, 2, "the admin catalog carries every poll, also future and disabled ones");
+  // בדיוק מה שהניהול המאוחד שולח בפרסום (PublishSection): settings: data.settings
+  const write = await call("/api/program/catalog", { method: "POST", token: admin, body: { seasons: loaded.seasons, episodes: loaded.episodes.map((e) => core.normEpisode(e, 0)), removedIds: [], settings: { ...loaded.settings, banner: { ...loaded.settings.banner, text: "חדש", enabled: true } } } });
+  assert.equal(write.status, 200, await write.clone().text());
+  assert.deepEqual((await catalogAsAdmin(call, admin)).settings.polls, before, "publishing an unrelated change leaves polls untouched");
+  // שדה חסר נשאר חסר (ולא הופך ל"אין סקרים")
+  assert.equal(core.normCatalog({ settings: { banner: {} } }).settings.polls, undefined);
+  const odd = [{ id: "x", question: "?", extra: 1 }];
+  assert.deepEqual(core.normCatalog({ settings: { polls: odd } }).settings.polls, odd, "polls are carried as they are, not re-normalized");
+});
+
+test("shared poll rules: withPolls never drops the field, and an edited poll publishes exactly as saved", async () => {
+  const shared = await import("../worker/program-polls-shared.js");
+  assert.deepEqual(shared.withPolls({ banner: 1 }, undefined, [{ id: "a" }]), { banner: 1, polls: [{ id: "a" }] });
+  assert.deepEqual(shared.withPolls({ polls: [] }, [{ id: "a" }]), { polls: [] }, "an explicit empty list stays");
+  assert.deepEqual(shared.withPolls({ banner: 1 }), { banner: 1 });
+  assert.equal(shared.pollsIn({}), undefined);
+
+  const draft = shared.blankPoll({ question: "מי הזמר שלכם?", show: { home: true, archive: false, me: false, allEpisodes: false, episodes: ["ep-1"] }, from: "2026-01-01T09:00", until: "2099-01-01T20:00", results: "closed", multi: true, maxChoices: 2 });
+  draft.options = [{ id: "a", label: "זמר א", sub: "", image: "https://media.example/a.jpg" }, { id: "b", label: "זמר ב", sub: "להקה", image: "" }, { id: "c", label: "", sub: "", image: "" }];
+  const saved = shared.pollForSave(draft);
+  assert.deepEqual(saved.options.map((o) => o.id), ["a", "b"], "empty answers are dropped on save");
+  assert.deepEqual(shared.pollProblems(saved), []);
+  assert.equal(shared.pollState(saved, "2026-06-01T12:00").cls, "live");
+  assert.equal(shared.pollState(saved, "2025-06-01T12:00").cls, "soon");
+  assert.equal(shared.pollState({ ...saved, until: "2026-02-01T00:00" }, "2026-06-01T12:00").cls, "closed");
+  assert.deepEqual(shared.pollPlaces(saved, () => "תוכנית 1"), ["דף הבית", "דף תוכנית: תוכנית 1"]);
+
+  const { call, admin } = await setup();
+  await publish(call, admin, { settings: { polls: [saved] } });
+  const [back] = (await catalogAsAdmin(call, admin)).settings.polls;
+  assert.deepEqual(back, saved, "the server keeps every field the admin wrote (polls.js reads the same shape)");
+});
+
+test("admin live results: per option (also removed options), voters and last vote; listeners are refused", async () => {
+  const { db, call, admin, voter, other } = await setup();
+  await publish(call, admin, { settings: { polls: [poll({ multi: true, maxChoices: 2 })] } });
+  await vote(db, call, voter, ["a", "b"]);
+  await vote(db, call, other, ["a"]);
+  assert.equal((await call("/api/program/polls/results?ids=p1", { token: voter })).status, 403);
+  assert.equal((await call("/api/program/polls/results?ids=p1")).status, 403);
+  let r = (await (await call("/api/program/polls/results?ids=p1,draft-only", { token: admin })).json()).results;
+  assert.equal(r.p1.total, 2);
+  assert.deepEqual(r.p1.counts, { a: 2, b: 1 });
+  assert.equal(r.p1.published, true);
+  assert.equal(r.p1.open, true);
+  assert.ok(r.p1.lastVoteAt > 0);
+  assert.deepEqual(r["draft-only"], { total: 0, counts: {}, lastVoteAt: null, published: false, open: false, closed: false }, "a poll that is only in the draft has no votes yet");
+  // תשובה שנמחקה מהסקר — הספירה שלה עדיין מוחזרת למנהל
+  await publish(call, admin, { settings: { polls: [poll({ multi: true, maxChoices: 2, options: [{ id: "a", label: "שיר א" }, { id: "c", label: "שיר ג" }] })] } });
+  r = (await (await call("/api/program/polls/results?ids=p1", { token: admin })).json()).results;
+  assert.deepEqual(r.p1.counts, { a: 2, b: 1 });
+  await call("/api/program/polls/reset", { method: "POST", token: admin, body: { pollId: "p1" } });
+  r = (await (await call("/api/program/polls/results?ids=p1", { token: admin })).json()).results;
+  assert.equal(r.p1.total, 0);
+  assert.deepEqual(r.p1.counts, {});
+});
