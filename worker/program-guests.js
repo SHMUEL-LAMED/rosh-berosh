@@ -67,22 +67,37 @@ export function collectGuests(episodes, profiles = []) {
 export function renameGuest(episodes, from, to) {
   const fromKey = guestKey(from), name = String(to ?? "").replace(/\s+/g, " ").trim(), toKey = guestKey(name);
   if (!fromKey || !toKey) return episodes;
-  return episodes.map((episode) => {
-    if (!episode.guests?.some((g) => guestKey(g) === fromKey)) return episode;
+  const renameList = (values = []) => {
     const next = [];
-    for (const g of episode.guests) {
-      const key = guestKey(g) === fromKey ? toKey : guestKey(g);
+    for (const value of values) {
+      const key = guestKey(value) === fromKey ? toKey : guestKey(value);
       if (next.some((x) => guestKey(x) === key)) continue;
-      next.push(guestKey(g) === fromKey ? name : g);
+      next.push(guestKey(value) === fromKey ? name : value);
     }
-    return { ...episode, guests: next };
+    return next;
+  };
+  return episodes.map((episode) => {
+    const guests = Array.isArray(episode.guests) ? episode.guests : [];
+    const panelists = Array.isArray(episode.panelists) ? episode.panelists : [];
+    const inGuests = guests.some((g) => guestKey(g) === fromKey);
+    const inPanel = panelists.some((g) => guestKey(g) === fromKey);
+    if (!inGuests && !inPanel) return episode;
+    return { ...episode, guests: renameList(guests), panelists: renameList(panelists) };
   });
 }
 
-/** הסרת אורח מכל התוכניות. */
+/** הסרת אורח/חבר פאנל מכל התוכניות. */
 export function removeGuest(episodes, name) {
   const key = guestKey(name);
-  return episodes.map((episode) => (episode.guests?.some((g) => guestKey(g) === key) ? { ...episode, guests: episode.guests.filter((g) => guestKey(g) !== key) } : episode));
+  return episodes.map((episode) => {
+    const guests = Array.isArray(episode.guests) ? episode.guests : [];
+    const panelists = Array.isArray(episode.panelists) ? episode.panelists : [];
+    const nextGuests = guests.filter((g) => guestKey(g) !== key);
+    const nextPanelists = panelists.filter((g) => guestKey(g) !== key);
+    return nextGuests.length === guests.length && nextPanelists.length === panelists.length
+      ? episode
+      : { ...episode, guests: nextGuests, panelists: nextPanelists };
+  });
 }
 
 /** הצעות להשלמת האורחים מהסיכומים של התמלולים (הבינה המלאכותית מחזירה `guests` בכל סיכום).
