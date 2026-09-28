@@ -162,13 +162,32 @@ test("admin navigation groups permissions and omits the timeline chart", () => {
 
 test("the upload queue keeps going after the first file, instead of stopping on it", () => {
   const queue = source("app/admin/upload-queue.tsx");
-  const finish = queue.slice(queue.indexOf("const finish = async"), queue.indexOf("xhr.onload"));
-  const releaseAt = finish.indexOf("processing.current = false");
-  const refreshAt = finish.indexOf("await completedRef.current()");
-  assert.ok(releaseAt !== -1 && refreshAt !== -1);
-  assert.ok(releaseAt < refreshAt, "הנעילה משתחררת רק אחרי רענון הקטלוג, וכל שאר השירים נתקעים בתור");
+  const finish = queue.slice(queue.indexOf("const finish = async"), queue.indexOf("const retry = "));
+  const releaseAt = finish.indexOf("active.current.delete(next.id)");
+  const deleteAt = finish.indexOf("await stored(\"readwrite\"");
+  const refreshAt = finish.indexOf("scheduleRefresh()");
+  assert.ok(releaseAt !== -1 && deleteAt !== -1 && refreshAt !== -1);
+  assert.ok(releaseAt < deleteAt, "הקובץ יוצא מהפעילים לפני המחיקה מ-IndexedDB, אחרת כשל במחיקה תופס את המקום לתמיד");
+  assert.ok(releaseAt < refreshAt, "הקובץ יוצא מהפעילים לפני רענון הקטלוג, אחרת שאר השירים נתקעים בתור");
+  assert.match(finish, /try \{ await stored\("readwrite"[^\n]*\} catch \{/);
   assert.match(finish, /setPump\(\(tick\) => tick \+ 1\)/);
   assert.match(queue, /\}, \[processQueue, pump\]\)/);
+});
+
+test("the upload queue sends several files at once and retries a cut-off file by itself", () => {
+  const queue = source("app/admin/upload-queue.tsx");
+  assert.match(queue, /const PARALLEL = 3;/);
+  assert.match(queue, /active\.current\.size >= PARALLEL\) break;/);
+  // ניתוק, שגיאת שרת חולפת או בקשה שנתקעה — ניסיון חוזר לבד, עם המתנה גדלה
+  assert.match(queue, /const ATTEMPTS = 4;/);
+  assert.match(queue, /const STALL_MS = 45_000;/);
+  assert.match(queue, /stalled = true; xhr\.abort\(\);/);
+  assert.match(queue, /if \(transient\(xhr\.status\)\) retry\(error\); else void finish\("error", error\);/);
+  assert.match(queue, /xhr\.onerror = \(\) => retry\(/);
+  assert.match(queue, /1000 \* 2 \*\* \(attempts - 1\)/);
+  // רענון הקטלוג מאוחד ולא אחרי כל שיר
+  assert.match(queue, /const REFRESH_MS = 1500;/);
+  assert.match(queue, /if \(refreshTimer\.current\) return;/);
 });
 
 test("the public catalog keeps heavy phone and song media out of the first response", () => {

@@ -17,7 +17,11 @@ const ORIGIN = "https://shmuel-lamed.github.io";
 // הקלטה עד 1GB, עטיפה עד 15MB.
 const UPLOAD_LIMITS = { audio: 1024 * 1024 * 1024, cover: 15 * 1024 * 1024 } as const;
 const TOO_LARGE = { audio: "הקובץ גדול מ־1GB.", cover: "התמונה גדולה מ־15MB." } as const;
-const PART_SIZE = 20 * 1024 * 1024;
+// חלקים של 10MB: אתר התוכניות מעלה ארבעה במקביל, וחלק שנכשל או נתקע מנוסה שוב לבד — חלק קטן
+// יותר הוא פחות לשלוח מחדש. R2 דורש לפחות 5MB לכל חלק חוץ מהאחרון.
+const PART_SIZE = 10 * 1024 * 1024;
+/** העלאה בחלקים שכבר לא קיימת ב־R2 (בוטלה, הושלמה או פגה): הלקוח מתחיל מחדש ולא מנסה שוב */
+const vanishedUpload = (error: unknown) => /no such upload|does not exist|NoSuchUpload|10024/i.test(error instanceof Error ? error.message : String(error));
 // הזריעה מהקובץ נעשית פעם אחת בחיי המסד, לפי הסימון הזה ב־program_settings
 const SEEDED_KEY = "seeded";
 // Recordings live in shared Google Drive files. Google serves them as plain
@@ -543,7 +547,8 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
     return reply(request, { url: `${url.origin}/media/${key}` });
   }
   /* ---------- העלאה בחלקים (R2 multipart) לקבצים גדולים ----------
-     start → part (PUT לכל חלק של 20MB) → complete, או abort בביטול. */
+     start → part (PUT לכל חלק של 10MB, כמה במקביל) → complete, או abort בביטול.
+     חלק של העלאה שכבר אינה קיימת נענה 410, כדי שהלקוח יתחיל מחדש במקום לנסות שוב. */
   if (url.pathname.startsWith("/api/program/upload/")) {
     if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
     const step = url.pathname.slice("/api/program/upload/".length);
@@ -576,6 +581,7 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
         const uploaded = await env.MEDIA.resumeMultipartUpload(key, uploadId).uploadPart(part, request.body);
         return reply(request, { part: uploaded.partNumber, etag: uploaded.etag });
       } catch (error) {
+        if (vanishedUpload(error)) return reply(request, { error: "ההעלאה הזו כבר לא קיימת בשרת." }, 410);
         console.error("program multipart part error", key, part, error);
         return reply(request, { error: "העלאת החלק נכשלה." }, 500);
       }
@@ -589,6 +595,7 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
         const object = await env.MEDIA.resumeMultipartUpload(key, String(input.uploadId)).complete(parts.sort((a, b) => a.partNumber - b.partNumber));
         return reply(request, { url: `${url.origin}/media/${key}`, key, size: object.size });
       } catch (error) {
+        if (vanishedUpload(error)) return reply(request, { error: "ההעלאה הזו כבר לא קיימת בשרת." }, 410);
         console.error("program multipart complete error", key, error);
         return reply(request, { error: "סיום ההעלאה נכשל." }, 500);
       }

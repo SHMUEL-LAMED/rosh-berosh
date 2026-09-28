@@ -1018,16 +1018,17 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
     }
     if (!file.type.startsWith("audio/") && !/\.(mp3|m4a|wav|ogg|flac|aac|wma)$/i.test(file.name)) return json({ error: "יש לבחור קובץ שמע." }, 415);
     if (file.size > 75 * 1024 * 1024) return json({ error: "הקובץ גדול מ־75MB." }, 413);
-    const audioBuffer = await file.arrayBuffer();
     const key = `albums/${albumId}/audio-${crypto.randomUUID()}-${safeName(file.name)}`;
-    await env.MEDIA.put(key, audioBuffer, { httpMetadata: { contentType: file.type || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId, kind: "audio" } });
+    // לאלבום שכבר יש לו תמונה השיר מקבל אותה, ואין טעם לשלוף ולשמור עטיפה
+    // נפרדת מתוך הקובץ: הוא עובר ל־R2 כמו שהוא, בלי העתק נוסף בזיכרון הוורקר.
+    // רק לאלבום בלי תמונה הקובץ נקרא לזיכרון, והעטיפה שבו הופכת לתמונתו.
+    let coverUrl: string | null = album.coverUrl || null;
+    const audioBuffer = coverUrl ? null : await file.arrayBuffer();
+    await env.MEDIA.put(key, audioBuffer ?? file, { httpMetadata: { contentType: file.type || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { originalName: file.name, albumId, kind: "audio" } });
     const audioUrl = mediaUrl(key);
     const songId = crypto.randomUUID();
     const title = text(form.get("title")) || file.name.replace(/\.[^.]+$/, "").replace(/^\d+[\s._-]*/, "");
-    // לאלבום שכבר יש לו תמונה השיר מקבל אותה, ואין טעם לשלוף ולשמור עטיפה
-    // נפרדת מתוך הקובץ. רק לאלבום בלי תמונה העטיפה של השיר הופכת לתמונתו.
-    let coverUrl: string | null = album.coverUrl || null;
-    const cover = coverUrl ? null : extractCoverFromAudio(audioBuffer);
+    const cover = audioBuffer ? extractCoverFromAudio(audioBuffer) : null;
     if (cover) {
       const coverKey = `albums/${albumId}/cover-${songId}-${crypto.randomUUID()}.jpg`;
       await env.MEDIA.put(coverKey, cover.data, { httpMetadata: { contentType: cover.mime, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { songId, albumId } });
