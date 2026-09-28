@@ -29,16 +29,16 @@ type TimelinePoint = { bucket: number; channel: "site" | "phone"; votes: number 
 type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; fixedManagers?: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; voteTimeline: { hourly: TimelinePoint[]; daily: TimelinePoint[] }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
 type SurveyPage = "preview" | "surveys" | "settings" | "albums" | "artists" | "ivr" | "results" | "voters" | "analytics";
 type SurveyTab = "survey" | SurveyPage;
-type ProgramTab = "prog-programs" | "prog-guests" | "prog-ads" | "prog-site" | "prog-listeners" | "prog-publish";
+type ProgramTab = "prog-programs" | "prog-guests" | "prog-ads" | "prog-site" | "prog-polls" | "prog-listeners" | "prog-publish";
 type GeneralTab = "dashboard" | "subscribers" | "archives" | "access";
 type Tab = GeneralTab | SurveyTab | ProgramTab;
 // הניהול הוא מרכז אחד לשני האתרים. אתר הסקר ואתר התוכניות הם שני חלקים שווים בתוכו: לכל אחד דף בית
 // משלו ("אתר הסקר" / "תוכניות") ותת־תפריט שנפתח רק כשנמצאים בו. "כללי" — מה שמשותף לשניהם.
 const SURVEY_TABS: Record<SurveyPage, string> = { preview: "תצוגה מקדימה", surveys: "סקרים", settings: "הגדרות הסקר", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", results: "תוצאות", voters: "מצביעים", analytics: "נתונים מתקדמים" };
 // אתר התוכניות (GitHub Pages): הניהול שלו מוטמע כאן, עם כניסה משותפת.
-const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "מגישים ואורחים", "prog-ads": "ניקוי פרסומות", "prog-site": "הודעה ועדכונים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
+const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "מגישים ואורחים", "prog-ads": "ניקוי פרסומות", "prog-site": "הודעה ועדכונים", "prog-polls": "סקרים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
 const TITLES: Record<Tab, string> = { dashboard: "מרכז הניהול", survey: "אתר הסקר", ...SURVEY_TABS, ...PROGRAM_TABS, subscribers: "רשימת תפוצה", archives: "ארכיון וגיבויים", access: "הרשאות" };
-const TABS: Tab[] = ["dashboard", "survey", "preview", "surveys", "settings", "albums", "artists", "ivr", "results", "voters", "analytics", "prog-programs", "prog-guests", "prog-ads", "prog-site", "prog-listeners", "prog-publish", "subscribers", "archives", "access"];
+const TABS: Tab[] = ["dashboard", "survey", "preview", "surveys", "settings", "albums", "artists", "ivr", "results", "voters", "analytics", "prog-programs", "prog-guests", "prog-ads", "prog-site", "prog-polls", "prog-listeners", "prog-publish", "subscribers", "archives", "access"];
 const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");
 const isSurveyTab = (tab: Tab): tab is SurveyTab => tab === "survey" || tab in SURVEY_TABS;
 // הלשונית הפתוחה נשמרת בכתובת (#prog-programs), כדי שקישור מאתר התוכניות ייפתח ישר בחלק הנכון

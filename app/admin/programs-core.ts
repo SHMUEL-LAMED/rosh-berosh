@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from "react";
 import { normalizeGuests } from "../../worker/program-guests.js";
 import { publicHosts } from "../../worker/program-hosts.js";
+import { pollsIn } from "../../worker/program-polls-shared.js";
 
 export const PROGRAM_SITE = "https://shmuel-lamed.github.io/rosh-berosh-2/";
 
@@ -32,7 +33,20 @@ export type Contacts = typeof DEFAULT_CONTACTS;
 export type GuestProfile = { name: string; role: string; bio: string; photo: string; links: Link[] };
 /** מגיש (settings.hosts) — הסדר ברשימה הוא הסדר באתר */
 export type Host = { name: string; role: string; bio: string; photo: string; links: Link[]; seasons: string[]; current: boolean };
-export type Settings = { banner: Banner; updates: Update[]; contacts: Contacts; guests: GuestProfile[]; hosts: Host[] };
+/** סקר באתר התוכניות — אותם שדות כמו בשרת (worker/program-polls.ts) ובניהול הישן (admin-polls.js) */
+export type PollOption = { id: string; label: string; sub: string; image: string };
+export type Poll = {
+  id: string; enabled: boolean; title: string; question: string; description: string;
+  image: string; imageShape: "wide" | "square" | "circle"; hue: number;
+  layout: "list" | "grid" | "cards"; optionShape: "circle" | "square" | "rounded"; optionSize: "s" | "m" | "l";
+  multi: boolean; maxChoices: number; allowChange: boolean; results: "after" | "always" | "closed" | "admin";
+  from: string; until: string; thanks: string; buttonLabel: string;
+  show: { home: boolean; archive: boolean; me: boolean; allEpisodes: boolean; episodes: string[] };
+  options: PollOption[]; createdAt: string;
+};
+/** `polls` — סקרי האתר, בדיוק כפי שהגיעו (בלי נרמול, כדי ששמירה ופרסום לא ישנו סקר שלא נערך).
+    undefined — השדה חסר במקור (טיוטה או גרסה ישנה); פרסום בלי השדה אינו נוגע בסקרים. */
+export type Settings = { banner: Banner; updates: Update[]; contacts: Contacts; guests: GuestProfile[]; hosts: Host[]; polls?: Poll[] };
 export type Catalog = { seasons: Season[]; episodes: Episode[]; settings: Settings };
 export type SurveyRow = { id: string; name: string; active: boolean; open: boolean };
 export type Version = { id: string; by: string; episodes: number; createdAt: number };
@@ -99,7 +113,8 @@ export function normCatalog(raw: Record<string, unknown> | null | undefined): Ca
   const sites = (b.sites && typeof b.sites === "object" ? b.sites : {}) as Record<string, unknown>;
   const banner: Banner = { enabled: !!b.enabled, text: str(b.text), link: str(b.link), linkLabel: str(b.linkLabel), until: str(b.until).slice(0, 10), sites: { program: sites.program !== false, survey: sites.survey === true } };
   const updates = (Array.isArray(settings.updates) ? settings.updates as Array<Record<string, unknown>> : []).map((u, i) => ({ id: str(u.id || `u${i}`), date: str(u.date).slice(0, 10), title: str(u.title), text: str(u.text), link: str(u.link), pinned: !!u.pinned }));
-  return { seasons, episodes, settings: { banner, updates, contacts: normContacts(settings.contacts), guests: normalizeGuests(settings.guests) as GuestProfile[], hosts: publicHosts(settings.hosts) as Host[] } };
+  const polls = pollsIn(settings) as Poll[] | undefined;
+  return { seasons, episodes, settings: { banner, updates, contacts: normContacts(settings.contacts), guests: normalizeGuests(settings.guests) as GuestProfile[], hosts: publicHosts(settings.hosts) as Host[], ...(polls ? { polls } : {}) } };
 }
 /** מה שנשמר ומתפרסם — בלי שדות מחושבים, כדי שההשוואה תהיה נקייה */
 export const pack = (episode: Episode) => JSON.stringify(normEpisode(episode, 0));

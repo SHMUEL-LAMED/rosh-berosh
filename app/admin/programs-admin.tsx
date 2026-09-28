@@ -2,8 +2,8 @@
 
 /* ניהול אתר התוכניות — חלק רגיל של דף הניהול, באותו עיצוב ובאותה כניסה.
    הכול עובד על טיוטה שנשמרת אוטומטית בשרת (/api/program/draft), ו"פרסום"
-   מעביר אותה לאתר התוכניות (/api/program/catalog). חמישה חלקים: תוכניות,
-   אורחים (programs-guests), הודעה ועדכונים, מאזינים, פרסום. הטיפוסים והעזרים ב־programs-core, הבינה
+   מעביר אותה לאתר התוכניות (/api/program/catalog). החלקים: תוכניות,
+   אורחים (programs-guests), הודעה ועדכונים, סקרים (programs-polls), מאזינים, פרסום. הטיפוסים והעזרים ב־programs-core, הבינה
    המלאכותית ב־programs-ai, המאזינים ב־programs-listeners, העבודות ב־programs-jobs. */
 
 import type { ChangeEvent, DragEvent } from "react";
@@ -21,8 +21,10 @@ import { CommentsCard, commentsError, CountSettings, DeepStats, EpisodeTable, mi
 import { runJob, stopJob, useJob } from "./programs-jobs";
 import { GuestsSection } from "./programs-guests";
 import { HostsSection } from "./programs-hosts";
+import { PollsSection } from "./programs-polls";
+import { withPolls } from "../../worker/program-polls-shared.js";
 
-export type ProgramSection = "programs" | "guests" | "ads" | "site" | "listeners" | "publish";
+export type ProgramSection = "programs" | "guests" | "ads" | "site" | "polls" | "listeners" | "publish";
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
 type PatchEpisode = (id: string, fields: Partial<Episode> | ((episode: Episode) => Partial<Episode>)) => void;
 type Common = { data: Catalog; change(next: Catalog): void; mutate: Mutate; patchEpisode: PatchEpisode; onMessage(message: string): void };
@@ -61,7 +63,9 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
         if (!active) return;
         const pub = normCatalog(published);
         base.current = draft?.data && draft.data.baseVersion !== undefined ? draft.data.baseVersion ?? null : published.versionId ?? null;
-        const next = draft?.data ? normCatalog(draft.data) : pub;
+        const loaded = draft?.data ? normCatalog(draft.data) : pub;
+        // טיוטה ישנה בלי הסקרים ממשיכה עם הסקרים שבאתר — כדי שהשמירה והפרסום מכאן לא יאבדו אותם
+        const next = { ...loaded, settings: withPolls(loaded.settings, pub.settings.polls) };
         dataRef.current = next;
         setOrigin(pub); setData(next); setSurveys(list.surveys || []); setLoadError("");
       })
@@ -72,7 +76,9 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   /** כל שינוי נשמר אוטומטית בטיוטה בשרת. השינוי מחושב מהמצב העדכני ביותר, כך שגם עבודות ברקע לא דורסות עריכה */
   const mutate = useCallback<Mutate>((fn) => {
     const current = dataRef.current; if (!current) return;
-    const next = fn(current); if (next === current) return;
+    let next = fn(current); if (next === current) return;
+    // שחזור מגרסה או מגיבוי בלי הסקרים אינו מוחק אותם מהטיוטה
+    if (!next.settings.polls && current.settings.polls) next = { ...next, settings: withPolls(next.settings, current.settings.polls) };
     dataRef.current = next; setData(next); setSync("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
@@ -110,6 +116,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
     {section === "guests" && <><HostsSection data={data} mutate={mutate} onMessage={onMessage} /><GuestsSection data={data} mutate={mutate} onMessage={onMessage} /></>}
     {section === "ads" && <ProgramsAds episodes={data.episodes} patchEpisode={patchEpisode} onMessage={onMessage} />}
     {section === "site" && <SiteSection {...common} />}
+    {section === "polls" && <PollsSection data={data} mutate={mutate} onMessage={onMessage} />}
     {section === "listeners" && <ListenersSection data={data} onMessage={onMessage} />}
     {section === "publish" && <PublishSection {...common} origin={origin} changes={changes} base={base} onOpen={open} onPublished={(published, versionId) => { base.current = versionId; dataRef.current = published; setOrigin(published); setData(published); setSync(""); }} onDiscard={() => setReload((v) => v + 1)} />}
   </div>;

@@ -3,10 +3,13 @@
    הגדרות האתר (program_settings, המפתח "polls") ומתפרסמת יחד עם הקטלוג —
    כמו ההודעה בדף הבית: טיוטה, פרסום וגרסאות. ההצבעות נשמרות בטבלה
    program_poll_votes: שורה לכל אפשרות שמאזין בחר, מאזין מחובר אחד להצבעה אחת.
-   מי רואה תוצאות — לפי ההגדרה של הסקר (results); מנהלים רואים תמיד. */
+   מי רואה תוצאות — לפי ההגדרה של הסקר (results); מנהלים רואים תמיד.
+   טיוטה שנשמרת בלי השדה polls מקבלת אותו מהטיוטה הקודמת או ממה שמפורסם (draftWithPolls),
+   כדי ששמירה מניהול שאינו מכיר סקרים לא תהפוך בפרסום הבא ל"אין סקרים". */
 import { readSession, type SessionUser } from "./auth";
 import { checkBallotRate } from "./rate-limit";
 import { israelWallClock } from "./program-schedule.js";
+import { pollsIn, withPolls } from "./program-polls-shared.js";
 
 type Env = { DB: D1Database; ADMIN_EMAILS?: string };
 type Reply = (request: Request, body: unknown, status?: number) => Response;
@@ -109,6 +112,16 @@ export async function readPolls(env: Env): Promise<Poll[]> {
   try { return normalizePolls(JSON.parse(row.value_json)); } catch { return []; }
 }
 
+/** נתוני טיוטה עם settings.polls: מה שנשלח; ואם השדה חסר — מהטיוטה הקודמת (`previous`), אחרת מה שמפורסם.
+    טיוטה בלי settings בכלל נשארת כמו שהיא (פרסום שלה אינו נוגע בהגדרות). */
+export async function draftWithPolls<T>(env: Env, data: T, previous?: unknown): Promise<T> {
+  const record = data as Record<string, unknown> | null;
+  const settings = record && typeof record === "object" ? record.settings : null;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings) || pollsIn(settings)) return data;
+  const before = previous && typeof previous === "object" ? pollsIn((previous as Record<string, unknown>).settings) : undefined;
+  return { ...record, settings: withPolls(settings, before, before ? null : await readPolls(env)) } as T;
+}
+
 /** מותר לראות את התוצאות? */
 function resultsVisible(poll: Poll, user: SessionUser | null, voted: boolean, now = israelWallClock()) {
   if (user?.isAdmin) return true;
@@ -178,6 +191,31 @@ export async function pollsApi(request: Request, env: Env, h: { reply: Reply; ad
       ...choices.map((option) => env.DB.prepare("INSERT INTO program_poll_votes (poll_id,user_sub,option_id) VALUES (?,?,?)").bind(poll.id, user.sub, option)),
     ]);
     return h.reply(request, { ok: true, poll: (await pollStatus(env, [poll], user))[poll.id] });
+  }
+
+  /* GET /polls/results?ids=a,b — מנהל: התוצאות החיות לניהול, לכל מזהה שנשלח — גם סקר שעוד רק בטיוטה או
+     שנערך מאז הפרסום: כמה הצביעו, ההצבעות לכל אפשרות (גם לאפשרות שכבר נמחקה מהסקר), מתי הייתה
+     ההצבעה האחרונה, והאם הסקר מפורסם ופתוח עכשיו. */
+  if (path === "/polls/results" && method === "GET") {
+    if (!await h.admin(request, env)) return h.reply(request, { error: "אין הרשאת ניהול." }, 403);
+    const ids = [...new Set((url.searchParams.get("ids") || "").split(",").map(pollId).filter(Boolean))].slice(0, POLL_MAX);
+    const results: Record<string, { total: number; counts: Record<string, number>; lastVoteAt: number | null; published: boolean; open: boolean; closed: boolean }> = {};
+    if (!ids.length) return h.reply(request, { results });
+    const marks = ids.map(() => "?").join(",");
+    const [counts, voters] = await env.DB.batch([
+      env.DB.prepare(`SELECT poll_id AS poll, option_id AS option, COUNT(*) AS n FROM program_poll_votes WHERE poll_id IN (${marks}) GROUP BY poll_id, option_id`).bind(...ids),
+      env.DB.prepare(`SELECT poll_id AS poll, COUNT(DISTINCT user_sub) AS n, MAX(created_at) AS last FROM program_poll_votes WHERE poll_id IN (${marks}) GROUP BY poll_id`).bind(...ids),
+    ]);
+    const published = new Map((await readPolls(env)).map((poll) => [poll.id, poll]));
+    const now = israelWallClock();
+    for (const id of ids) {
+      const map: Record<string, number> = {};
+      for (const row of counts.results as Array<{ poll: string; option: string; n: number }>) if (row.poll === id) map[row.option] = Number(row.n) || 0;
+      const summary = (voters.results as Array<{ poll: string; n: number; last: number | null }>).find((row) => row.poll === id);
+      const poll = published.get(id);
+      results[id] = { total: Number(summary?.n || 0), counts: map, lastVoteAt: summary?.last ? Number(summary.last) : null, published: !!poll, open: !!poll && pollOpen(poll, now), closed: !!poll && pollClosed(poll, now) };
+    }
+    return h.reply(request, { results });
   }
 
   /* POST /polls/reset { pollId } — מנהל: מחיקת כל ההצבעות בסקר */
