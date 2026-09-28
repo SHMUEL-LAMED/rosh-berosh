@@ -12,7 +12,9 @@ import { AnalyticsPanel } from "./analytics-panel";
 import { downloadResultsXlsx, downloadAllResultsXlsx } from "./xlsx-export";
 import systemPrompts from "../../ivr-service/src/ivr-system-prompts.json";
 import { PhonePreview } from "./phone-preview";
-import { ProgramsAdmin, type ProgramSection } from "./programs-admin";
+import { IvrLineSettings } from "./ivr-line-settings";
+import { openEpisode, ProgramsAdmin, type ProgramSection } from "./programs-admin";
+import { InboxBoard, QuickSearch, useInbox, type SearchItem } from "./admin-home";
 import { AdminTour, FULL_TOUR, markTourSeen, SECTION_TITLES, SECTION_TOURS, SHORT_TOUR, sectionTour, TourChooser, tourSeen } from "./admin-tour";
 
 type Album = { id: string; title: string; artistName: string; coverUrl?: string; position: number; active: number };
@@ -29,16 +31,16 @@ type TimelinePoint = { bucket: number; channel: "site" | "phone"; votes: number 
 type Overview = { albums: Album[]; songs: Song[]; artists: Artist[]; managers: string[]; fixedManagers?: string[]; ivrRecorders: string[]; yemotConnected: boolean; ttsAvailable: boolean; votes: { total?: number; phone?: number; site?: number }; voteTimeline: { hourly: TimelinePoint[]; daily: TimelinePoint[] }; settings: Settings; readiness: Readiness; ivrPrompts: IvrPrompt[]; results: { albums: Result[]; songs: Result[]; artists: Result[] }; surveys: Survey[]; activeSurvey: Survey | null; suspicious: SuspiciousVote[] };
 type SurveyPage = "preview" | "surveys" | "settings" | "albums" | "artists" | "ivr" | "results" | "voters" | "analytics";
 type SurveyTab = "survey" | SurveyPage;
-type ProgramTab = "prog-programs" | "prog-guests" | "prog-ads" | "prog-site" | "prog-listeners" | "prog-publish";
+type ProgramTab = "prog-programs" | "prog-guests" | "prog-ads" | "prog-site" | "prog-polls" | "prog-listeners" | "prog-publish";
 type GeneralTab = "dashboard" | "subscribers" | "archives" | "access";
 type Tab = GeneralTab | SurveyTab | ProgramTab;
 // הניהול הוא מרכז אחד לשני האתרים. אתר הסקר ואתר התוכניות הם שני חלקים שווים בתוכו: לכל אחד דף בית
 // משלו ("אתר הסקר" / "תוכניות") ותת־תפריט שנפתח רק כשנמצאים בו. "כללי" — מה שמשותף לשניהם.
 const SURVEY_TABS: Record<SurveyPage, string> = { preview: "תצוגה מקדימה", surveys: "סקרים", settings: "הגדרות הסקר", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", results: "תוצאות", voters: "מצביעים", analytics: "נתונים מתקדמים" };
 // אתר התוכניות (GitHub Pages): הניהול שלו מוטמע כאן, עם כניסה משותפת.
-const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "מגישים ואורחים", "prog-ads": "ניקוי פרסומות", "prog-site": "הודעה ועדכונים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
+const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "מגישים ואורחים", "prog-ads": "ניקוי פרסומות", "prog-site": "הודעה ועדכונים", "prog-polls": "סקרים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
 const TITLES: Record<Tab, string> = { dashboard: "מרכז הניהול", survey: "אתר הסקר", ...SURVEY_TABS, ...PROGRAM_TABS, subscribers: "רשימת תפוצה", archives: "ארכיון וגיבויים", access: "הרשאות" };
-const TABS: Tab[] = ["dashboard", "survey", "preview", "surveys", "settings", "albums", "artists", "ivr", "results", "voters", "analytics", "prog-programs", "prog-guests", "prog-ads", "prog-site", "prog-listeners", "prog-publish", "subscribers", "archives", "access"];
+const TABS: Tab[] = ["dashboard", "survey", "preview", "surveys", "settings", "albums", "artists", "ivr", "results", "voters", "analytics", "prog-programs", "prog-guests", "prog-ads", "prog-site", "prog-polls", "prog-listeners", "prog-publish", "subscribers", "archives", "access"];
 const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");
 const isSurveyTab = (tab: Tab): tab is SurveyTab => tab === "survey" || tab in SURVEY_TABS;
 // הלשונית הפתוחה נשמרת בכתובת (#prog-programs), כדי שקישור מאתר התוכניות ייפתח ישר בחלק הנכון
@@ -71,6 +73,38 @@ export default function AdminPage() {
   const tourSteps = tourMode === "short" ? SHORT_TOUR : tourMode === "full" ? FULL_TOUR : tourMode.startsWith("section:") ? sectionTour(tourMode.slice(8)) : null;
   const tourNavigate = useCallback((next: string) => go(next as Tab), [go]);
   const closeTour = useCallback(() => { markTourSeen(); setTourMode("closed"); }, []);
+  // "מה מחכה לך" והחיפוש המהיר (Ctrl+K)
+  const { inbox, failed: inboxFailed, reload: reloadInbox } = useInbox(!!user?.isAdmin);
+  const [searching, setSearching] = useState(false);
+  const shownTab = useRef(tab);
+  useEffect(() => { if (tab === "dashboard" && shownTab.current !== "dashboard" && user?.isAdmin) reloadInbox(); shownTab.current = tab; }, [tab, user, reloadInbox]);
+  useEffect(() => {
+    if (!user?.isAdmin) return;
+    const onKey = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key === "k" || event.key === "K" || event.code === "KeyK")) { event.preventDefault(); setSearching((open) => !open); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [user]);
+  const searchItems = useMemo<SearchItem[]>(() => {
+    if (!searching) return [];
+    const group = (key: Tab) => isProgramTab(key) ? "אתר התוכניות" : isSurveyTab(key) && key !== "survey" ? "אתר הסקר" : key === "dashboard" || key === "survey" ? "" : "כללי";
+    const albumTitle = new Map((data?.albums ?? []).map((album) => [album.id, album.title]));
+    return [
+      ...TABS.map((key) => ({ kind: "tab" as const, id: key, title: TITLES[key], sub: group(key) })),
+      ...(inbox?.episodes ?? []).map((episode) => ({ kind: "episode" as const, id: episode.id, title: episode.title, sub: [episode.number != null ? `תוכנית ${episode.number}` : "", episode.date ? new Date(`${episode.date.slice(0, 10)}T12:00:00`).toLocaleDateString("he-IL") : "", episode.visible ? "" : "מוסתרת"].filter(Boolean).join(" · ") })),
+      ...(data?.albums ?? []).map((album) => ({ kind: "album" as const, id: album.id, title: album.title, sub: album.artistName })),
+      ...(data?.songs ?? []).map((song) => ({ kind: "song" as const, id: song.albumId, title: song.title, sub: albumTitle.get(song.albumId) || "" })),
+      ...(data?.artists ?? []).map((artist) => ({ kind: "artist" as const, id: artist.id, title: artist.name })),
+    ];
+  }, [searching, data, inbox]);
+  const pickSearch = useCallback((item: SearchItem) => {
+    // אלבום, שיר או זמר: פותחים את הרשימה, גוללים אליו ומהבהבים לרגע
+    const flash = (id: string) => setTimeout(() => { const element = document.getElementById(id); if (!element) return; element.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); element.classList.add("search-flash"); setTimeout(() => element.classList.remove("search-flash"), 1700); }, 150);
+    if (item.kind === "tab") go(item.id as Tab);
+    else if (item.kind === "episode") { openEpisode(item.id); go("prog-programs"); }
+    else if (item.kind === "artist") { go("artists"); flash(`artist-${item.id}`); }
+    else { go("albums"); flash(`album-${item.id}`); }
+  }, [go]);
+  const openFromInbox = useCallback((id: string) => { openEpisode(id); go("prog-programs"); }, [go]);
   const pickTour = useCallback((kind: "short" | "full") => { markTourSeen(); setTourMode(kind); }, []);
 
   if (user === undefined) return <main className="login-shell"><div className="loading">בודקים הרשאות…</div></main>;
@@ -182,9 +216,10 @@ export default function AdminPage() {
       <div className={`nav-section${isProgramTab(tab) ? " open" : ""}`} data-tour="nav-programs"><Nav className="nav-site" active={false} onClick={() => go("prog-programs")}>אתר התוכניות</Nav>{isProgramTab(tab) && <>{(Object.keys(PROGRAM_TABS) as ProgramTab[]).map((key) => <Nav key={key} className="nav-sub" active={tab === key} onClick={() => go(key)}>{PROGRAM_TABS[key]}</Nav>)}<button type="button" className="nav-tour" data-tour="tour-button" onClick={() => setTourMode("choose")}>🧭 סיור בניהול</button></>}</div>
       <p className="nav-group">כללי</p><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
-    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{isSurveyTab(tab) && data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{TITLES[tab]}{SECTION_TOURS[tab] && <button type="button" className="section-help" data-tour="section-help" onClick={() => setTourMode(`section:${tab}`)} title={`הסבר על ${SECTION_TITLES[tab]} — כל כפתור וכל שדה`}><i aria-hidden="true">?</i>הסבר</button>}</h1></div><span>{user.picture && <img src={user.picture} alt="" />}<bdi dir="ltr">{user.email}</bdi></span></header>
+    <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{isSurveyTab(tab) && data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{TITLES[tab]}{SECTION_TOURS[tab] && <button type="button" className="section-help" data-tour="section-help" onClick={() => setTourMode(`section:${tab}`)} title={`הסבר על ${SECTION_TITLES[tab]} — כל כפתור וכל שדה`}><i aria-hidden="true">?</i>הסבר</button>}</h1></div><button type="button" className="quick-search-open" onClick={() => setSearching(true)} title="חיפוש מהיר (Ctrl+K)"><span aria-hidden="true">🔍</span>חיפוש<kbd>Ctrl K</kbd></button><span>{user.picture && <img src={user.picture} alt="" />}<bdi dir="ltr">{user.email}</bdi></span></header>
       {isSurveyTab(tab) && <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>}
-      {tab === "dashboard" && <Dashboard data={data} onNavigate={go} />}
+      {tab === "dashboard" && <><InboxBoard inbox={inbox} failed={inboxFailed} votes24h={(data?.voteTimeline.hourly ?? []).reduce((sum, point) => sum + Number(point.votes || 0), 0)} missingPrompts={data ? SYSTEM_PROMPTS.filter((item) => !data.ivrPrompts?.find((prompt) => prompt.key === item.key)?.audioUrl).length : 0} onNavigate={(next) => go(next as Tab)} onOpenEpisode={openFromInbox} onReload={reloadInbox} /><Dashboard data={data} onNavigate={go} /></>}
+      {searching && <QuickSearch items={searchItems} onPick={pickSearch} onClose={() => setSearching(false)} />}
       {tab === "survey" && <SurveyHome data={data} onNavigate={go} onChanged={load} onMessage={notify} />}
       {tab === "preview" && data && <PreviewPanel data={data} />}
       {tab === "surveys" && data && <SurveysPanel data={data} onChanged={load} onMessage={notify} />}
@@ -194,8 +229,8 @@ export default function AdminPage() {
       {programsOpened && <ProgramsAdmin section={isProgramTab(tab) ? tab.slice(5) as ProgramSection : null} onMessage={notify} />}
       {choosing && <TourChooser onPick={pickTour} onClose={closeTour} />}
       {tourSteps && <AdminTour key={tourMode} steps={tourSteps} onNavigate={tourNavigate} onClose={closeTour} />}
-      {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP עם קובצי שמע. אפשר להעלות תמונת אלבום ידנית או לתת לה להישלף אוטומטית מה־metadata של השירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מכין…" : "יצירת האלבום"}</button></form></AdminSection>{uploadQueue.panel}<AdminSection title="שליפת תמונות מקבצי שמע"><p className="panel-help">שליפת עטיפות אלבום מה־metadata של שירים שכבר עלו אך אין להם תמונה.</p><button className="continue" style={{width:"100%"}} disabled={uploading} onClick={async()=>{setUploading(true);notify("");try{const r=await fetch("/api/admin/extract-covers",{method:"POST"});const d=await r.json();if(r.ok)notify(`נשלפו ${d.extracted} תמונות מתוך ${d.total} שירים ללא תמונה.`);else notify(d.error||"השליפה נכשלה.");}catch{notify("השליפה נכשלה.");}finally{setUploading(false);await load();}}}>שליפת תמונות חסרות</button></AdminSection><div className="album-admin-grid">{albumOrder.map((album, index) => <div key={album.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("album", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === albumOrder.length - 1} onClick={() => moveItem("album", index, 1)} aria-label="הזז למטה">▼</button></div><AlbumEditor album={album} songs={data?.songs.filter((song) => song.albumId === album.id) ?? []} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onFiles={(files) => addFiles(album.id, files)} onUploadCover={uploadAlbumCover} onRemoveCover={removeAlbumCover} onReordered={load} onMessage={notify} /></div>)}</div></>}
-      {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{artistOrder.map((item, index) => <div key={item.id} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("artist", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === artistOrder.length - 1} onClick={() => moveItem("artist", index, 1)} aria-label="הזז למטה">▼</button></div><ArtistRow item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} /></div>)}</div></AdminSection>}
+      {tab === "albums" && <><AdminSection title="העלאת אלבום שלם"><p className="panel-help">בחרו תיקייה או ZIP עם קובצי שמע. אפשר להעלות תמונת אלבום ידנית או לתת לה להישלף אוטומטית מה־metadata של השירים.</p><form className="upload-form" onSubmit={uploadAlbum}><input name="title" placeholder="שם האלבום" required /><input name="artistName" placeholder="שם האמן" required /><label className="file-field">בחירת תיקייה<input name="folder" type="file" multiple accept="audio/*" {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label><label className="file-field">או קובץ ZIP<input name="zip" type="file" accept=".zip,application/zip" /></label><button disabled={uploading}>{uploading ? "מכין…" : "יצירת האלבום"}</button></form></AdminSection>{uploadQueue.panel}<AdminSection title="שליפת תמונות מקבצי שמע"><p className="panel-help">שליפת עטיפות אלבום מה־metadata של שירים שכבר עלו אך אין להם תמונה.</p><button className="continue" style={{width:"100%"}} disabled={uploading} onClick={async()=>{setUploading(true);notify("");try{const r=await fetch("/api/admin/extract-covers",{method:"POST"});const d=await r.json();if(r.ok)notify(`נשלפו ${d.extracted} תמונות מתוך ${d.total} שירים ללא תמונה.`);else notify(d.error||"השליפה נכשלה.");}catch{notify("השליפה נכשלה.");}finally{setUploading(false);await load();}}}>שליפת תמונות חסרות</button></AdminSection><div className="album-admin-grid">{albumOrder.map((album, index) => <div key={album.id} id={`album-${album.id}`} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("album", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === albumOrder.length - 1} onClick={() => moveItem("album", index, 1)} aria-label="הזז למטה">▼</button></div><AlbumEditor album={album} songs={data?.songs.filter((song) => song.albumId === album.id) ?? []} onSave={saveCatalog} onToggle={toggle} onDelete={remove} onFiles={(files) => addFiles(album.id, files)} onUploadCover={uploadAlbumCover} onRemoveCover={removeAlbumCover} onReordered={load} onMessage={notify} /></div>)}</div></>}
+      {tab === "artists" && <AdminSection title="ניהול זמרים"><p className="panel-help">אפשר להוסיף תמונת זמר בהעלאת קובץ, או להדביק קישור. לכל זמר קיים אפשר להעלות/להחליף תמונה משורת הזמר.</p><form className="artist-form" onSubmit={addArtist}><input name="name" placeholder="שם הזמר" required /><input name="imageUrl" placeholder="קישור לתמונה (לא חובה)" /><input name="position" type="number" placeholder="סדר" /><label className="file-field">תמונת זמר (קובץ)<input name="image" type="file" accept="image/*" /></label><button>הוסף זמר</button></form><div className="admin-list">{artistOrder.map((item, index) => <div key={item.id} id={`artist-${item.id}`} className="reorder-row"><div className="reorder-arrows"><button type="button" disabled={index === 0} onClick={() => moveItem("artist", index, -1)} aria-label="הזז למעלה">▲</button><button type="button" disabled={index === artistOrder.length - 1} onClick={() => moveItem("artist", index, 1)} aria-label="הזז למטה">▼</button></div><ArtistRow item={item} onToggle={toggle} onDelete={remove} onUploadImage={uploadArtistImage} onRemoveImage={removeArtistImage} /></div>)}</div></AdminSection>}
       {tab === "access" && data && <><ManagersPanel managers={data.managers} fixed={data.fixedManagers || []} currentEmail={user.email} onSaved={load} onMessage={notify} /><AdminSection title="הרשאות לקו ההקלטות"><RecorderAccessPanel recorders={data.ivrRecorders || []} onSaved={load} onMessage={notify} /></AdminSection></>}
       {tab === "results" && data && <Results data={data.results} />}
       {tab === "voters" && <VotersPanel />}
@@ -282,6 +317,7 @@ function IvrPanel({ data, onSaved, onMessage }: { data: Overview; onSaved(): Pro
   };
   const orderPreview = (label: string, items: { id: string; name: string }[]) => <details className="prompt-order-details"><summary>הצגת סדר {label} להקלטה</summary><ol>{items.map((item, index) => <li key={item.id}><b>{itemCode(index, items.length)}.</b> {item.name}</li>)}</ol></details>;
   return <AdminSection title="קריינות הקו הטלפוני">
+    <IvrLineSettings onMessage={onMessage} />
     <div className={`connection-banner ${data.yemotConnected ? "connected" : "disconnected"}`}><b>{data.yemotConnected ? "החיבור לימות המשיח מוגדר" : "החיבור לימות המשיח עדיין לא מוגדר"}</b><span>{data.yemotConnected ? "קבצים חדשים יישלחו גם לקו." : "הקבצים נשמרים באתר בלבד עד להוספת YEMOT_TOKEN בסביבת Cloudflare."}</span></div>
     <p className="panel-help ivr-intro">המסך מחולק לפי סוג הקלטה. כל תפריט רציף נשמר בקובץ אחד בלבד — אלבומים, זמרים וגם שירי כל אלבום.</p>
     <div className="ivr-overview" aria-label="סיכום קריינויות"><span><b>1</b> קובץ לכל רשימה</span><span><b>{activeAlbums.length}</b> אלבומים פעילים</span><span><b>{activeArtists.length}</b> זמרים פעילים</span><span><b>{data.ivrRecorders?.length || 0}</b> מקליטים מורשים</span></div>

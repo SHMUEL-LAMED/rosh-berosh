@@ -9,7 +9,7 @@ import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 import { importSubscribers } from "./subscribers-admin";
 import { israelHour, isPublic, israelWallClock } from "./program-schedule.js";
 import { loadEpisode } from "./program-audio";
-import { normalizePolls, publicPolls } from "./program-polls";
+import { draftWithPolls, normalizePolls, publicPolls } from "./program-polls";
 import { normalizeGuests } from "./program-guests.js";
 import { normalizeHosts, publicHosts } from "./program-hosts.js";
 
@@ -364,12 +364,15 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     if (!user) return forbidden();
     if (method === "GET") {
       const draft = await readSetting<{ data: unknown; updatedAt: string; by: string }>(env, "draft");
-      return h.reply(request, { draft: draft || null });
+      // טיוטה ישנה שנשמרה בלי הסקרים — מוחזרת עם הסקרים שמפורסמים, כדי שאף ניהול לא יטען אותה כ"אין סקרים"
+      return h.reply(request, { draft: draft ? { ...draft, data: await draftWithPolls(env, draft.data) } : null });
     }
     if (method === "PUT") {
       const { data, ifUpdatedAt } = await body<{ data?: { seasons?: unknown[]; episodes?: unknown[] }; ifUpdatedAt?: unknown }>();
       if (!data || !Array.isArray(data.episodes) || !Array.isArray(data.seasons) || data.episodes.length > 2000) return h.reply(request, { error: "הטיוטה אינה תקינה." }, 400);
-      const draft = { data, updatedAt: new Date().toISOString(), by: user.email };
+      // טיוטה שנשלחה בלי settings.polls (ניהול שאינו מכיר סקרים) שומרת את הסקרים של הטיוטה הקודמת, או את המפורסמים
+      const previous = await readSetting<{ data: unknown }>(env, "draft");
+      const draft = { data: await draftWithPolls(env, data, previous?.data), updatedAt: new Date().toISOString(), by: user.email };
       // תנאי מוקדם (לא חובה): הלקוח שולח את updatedAt של הטיוטה שעליה עבד. אם
       // מאז מנהל אחר שמר טיוטה, לא נכתב דבר ומוחזרת הטיוטה השמורה (409), כדי
       // ששני מכשירים לא ידרסו זה את זה בשקט. בלי השדה — שמירה רגילה, כמו קודם.
@@ -410,7 +413,7 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     if (!token || !preview || preview.token !== token) return h.reply(request, { error: "קישור התצוגה המקדימה אינו בתוקף." }, 404);
     const draft = await readSetting<{ data: unknown; updatedAt: string }>(env, "draft");
     if (!draft) return h.reply(request, { error: "אין טיוטה כרגע." }, 404);
-    return h.reply(request, { data: draft.data, updatedAt: draft.updatedAt });
+    return h.reply(request, { data: await draftWithPolls(env, draft.data), updatedAt: draft.updatedAt });
   }
 
   /* ---------- גרסאות (גיבוי אוטומטי בכל פרסום) ---------- */

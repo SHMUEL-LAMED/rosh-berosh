@@ -111,10 +111,12 @@ function GuestEditor({ guest, guests, data, mutate, onMessage, onSelect }: { gue
     const asPanelist = profile.role === "חבר פאנל";
     mutate((cur) => ({ ...cur, episodes: cur.episodes.map((e) => {
       if (e.id !== id) return e;
-      const target = asPanelist ? e.panelists : e.guests;
-      const other = asPanelist ? e.guests : e.panelists;
+      // לתוכנית ישנה אין עדיין רשימת חברי פאנל — נחשבת ריקה
+      const panelists = Array.isArray(e.panelists) ? (e.panelists as string[]) : [];
+      const target = asPanelist ? panelists : e.guests;
+      const other = asPanelist ? e.guests : panelists;
       if (target.some((name) => guestKey(name) === guest.key) || other.some((name) => guestKey(name) === guest.key)) return e;
-      return asPanelist ? { ...e, panelists: [...e.panelists, guest.name] } : { ...e, guests: [...e.guests, guest.name] };
+      return asPanelist ? { ...e, panelists: [...panelists, guest.name] } : { ...e, guests: [...e.guests, guest.name] };
     }) }));
     setAddTo("");
   };

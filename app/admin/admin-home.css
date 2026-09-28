@@ -1,0 +1,30 @@
+/* "מה מחכה לך" במרכז הניהול */
+.inbox{margin:0 0 15px}.inbox>header{display:flex;align-items:center;justify-content:space-between;gap:12px}.inbox>header h2{margin:0}
+.inbox-refresh{width:36px;height:36px;border:1px solid #e4d8c4;border-radius:10px;color:#967b1f;background:#fff;font-size:17px;cursor:pointer}.inbox-refresh:hover{border-color:#d4b060}
+.inbox-votes{margin:10px 0 14px;color:var(--muted);font-size:14px}.inbox-votes b{color:var(--text);font-size:18px}.inbox-votes button,.inbox-link{padding:0;border:0;color:#967b1f;background:none;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer}
+.inbox-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.inbox-list button{display:flex;align-items:center;gap:13px;width:100%;padding:12px 14px;border:1px solid #efe4c8;border-radius:13px;color:var(--text);background:#fffaf0;text-align:right;font:inherit;cursor:pointer;transition:border-color .15s,transform .15s}
+.inbox-list button:hover{border-color:#d4b060;transform:translateY(-1px)}.inbox-list button.info{background:#fff;border-color:#eee6d6}
+.inbox-list i{display:grid;place-items:center;min-width:34px;height:34px;padding:0 8px;border-radius:99px;color:#fff;background:#c2453d;font-style:normal;font-weight:800;font-size:14px}.inbox-list i.dot{color:#967b1f;background:#f2e8cc;font-size:17px}
+.inbox-list span{flex:1;min-width:0}.inbox-list b,.inbox-list small{display:block}.inbox-list b{line-height:1.4}.inbox-list small{margin-top:2px;color:var(--muted);font-size:13px;line-height:1.45}.inbox-list em{color:#b8a060;font-style:normal}
+.inbox-clear{margin:10px 0 0;padding:12px 14px;border-radius:12px;color:#137861;background:#e8f7f2;font-weight:700}
+
+/* כפתור החיפוש בכותרת: צמוד לכתובת המייל, בצד השני של הכותרת */
+.admin-main>header>.quick-search-open{margin-inline-start:auto}
+.quick-search-open{display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:0 13px;border:1px solid #e4d8c4;border-radius:11px;color:#6d6448;background:#fff;font:inherit;font-size:13px;cursor:pointer}.quick-search-open:hover{border-color:#d4b060}.quick-search-open kbd{padding:1px 6px;border:1px solid #e4d8c4;border-radius:6px;background:#faf7ed;font-family:inherit;font-size:11px}
+
+/* חלון החיפוש */
+.quick-search-layer{position:fixed;inset:0;z-index:90;display:grid;justify-items:center;align-items:start;padding:12vh 16px 16px;background:rgba(42,36,24,.38)}
+.quick-search{display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(620px,100%);max-height:70vh;overflow:hidden;border:1px solid #e4d8c4;border-radius:18px;background:#fff;box-shadow:0 30px 80px rgba(42,36,24,.28)}
+.quick-search input{height:58px;padding:0 20px;border:0;border-bottom:1px solid #efe6d2;outline:0;color:var(--text);background:transparent;font:inherit;font-size:17px}
+.quick-search ul{margin:0;padding:6px;overflow-y:auto;list-style:none}
+.quick-search li{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:11px;cursor:pointer}.quick-search li.active{background:#f7efd8}
+.quick-search li span{flex:1;min-width:0}.quick-search li b,.quick-search li small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quick-search li small{margin-top:2px;color:var(--muted);font-size:13px}
+.quick-search li em{flex:none;padding:3px 9px;border-radius:99px;color:#967b1f;background:#f2e8cc;font-style:normal;font-size:12px;font-weight:700}
+.quick-search li.empty{justify-content:center;color:var(--muted);cursor:default}
+.quick-search footer{display:flex;gap:16px;flex-wrap:wrap;padding:10px 16px;border-top:1px solid #efe6d2;color:var(--muted);font-size:12px}.quick-search kbd{margin-inline-end:4px;padding:1px 6px;border:1px solid #e4d8c4;border-radius:6px;background:#faf7ed;font-family:inherit}
+@media(max-width:580px){.quick-search-layer{padding-top:8vh}.quick-search footer{display:none}.quick-search-open kbd{display:none}}
+
+/* פריט שנפתח מהחיפוש: הבהוב קצר כדי שיהיה ברור איפה הוא */
+.search-flash{animation:search-flash 1.6s ease-out}@keyframes search-flash{0%,30%{box-shadow:0 0 0 3px #d4b060;border-radius:16px}100%{box-shadow:0 0 0 3px transparent}}
+@media(prefers-reduced-motion:reduce){.search-flash{animation:none;outline:3px solid #d4b060}}

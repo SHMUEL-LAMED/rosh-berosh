@@ -606,8 +606,11 @@ test("the voting line transfers the caller back to the main line when the call i
   for (const off of ["0", "off", "OFF", "none", "no"]) assert.equal(resolvePostVoteTransfer(off), "", `${off} מבטל את ההעברה`);
 
   const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
-  assert.match(server, /const POST_VOTE_TRANSFER = resolvePostVoteTransfer\(process\.env\.POST_VOTE_TRANSFER\)/);
-  assert.match(server, /function finishCall\(call\) \{ return POST_VOTE_TRANSFER \? call\.routing_yemot\(POST_VOTE_TRANSFER\) : call\.hangup\(\); \}/);
+  // היעד נקבע לכל שיחה: מסך הניהול באתר, אחריו POST_VOTE_TRANSFER ואחריו ברירת המחדל.
+  const { resolveLineSettings } = require("../ivr-service/src/line-settings.js");
+  assert.equal(resolveLineSettings(null, {}).postVoteTransfer, "0796077075", "בלי שום הגדרה מועברים לקו הראשי");
+  assert.equal(resolveLineSettings(null, { POST_VOTE_TRANSFER: "off" }).postVoteTransfer, "");
+  assert.match(server, /function finishCall\(call\) \{\n  const target = settingsOf\(call\)\.postVoteTransfer;\n  return target \? call\.routing_yemot\(target\) : call\.hangup\(\);/);
   // מי שכבר הצביע שומע את ההודעה ומועבר חזרה לקו, ולא מנותק באמצע.
   const alreadyVoted = [...server.matchAll(/system:already_voted[\s\S]{0,220}?(finishCall\(call\)|call\.hangup\(\))/g)];
   assert.equal(alreadyVoted.length, 2, "שני המסלולים של הצבעה כפולה חייבים להיבדק");
@@ -627,10 +630,10 @@ test("an empty entry requires explicit confirmation before transfer", () => {
   assert.doesNotMatch(TRANSFER_KEY, /[\d,]/, "ערך ההקשה הריקה לא יכול להיראות כמו קוד הקשה או לשבור את שורת הפרמטרים");
 
   const server = readFileSync(new URL("../ivr-service/src/server.js", import.meta.url), "utf8");
-  assert.match(server, /function transferOnHash\(options\) \{\n  return transferOnEmptyEntry\(options, POST_VOTE_TRANSFER\);/);
+  assert.match(server, /function transferOnHash\(call, options\) \{\n  return transferOnEmptyEntry\(options, settingsOf\(call\)\.postVoteTransfer\);/);
   assert.match(server, /async function confirmTransfer\(call, prompts\)/);
   assert.match(server, /answer !== "1"\) return false/, "רק הקשת 1 מאשרת העברה");
-  assert.match(server, /call\.routing_yemot\(POST_VOTE_TRANSFER\);\n\}/, "ההעברה עצמה יוצאת מהשיחה דרך routing_yemot");
+  assert.match(server, /call\.routing_yemot\(settingsOf\(call\)\.postVoteTransfer\);\n\}/, "ההעברה עצמה יוצאת מהשיחה דרך routing_yemot");
 
   // שני התפריטים של קו ההצבעה: רשימת הבחירה ותפריט השלבים הראשי.
   const votingReads = [...server.matchAll(/await call\.read\([^;]*?"tap",\s*transferOnHash\(/g)];

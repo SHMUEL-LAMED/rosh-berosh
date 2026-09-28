@@ -6,6 +6,7 @@ import { normalizePhone } from "./phone";
 import { resolveCatalogPosition } from "./catalog-position.js";
 import { placeholders } from "./sql.js";
 import { normalizeBanner, normalizeUpdates, settingStatement, versionStatements } from "./program-tools";
+import { isScheduled, israelWallClock, normalizePublishAt } from "./program-schedule.js";
 
 export type AdminEnv = { DB: D1Database; MEDIA: R2Bucket; YEMOT_TOKEN?: string; YEMOT_API_BASE?: string; ADMIN_EMAILS?: string; AI_API_KEY?: string; AI_BASE_URL?: string; AI_TRANSCRIBE_MODEL?: string; AI_CHAT_MODEL?: string; TTS_PROVIDER?: string; ELEVENLABS_API_KEY?: string; ELEVENLABS_VOICE_ID?: string; GOOGLE_SA_KEY?: string };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -653,6 +654,31 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
   if (request.method === "GET" && url.pathname === "/api/admin/analytics") {
     try { return json(await buildAnalytics(env, surveyId, { fresh: url.searchParams.get("fresh") === "1" })); }
     catch (error) { console.error("analytics error", error); return json({ error: "לא הצלחנו לחשב את הנתונים המתקדמים." }, 500); }
+  }
+
+  // "מה מחכה לי" במסך הכניסה לניהול, ורשימת התוכניות לחיפוש המהיר (Ctrl+K). כל חלק נספר בנפרד:
+  // טבלה שעוד לא נוצרה (אתר התוכניות לפני השימוש הראשון) נספרת כאפס ולא מפילה את הכול.
+  if (request.method === "GET" && url.pathname === "/api/admin/inbox") {
+    const count = async (sql: string) => { try { return Number((await env.DB.prepare(sql).first<{ n: number }>())?.n) || 0; } catch { return 0; } };
+    const [messagesUnread, commentsPending, draftRow, episodeRows] = await Promise.all([
+      count("SELECT COUNT(*) AS n FROM program_messages WHERE read_at IS NULL"),
+      count("SELECT COUNT(*) AS n FROM program_comments WHERE status='pending'"),
+      env.DB.prepare("SELECT updated_at AS updatedAt FROM program_settings WHERE key='draft'").first<{ updatedAt: number }>().catch(() => null),
+      env.DB.prepare("SELECT id,data_json FROM program_episodes ORDER BY date DESC,number DESC LIMIT 2000").all<{ id: string; data_json: string }>().then((r) => r.results).catch(() => []),
+    ]);
+    const now = israelWallClock(), soon = israelWallClock(Date.now() + 14 * 86400000);
+    const episodes: Array<{ id: string; title: string; number: number | null; date: string; visible: boolean }> = [];
+    const scheduled: Array<{ id: string; title: string; publishAt: string }> = [];
+    for (const row of episodeRows) {
+      let data: Record<string, unknown>;
+      try { data = JSON.parse(row.data_json); } catch { continue; }
+      const title = String(data.title || "").slice(0, 200);
+      episodes.push({ id: row.id, title, number: Number.isFinite(Number(data.number)) && data.number !== null && data.number !== "" ? Number(data.number) : null, date: String(data.date || ""), visible: data.visible !== false });
+      const publishAt = normalizePublishAt(data.publishAt);
+      if (data.visible !== false && isScheduled(data, now) && publishAt <= soon) scheduled.push({ id: row.id, title, publishAt });
+    }
+    scheduled.sort((a, b) => a.publishAt.localeCompare(b.publishAt));
+    return json({ messagesUnread, commentsPending, draft: draftRow ? { updatedAt: draftRow.updatedAt } : null, scheduled: scheduled.slice(0, 8), scheduledCount: scheduled.length, episodes });
   }
 
   if (request.method === "GET" && url.pathname === "/api/admin/overview") {

@@ -5,6 +5,7 @@ import { clearSessionCookie, createSession, destroySession, GOOGLE_CLIENT_ID, is
 import { adminApi } from "./admin";
 import { subscribersAdminApi } from "./subscribers-admin";
 import { ivrAdminApi } from "./ivr-admin";
+import { IVR_LINE_SETTINGS_PATH, lineSettingsAdminApi, lineSettingsForIvrResponse } from "./ivr-line-settings-api";
 import { ensureRuntimeSchema } from "./schema";
 import { deleteIvrAudioIfUnreferenced, readIvrPrompts, readIvrRecorders, syncPromptToYemot, upsertIvrPrompt } from "./ivr-prompts";
 import { normalizePhone } from "./phone";
@@ -29,6 +30,9 @@ interface Env {
   // Workers AI (תמלול וסיכום של תוכניות) ומפתח Claude אופציונלי לסיכומים
   AI?: AiBinding;
   ANTHROPIC_API_KEY?: string;
+  // בניית אתר התוכניות עכשיו (GitHub Actions של rosh-berosh-2) — טוקן עם Actions: Read and write
+  GITHUB_TOKEN?: string;
+  PROGRAM_SITE_REPO?: string;
   IMAGES: { input(stream: ReadableStream): { transform(options: Record<string, unknown>): { output(options: { format: string; quality: number }): Promise<{ response(): Response }> } } };
 }
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; passThroughOnException(): void }
@@ -423,6 +427,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const handled = await subscribersAdminApi(request, env);
     if (handled) return handled;
   }
+  if (url.pathname.startsWith("/api/admin/ivr-line-settings")) {
+    const handled = await lineSettingsAdminApi(request, env);
+    if (handled) return handled;
+  }
   if (url.pathname.startsWith("/api/admin/")) {
     const response = await adminApi(request, env);
     if (request.method !== "GET" && response.ok) invalidateCatalogCache(request, ctx);
@@ -433,6 +441,12 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (url.pathname === "/api/ivr/catalog" && request.method === "GET") {
     if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
     return cachedIvrCatalog(request, env, ctx);
+  }
+  // הגדרות הקו (מספר ההעברה, זמני ההמתנה והחזרות) שנקבעו במסך הניהול. השירות
+  // שומר אותן בזיכרון לדקה, ולכן הנתיב אינו עובר במטמון הקצה.
+  if (url.pathname === IVR_LINE_SETTINGS_PATH && request.method === "GET") {
+    if (!verifyIvrSecret(request, env)) return json({ error: "אין הרשאה." }, 401);
+    return lineSettingsForIvrResponse(env);
   }
   // קו הניהול הטלפוני, כמו קו ההצבעה, אינו מריץ כאן את בניית הסכמה המלאה: היא
   // עשרות משפטים ברצף על מסד קר, וימות המשיח מנתקת לפני שהמנהל שומע תפריט.

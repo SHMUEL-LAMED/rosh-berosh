@@ -230,3 +230,7 @@
 .host-row-head span{display:grid;gap:2px;min-width:0;flex:1}.host-row-head small{color:var(--muted);font-size:12px}
 .host-row-head i{font-style:normal;color:var(--muted)}
 .host-editor{grid-column:1/-1;display:grid;gap:14px;padding:8px 4px 4px;border-top:1px solid #efe6d4}
+/* "פרסם רק את התוכנית הזו" — פס מעל העורך כשהתוכנית שונה ממה שבאתר */
+.prog-one{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;border:1px solid #d4b060;border-radius:16px;background:linear-gradient(90deg,#fbf3dc,#fffaf0)}.prog-one>span{flex:1;min-width:220px}.prog-one b,.prog-one small{display:block}.prog-one small{margin-top:3px;color:var(--muted);line-height:1.5}.prog-one .prog-check{margin:0}
+.prog-build{display:grid;gap:10px}.prog-build-state{display:flex;align-items:center;gap:9px;flex-wrap:wrap;color:var(--muted);font-size:14px}.prog-build-state i{width:10px;height:10px;border-radius:50%;background:#b8b0a0}.prog-build-state i.ok{background:#1f9d72}.prog-build-state i.run{background:#d4a32a;animation:prog-pulse 1.2s ease-in-out infinite}.prog-build-state i.bad{background:#c2453d}.prog-build-state a{color:#967b1f}
+@keyframes prog-pulse{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){.prog-build-state i.run{animation:none}}
