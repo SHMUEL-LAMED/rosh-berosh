@@ -36,7 +36,7 @@ type Tab = GeneralTab | SurveyTab | ProgramTab;
 // משלו ("אתר הסקר" / "תוכניות") ותת־תפריט שנפתח רק כשנמצאים בו. "כללי" — מה שמשותף לשניהם.
 const SURVEY_TABS: Record<SurveyPage, string> = { preview: "תצוגה מקדימה", surveys: "סקרים", settings: "הגדרות הסקר", albums: "אלבומים ושירים", artists: "זמרים", ivr: "קריינות לקו", results: "תוצאות", voters: "מצביעים", analytics: "נתונים מתקדמים" };
 // אתר התוכניות (GitHub Pages): הניהול שלו מוטמע כאן, עם כניסה משותפת.
-const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "אורחים", "prog-ads": "ניקוי פרסומות", "prog-site": "הודעה ועדכונים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
+const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "מגישים ואורחים", "prog-ads": "ניקוי פרסומות", "prog-site": "הודעה ועדכונים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
 const TITLES: Record<Tab, string> = { dashboard: "מרכז הניהול", survey: "אתר הסקר", ...SURVEY_TABS, ...PROGRAM_TABS, subscribers: "רשימת תפוצה", archives: "ארכיון וגיבויים", access: "הרשאות" };
 const TABS: Tab[] = ["dashboard", "survey", "preview", "surveys", "settings", "albums", "artists", "ivr", "results", "voters", "analytics", "prog-programs", "prog-guests", "prog-ads", "prog-site", "prog-listeners", "prog-publish", "subscribers", "archives", "access"];
 const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");

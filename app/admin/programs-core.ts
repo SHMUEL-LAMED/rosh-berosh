@@ -5,6 +5,7 @@
 
 import { useSyncExternalStore } from "react";
 import { normalizeGuests } from "../../worker/program-guests.js";
+import { publicHosts } from "../../worker/program-hosts.js";
 
 export const PROGRAM_SITE = "https://shmuel-lamed.github.io/rosh-berosh-2/";
 
@@ -29,7 +30,9 @@ export const DEFAULT_CONTACTS = {
 export type Contacts = typeof DEFAULT_CONTACTS;
 /** פרופיל של אורח (settings.guests) — מזוהה לפי השם כפי שהוא בשדה האורחים של התוכניות */
 export type GuestProfile = { name: string; role: string; bio: string; photo: string; links: Link[] };
-export type Settings = { banner: Banner; updates: Update[]; contacts: Contacts; guests: GuestProfile[] };
+/** מגיש (settings.hosts) — הסדר ברשימה הוא הסדר באתר */
+export type Host = { name: string; role: string; bio: string; photo: string; links: Link[]; seasons: string[]; current: boolean };
+export type Settings = { banner: Banner; updates: Update[]; contacts: Contacts; guests: GuestProfile[]; hosts: Host[] };
 export type Catalog = { seasons: Season[]; episodes: Episode[]; settings: Settings };
 export type SurveyRow = { id: string; name: string; active: boolean; open: boolean };
 export type Version = { id: string; by: string; episodes: number; createdAt: number };
@@ -96,7 +99,7 @@ export function normCatalog(raw: Record<string, unknown> | null | undefined): Ca
   const sites = (b.sites && typeof b.sites === "object" ? b.sites : {}) as Record<string, unknown>;
   const banner: Banner = { enabled: !!b.enabled, text: str(b.text), link: str(b.link), linkLabel: str(b.linkLabel), until: str(b.until).slice(0, 10), sites: { program: sites.program !== false, survey: sites.survey === true } };
   const updates = (Array.isArray(settings.updates) ? settings.updates as Array<Record<string, unknown>> : []).map((u, i) => ({ id: str(u.id || `u${i}`), date: str(u.date).slice(0, 10), title: str(u.title), text: str(u.text), link: str(u.link), pinned: !!u.pinned }));
-  return { seasons, episodes, settings: { banner, updates, contacts: normContacts(settings.contacts), guests: normalizeGuests(settings.guests) as GuestProfile[] } };
+  return { seasons, episodes, settings: { banner, updates, contacts: normContacts(settings.contacts), guests: normalizeGuests(settings.guests) as GuestProfile[], hosts: publicHosts(settings.hosts) as Host[] } };
 }
 /** מה שנשמר ומתפרסם — בלי שדות מחושבים, כדי שההשוואה תהיה נקייה */
 export const pack = (episode: Episode) => JSON.stringify(normEpisode(episode, 0));
