@@ -32,7 +32,7 @@ const seedDriveId = driveIdOf;
 const PROFILE_PHOTO_SOURCES: Record<string, string> = {
   "alchanan-inbal": "https://www.emess.co.il/upload/pictures/16/16674.jpg",
   "guy-meroz": "https://upload.wikimedia.org/wikipedia/commons/8/87/Meroz.JPG",
-  "dudi-zinger": "https://img.youtube.com/vi/Pz3iC9Qz23w/maxresdefault.jpg",
+  "dudi-zinger": "https://www.kol-play.co.il/media/Storage/150c4dee-a237-4490-93be-e1bfbc672d70_tumb_250X250.jpg",
   "yehuda-born": "https://www.emess.co.il/resize/?height=0&url=%2Fuploads%2F2025%2F02%2F%D7%99%D7%94%D7%95%D7%93%D7%94-%D7%91%D7%95%D7%A8%D7%9F-%D7%94%D7%A7%D7%95%D7%9C-%D7%94%D7%97%D7%93%D7%A9.png&width=800",
   "yossi-stark": "https://secure.gravatar.com/avatar/1e028649e67f73e8d264623da9b79899db7e31c7d49132d302c7fcb8735553ee?s=500&d=mm&r=g",
   "yermi-slater": "https://www.emess.co.il/resize/?width=800&height=450&url=/uploads/2025/02/%D7%99%D7%A8%D7%9E%D7%99-%D7%A1%D7%9C%D7%99%D7%99%D7%98%D7%A8-%D7%94%D7%A7%D7%95%D7%9C-%D7%94%D7%97%D7%93%D7%A9.png",
