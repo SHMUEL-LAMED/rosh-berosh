@@ -8,6 +8,7 @@ import { NOTIFIED_KEY, notifiedStatement, notifyEpisodes, programPushApi } from 
 import { programAiApi, type AiBinding } from "./program-ai";
 import { cutMp3, validateCuts } from "./program-mp3-cut";
 import { runTextFixes, TEXT_FIXES_KEY } from "./program-text-fixes";
+import { backfillProgramPeople, correctProgramPeople, PEOPLE_MARKERS } from "./program-people-backfill";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string };
 const ORIGIN = "https://shmuel-lamed.github.io";
@@ -172,14 +173,17 @@ function episodeNumber(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
-/** ההכנות החד־פעמיות (זריעה, סימון ההקלטות ב־R2, תיקוני כתיב). כשכל הסימונים כבר במסד — שאילתה
-    אחת ודי, במקום שלוש בזו אחר זו בכל טעינה של האתר. */
+/** ההכנות החד־פעמיות (זריעה, סימון ההקלטות ב־R2, תיקוני כתיב, שיוך המגישים והאורחים). כשכל הסימונים
+    כבר במסד — שאילתה אחת ודי, במקום בדיקה נפרדת לכל אחת בזו אחר זו בכל טעינה של האתר. */
 async function catalogSetup(env: Env) {
-  const done = await env.DB.prepare("SELECT COUNT(*) AS n FROM program_settings WHERE key IN (?,?,?)").bind(SEEDED_KEY, R2_BACKFILL_KEY, TEXT_FIXES_KEY).first<{ n: number }>();
-  if (Number(done?.n) === 3) return;
+  const keys = [SEEDED_KEY, R2_BACKFILL_KEY, TEXT_FIXES_KEY, ...PEOPLE_MARKERS];
+  const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM program_settings WHERE key IN (${keys.map(() => "?").join(",")})`).bind(...keys).first<{ n: number }>();
+  if (Number(done?.n) === keys.length) return;
   await seedOnce(env);
   await backfillSeedR2Metadata(env);
   await runTextFixes(env);   // תיקוני כתיב חד־פעמיים בשמות ובתיאורים
+  await backfillProgramPeople(env);
+  await correctProgramPeople(env);
 }
 
 async function catalog(env: Env, includeHidden = false, origin = "") {

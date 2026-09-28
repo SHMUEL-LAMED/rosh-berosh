@@ -62,8 +62,19 @@ test("normalizeHosts keeps known fields, drops duplicates and unsafe links", () 
 
 test("hosts publish with the catalog; until saved the public sees the defaults", async () => {
   const { call, admin } = await setup();
-  let pub = (await (await call("/api/program/catalog")).json()).settings;
-  assert.deepEqual(pub.hosts.map((h) => h.name), ["קובי בלום", "ירמי סלייטר", "מיכאל לוי"]);
+  const catalog = await (await call("/api/program/catalog")).json();
+  assert.deepEqual(catalog.episodes.find((e) => e.number === 84).hosts, ["מיכאל לוי", "ירמי סלייטר"], "the one-off substitute replaces the usual host");
+  assert.deepEqual(catalog.episodes.find((e) => e.number === 87).guests, ["פיני איינהורן", "גיא מרוז"]);
+  assert.ok(catalog.episodes.find((e) => e.number === 88).panelists.includes("ארי וייזר"));
+  assert.deepEqual(catalog.episodes.find((e) => e.number === 1).hosts, ["שלמה גולדברג"]);
+  assert.deepEqual(catalog.episodes.find((e) => e.number === 77).hosts, ["מיכאל לוי", "קובי בלום"]);
+  assert.ok(catalog.episodes.find((e) => e.number === 77).panelists.includes("דודי זינגר"));
+  assert.ok(!catalog.episodes.find((e) => e.number === 88).guests.includes("יאיר שטיין"));
+  assert.ok(catalog.episodes.find((e) => e.number === 88).panelists.includes("יאיר שטיין"));
+  assert.ok(catalog.settings.guests.some((g) => g.name === "יוסי קאהן" && g.role === "חבר פאנל"));
+  assert.ok(!catalog.settings.hosts.some((h) => h.name === "דודי זינגר"));
+  let pub = catalog.settings;
+  assert.deepEqual(pub.hosts.map((h) => h.name), DEFAULT_HOSTS.map((h) => h.name));
   const w = await publish(call, admin, { hosts: [{ name: "ירמי סלייטר", role: "מגיש", seasons: ["slater"], photo: "https://media.example/y.jpg" }, { name: "קובי בלום", bio: "ותיק" }] });
   assert.equal(w.status, 200, await w.clone().text());
   pub = (await (await call("/api/program/catalog")).json()).settings;
