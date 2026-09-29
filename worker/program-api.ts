@@ -166,10 +166,15 @@ async function seedOnce(env: Env) {
  * האם מזהה קובץ הדרייב שייך לתוכנית בקטלוג. חיפוש זול של המחרוזת בנתוני
  * התוכניות, ואז בדיקה שהיא מופיעה שם כמזהה שלם ולא כחלק ממזהה ארוך יותר.
  */
+/** הקלטות שכבר אומתו בקטלוג — נשמר בזיכרון כדי שכל בקשת טווח (דילוג, המשך הזרמה) לא תחכה לחיפוש במסד */
+const knownRecordings = new Set<string>();
 async function catalogHasRecording(env: Env, id: string) {
+  if (knownRecordings.has(id)) return true;
   const rows = (await env.DB.prepare("SELECT data_json FROM program_episodes WHERE instr(data_json,?)>0 LIMIT 20").bind(id).all<{ data_json: string }>()).results;
   const whole = new RegExp(`(?:^|[^\\w-])${id}(?:[^\\w-]|$)`);
-  return rows.some((row) => whole.test(row.data_json));
+  const found = rows.some((row) => whole.test(row.data_json));
+  if (found) knownRecordings.add(id);
+  return found;
 }
 
 /** הכתובת (slug) הראשונה שתופיע פעמיים אחרי הפרסום, או "" כשאין כפילות. */
@@ -194,10 +199,12 @@ function episodeNumber(value: unknown): number | null {
 
 /** ההכנות החד־פעמיות (זריעה, סימון ההקלטות ב־R2, תיקוני כתיב, שיוך המגישים והאורחים). כשכל הסימונים
     כבר במסד — שאילתה אחת ודי, במקום בדיקה נפרדת לכל אחת בזו אחר זו בכל טעינה של האתר. */
+let setupDone = false;
 async function catalogSetup(env: Env) {
+  if (setupDone) return;
   const keys = [SEEDED_KEY, R2_BACKFILL_KEY, TEXT_FIXES_KEY, ...PEOPLE_MARKERS];
   const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM program_settings WHERE key IN (${keys.map(() => "?").join(",")})`).bind(...keys).first<{ n: number }>();
-  if (Number(done?.n) === keys.length) return;
+  if (Number(done?.n) === keys.length) { setupDone = true; return; }
   await seedOnce(env);
   await backfillSeedR2Metadata(env);
   await runTextFixes(env);   // תיקוני כתיב חד־פעמיים בשמות ובתיאורים
@@ -221,7 +228,20 @@ async function partialSnapshot(env: Env, current: Array<{ id: string; data_json:
   return { seasons: Array.isArray(seasons) ? seasons : (saved.get("seasons") || []), episodes, settings };
 }
 
+/** הקטלוג הציבורי נשמר בזיכרון לזמן קצר: דף הבית לא מחכה לשאילתות במסד בכל ביקור. פרסום מנקה אותו. */
+const PUBLIC_CATALOG_TTL = 20_000;
+let publicCatalogMemo: { at: number; origin: string; data: Promise<Awaited<ReturnType<typeof buildCatalog>>> } | null = null;
+function forgetPublicCatalog() { publicCatalogMemo = null; }
 async function catalog(env: Env, includeHidden = false, origin = "") {
+  if (includeHidden) return buildCatalog(env, true, origin);
+  const memo = publicCatalogMemo;
+  if (memo && memo.origin === origin && Date.now() - memo.at < PUBLIC_CATALOG_TTL) return memo.data;
+  const data = buildCatalog(env, false, origin);
+  publicCatalogMemo = { at: Date.now(), origin, data };
+  data.catch(() => { if (publicCatalogMemo?.data === data) publicCatalogMemo = null; });
+  return data;
+}
+async function buildCatalog(env: Env, includeHidden: boolean, origin: string) {
   await catalogSetup(env);
   // התוכניות וההגדרות הציבוריות במקביל
   const [[episodes, settings], publicSettingsValue] = await Promise.all([
@@ -254,6 +274,8 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/program/")) return null;
   if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }));
+  // כל שינוי (פרסום, הגדרות, מחיקה) — הקטלוג השמור בזיכרון נבנה מחדש בבקשה הבאה
+  if (request.method !== "GET" && request.method !== "HEAD") forgetPublicCatalog();
   if (url.pathname.startsWith("/api/program/profile-photo/") && (request.method === "GET" || request.method === "HEAD")) {
     const id = safeId(url.pathname.slice("/api/program/profile-photo/".length));
     const source = PROFILE_PHOTO_SOURCES[id];
@@ -340,9 +362,10 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
     const id = url.pathname.slice("/api/program/stream/".length);
     if (!DRIVE_ID.test(id)) return reply(request, { error: "מזהה הקלטה לא תקין." }, 400);
     // רק הקלטות של תוכניות בקטלוג — הוורקר אינו מתווך לכל קובץ דרייב שהוא
-    if (!await catalogHasRecording(env, id)) return reply(request, { error: "ההקלטה לא נמצאה." }, 404);
+    // קובץ שכבר ב־R2 הועלה על ידי מנהל לתוכנית בקטלוג — מגישים מיד, בלי לחכות לחיפוש במסד
     const stored = await r2AudioResponse(request, env, programAudioKey(id));
     if (stored) return cors(request, stored);
+    if (!await catalogHasRecording(env, id)) return reply(request, { error: "ההקלטה לא נמצאה." }, 404);
     const upstreamHeaders = new Headers();
     const range = request.headers.get("range");
     if (range) upstreamHeaders.set("range", range);
