@@ -36,7 +36,7 @@ export function GuestsSection({ data, mutate, onMessage }: { data: Catalog; muta
         <input className="prog-search" type="search" placeholder="חיפוש אורח…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="חיפוש אורח" />
         <div className="prog-filters"><small>{guests.length ? `${guests.length} אורחים` : "עדיין אין אורחים"}</small><a className="prog-btn" href={`${PROGRAM_SITE}archive.html`} target="_blank" rel="noopener">הארכיון באתר ↗</a></div>
         <div className="prog-items" role="listbox" aria-label="אורחים">
-          {shown.map((g) => <button key={g.key} type="button" role="option" aria-selected={g.key === selectedKey} className={`prog-item${g.key === selectedKey ? " selected" : ""}${g.count ? "" : " muted"}`} onClick={() => setSelectedKey(g.key)}>
+          {shown.map((g) => <button key={g.key} type="button" role="option" aria-selected={g.key === selectedKey} className={`prog-item guest-item${g.key === selectedKey ? " selected" : ""}${g.count ? "" : " muted"}`} onClick={() => setSelectedKey(g.key)}>
             <span><b>{g.name}</b><small>{g.count ? `${g.count === 1 ? "תוכנית אחת" : `${g.count} תוכניות`}` : "אין תוכניות"}{g.profile?.role ? ` · ${g.profile.role}` : ""}{g.spellings.length > 1 ? " · כמה כתיבים" : ""}</small></span>
           </button>)}
           {!shown.length && <p className="panel-help">{guests.length ? "אין אורח שמתאים לחיפוש." : "אורחים נכנסים מהשדה „אורחים” בכל תוכנית, או מהחיפוש בתמלולים למעלה."}</p>}
