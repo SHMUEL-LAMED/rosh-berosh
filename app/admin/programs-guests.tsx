@@ -1,17 +1,10 @@
 "use client";
 
-<<<<<<< HEAD
 /* ניהול האורחים של אתר התוכניות: כל מי שמופיע בשדה "אורחים" או "חברי פאנל" של התוכניות —
    שינוי שם ואיחוד כפילויות בכל התוכניות יחד, תפקיד ("חבר פאנל" קובע לאיזו רשימה בתוכנית הוא
    נוסף), הוספה לתוכנית, והשלמת אורחים מהסיכומים של התמלולים. באתר אין דף אורח: השמות בדפי
    התוכניות מובילים לארכיון המסונן לפי האדם (archive.html?guest=…). תמונה, כמה מילים וקישורים
    שנשמרו בעבר בפרופיל נשארים בנתונים (settings.guests) אבל אינם נערכים כאן ואינם מוצגים.
-=======
-/* ניהול האורחים של אתר התוכניות: כל מי שמופיע בשדה "אורחים" של התוכניות, עם פרופיל
-   (תמונה, שורת תפקיד, כמה מילים, קישורים — נשמר עם הקטלוג; באתר אין דף אורח, והשמות בדפי
-   התוכניות מובילים לארכיון המסונן לפי האדם, archive.html?guest=…), שינוי שם
-   ואיחוד כפילויות בכל התוכניות יחד, והשלמת אורחים מהסיכומים של התמלולים.
->>>>>>> origin/claude/affectionate-planck-xmw6cs
    הכול נכנס לטיוטה, ולאתר רק בפרסום — כמו שאר ניהול התוכניות. הכללים ב־worker/program-guests.js. */
 
 import { useMemo, useState } from "react";
@@ -25,22 +18,8 @@ type Guest = { key: string; name: string; spellings: string[]; episodeIds: strin
 type Suggestion = { episodeId: string; title: string; add: Array<{ name: string; checked: boolean; reason: string }> };
 
 const EMPTY: GuestProfile = { name: "", role: "", bio: "", photo: "", links: [] };
-<<<<<<< HEAD
 /** הארכיון באתר, מסונן לפי האורח — לשם מובילים השמות בדפי התוכניות */
 export const guestPageUrl = (name: string) => `${PROGRAM_SITE}archive.html?guest=${encodeURIComponent(name)}`;
-=======
-const hueOf = (key: string) => { let h = 2166136261; for (const c of key) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) % 360; };
-const initials = (name: string) => name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("");
-/** הארכיון באתר, מסונן לפי האורח — לשם מובילים השמות בדפי התוכניות */
-export const guestPageUrl = (name: string) => `${PROGRAM_SITE}archive.html?guest=${encodeURIComponent(name)}`;
-
-function Avatar({ guest, size = 34 }: { guest: { key: string; name: string; profile: GuestProfile | null }; size?: number }) {
-  const style = { width: size, height: size, fontSize: Math.round(size * 0.42) };
-  return guest.profile?.photo
-    ? <img className="guest-av" src={guest.profile.photo} alt="" style={style} />
-    : <span className="guest-av" aria-hidden="true" style={{ ...style, background: `hsl(${hueOf(guest.key)} 55% 42%)` }}>{initials(guest.name)}</span>;
-}
->>>>>>> origin/claude/affectionate-planck-xmw6cs
 
 export function GuestsSection({ data, mutate, onMessage }: { data: Catalog; mutate: Mutate; onMessage(message: string): void }) {
   const guests = useMemo(() => collectGuests(data.episodes, data.settings.guests) as Guest[], [data.episodes, data.settings.guests]);
@@ -55,11 +34,7 @@ export function GuestsSection({ data, mutate, onMessage }: { data: Catalog; muta
     <div className="prog-workspace" data-tour="guests-list">
       <aside className="admin-panel prog-list">
         <input className="prog-search" type="search" placeholder="חיפוש אורח…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="חיפוש אורח" />
-<<<<<<< HEAD
         <div className="prog-filters"><small>{guests.length ? `${guests.length} אורחים` : "עדיין אין אורחים"}</small><a className="prog-btn" href={`${PROGRAM_SITE}archive.html`} target="_blank" rel="noopener">הארכיון באתר ↗</a></div>
-=======
-        <div className="prog-filters"><small>{guests.length ? `${guests.length} אורחים · ${withProfile} עם פרופיל` : "עדיין אין אורחים"}</small><a className="prog-btn" href={`${PROGRAM_SITE}archive.html`} target="_blank" rel="noopener">הארכיון באתר ↗</a></div>
->>>>>>> origin/claude/affectionate-planck-xmw6cs
         <div className="prog-items" role="listbox" aria-label="אורחים">
           {shown.map((g) => <button key={g.key} type="button" role="option" aria-selected={g.key === selectedKey} className={`prog-item${g.key === selectedKey ? " selected" : ""}${g.count ? "" : " muted"}`} onClick={() => setSelectedKey(g.key)}>
             <span><b>{g.name}</b><small>{g.count ? `${g.count === 1 ? "תוכנית אחת" : `${g.count} תוכניות`}` : "אין תוכניות"}{g.profile?.role ? ` · ${g.profile.role}` : ""}{g.spellings.length > 1 ? " · כמה כתיבים" : ""}</small></span>
@@ -69,11 +44,7 @@ export function GuestsSection({ data, mutate, onMessage }: { data: Catalog; muta
       </aside>
       <div className="prog-editor">
         {current ? <GuestEditor key={current.key} guest={current} guests={guests} data={data} mutate={mutate} onMessage={onMessage} onSelect={setSelectedKey} />
-<<<<<<< HEAD
           : <Section title="שמות האורחים"><p className="panel-help">בחרו אורח מהרשימה כדי לשנות את השם בכל התוכניות, לאחד כפילויות, לסמן „חבר פאנל” או להוסיף אותו לתוכנית. השמות של האורחים וחברי הפאנל בדפי התוכניות באתר מובילים לארכיון המסונן לפי האדם, עם כל התוכניות שלו.</p>
-=======
-          : <Section title="פרופיל לכל אורח"><p className="panel-help">בחרו אורח מהרשימה כדי לערוך את הפרופיל שלו, לשנות את השם בכל התוכניות או לאחד כפילויות. השמות של האורחים וחברי הפאנל בדפי התוכניות באתר מובילים לארכיון המסונן לפי האדם, עם כל התוכניות שלו.</p>
->>>>>>> origin/claude/affectionate-planck-xmw6cs
             {guests.some((g) => g.spellings.length > 1) && <p className="panel-help">✦ יש אורחים שהשם שלהם נכתב בכמה צורות — פתחו אותם כדי לאחד לכתיב אחד.</p>}</Section>}
       </div>
     </div>
@@ -139,34 +110,8 @@ function GuestEditor({ guest, guests, data, mutate, onMessage, onSelect }: { gue
     }) }));
     setAddTo("");
   };
-<<<<<<< HEAD
   return <>
     <Section id="tour-guest-editor" title={guest.name} aside={<div className="row-actions">{live ? <a className="prog-btn" href={guestPageUrl(guest.name)} target="_blank" rel="noopener">התוכניות באתר ↗</a> : <small className="panel-help">יופיע באתר כשתהיה תוכנית מוצגת עם האורח</small>}</div>}>
-=======
-  const pickPhoto = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]; event.target.value = "";
-    if (!file) return;
-    setBusy("מעלים את התמונה…"); setError("");
-    try {
-      // תמונה ריבועית קטנה (480 פיקסלים) — נטענת מהר ברשימה בניהול
-      const blob = await squareThumb(file, 480);
-      const url = await uploadFile(new File([blob], `guest-${guest.key.replace(/[^\p{L}\p{N}]+/gu, "-")}.jpg`, { type: "image/jpeg" }), "guests", "cover");
-      setProfile({ photo: url });
-      onMessage("התמונה עלתה ונשמרה בטיוטה.");
-    } catch (cause) { setError(errorText(cause, "העלאת התמונה נכשלה.")); }
-    finally { setBusy(""); }
-  };
-
-  return <>
-    <Section id="tour-guest-editor" title={guest.name} aside={<div className="row-actions">{live ? <a className="prog-btn" href={guestPageUrl(guest.name)} target="_blank" rel="noopener">התוכניות באתר ↗</a> : <small className="panel-help">יופיע באתר כשתהיה תוכנית מוצגת עם האורח</small>}</div>}>
-      <div className="guest-editor-top">
-        <Avatar guest={{ ...guest, profile }} size={96} />
-        <div className="prog-field"><span>תמונה</span>
-          <div className="row-actions"><FilePick accept=".jpg,.jpeg,.png,.webp" disabled={!!busy} onChange={pickPhoto}>{busy ? "מעלים…" : profile.photo ? "⬆ החלפת תמונה" : "⬆ העלאת תמונה"}</FilePick>{profile.photo && <button type="button" className="danger" onClick={() => setProfile({ photo: "" })}>הסרה</button>}</div>
-          <Status text={busy} error={error} />
-        </div>
-      </div>
->>>>>>> origin/claude/affectionate-planck-xmw6cs
       <div className="prog-form">
         <label><span>השם (בכל התוכניות)</span><input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => { const next = name.replace(/\s+/g, " ").trim(); if (!next) setName(guest.name); else if (next !== guest.name) rename(next); }} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
         <label><span>תפקיד</span><input value={profile.role} maxLength={80} placeholder="למשל: זמר, או „חבר פאנל”" onChange={(e) => setProfile({ role: e.target.value })} /></label>
