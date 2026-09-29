@@ -193,7 +193,7 @@ test("large files upload in parts and are served back with ranges", async () => 
   assert.equal(start.status, 200, await start.clone().text());
   const { key, uploadId, partSize } = await start.json();
   assert.match(key, /^program\/ep-1\/[\w-]+\.mp3$/);
-  assert.equal(partSize, 20971520);
+  assert.equal(partSize, 10485760);
 
   const put = (part, bytes, k = key) => call(`/api/program/upload/part?key=${encodeURIComponent(k)}&uploadId=${uploadId}&part=${part}`, { method: "PUT", token: admin, raw: bytes, headers: { "content-type": "application/octet-stream" } });
   assert.equal((await put(1, new Uint8Array(1), "settings/admin-emails.json")).status, 400, "only program/ keys");
@@ -232,6 +232,12 @@ test("large files upload in parts and are served back with ranges", async () => 
 
   const preflight = await call("/api/program/upload/part", { method: "OPTIONS" });
   assert.match(preflight.headers.get("access-control-allow-methods"), /PUT/);
+
+  // חלק של העלאה שכבר לא קיימת: 410, כדי שאתר התוכניות יתחיל מחדש במקום לנסות שוב ושוב
+  const gone = await call(`/api/program/upload/part?key=${encodeURIComponent(key)}&uploadId=nope&part=1`, { method: "PUT", token: admin, raw: new Uint8Array(1), headers: { "content-type": "application/octet-stream" } });
+  assert.equal(gone.status, 410);
+  const goneComplete = await call("/api/program/upload/complete", { method: "POST", token: admin, body: { key, uploadId: "nope", parts: [one] } });
+  assert.equal(goneComplete.status, 410);
 });
 
 test("an episode downloads with its Hebrew title as the file name", async () => {
