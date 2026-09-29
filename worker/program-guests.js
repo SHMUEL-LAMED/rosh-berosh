@@ -5,7 +5,7 @@
    כמו בסינון לפי אורח בארכיון (rosh-berosh-2/assets/js/store.js).
 
    הפרופיל (תמונה, שורת תפקיד, כמה מילים וקישורים) נשמר ב־settings.guests ומתפרסם עם
-   הקטלוג; דף האורח באתר (guest.html) מציג אותו ליד כל התוכניות של האורח. */
+   הקטלוג. באתר אין דף אורח: השמות בדפי התוכניות מובילים לארכיון המסונן לפי האדם (archive.html?guest=…). */
 
 export const GUEST_LIMITS = { profiles: 500, name: 80, role: 80, bio: 1500, links: 6, label: 40, url: 500 };
 

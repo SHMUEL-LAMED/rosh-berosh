@@ -1,8 +1,8 @@
 "use client";
 
 /* ניהול המגישים של אתר התוכניות (settings.hosts): לכל מגיש תמונה, שורת תפקיד, כמה מילים,
-   קישורים, העונות שהגיש (מהן נאספות התוכניות שלו בדף המגיש) והאם הוא מגיש כיום.
-   הסדר כאן הוא הסדר באתר. הכול נכנס לטיוטה, ולאתר רק בפרסום. הכללים ב־worker/program-hosts.js. */
+   קישורים, העונות שהגיש והאם הוא מגיש כיום. באתר אין דף מגיש: שמות המגישים בדפי התוכניות
+   מובילים לארכיון המסונן לפי המגיש. הכול נכנס לטיוטה, ולאתר רק בפרסום. הכללים ב־worker/program-hosts.js. */
 
 import type { ChangeEvent } from "react";
 import { useState } from "react";
@@ -14,7 +14,8 @@ type Mutate = (fn: (current: Catalog) => Catalog) => void;
 const EMPTY: Host = { name: "", role: "", bio: "", photo: "", links: [], seasons: [], current: true };
 const hueOf = (key: string) => { let h = 2166136261; for (const c of key) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) % 360; };
 const initials = (name: string) => name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("") || "?";
-export const hostPageUrl = (name: string) => `${PROGRAM_SITE}guest.html?host=${encodeURIComponent(name)}`;
+/** הארכיון באתר, מסונן לפי המגיש — לשם מובילים השמות בדפי התוכניות */
+export const hostPageUrl = (name: string) => `${PROGRAM_SITE}archive.html?guest=${encodeURIComponent(name)}`;
 
 function Avatar({ host, size = 34 }: { host: Host; size?: number }) {
   const style = { width: size, height: size, fontSize: Math.round(size * 0.42) };
@@ -35,8 +36,8 @@ export function HostsSection({ data, mutate, onMessage }: { data: Catalog; mutat
   const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= hosts.length) return; set((list) => { const next = [...list]; [next[i], next[j]] = [next[j], next[i]]; return next; }); setOpen(open === i ? j : open === j ? i : open); };
   const remove = (i: number) => { if (!confirm(`להסיר את „${hosts[i].name}” מרשימת המגישים?`)) return; set((list) => list.filter((_, j) => j !== i)); setOpen(null); onMessage("המגיש הוסר מהטיוטה."); };
 
-  return <Section title="המגישים" aside={<div className="row-actions"><strong className="prog-badge">{hosts.length}</strong><a className="prog-btn" href={`${PROGRAM_SITE}guest.html`} target="_blank" rel="noopener">המגישים והאורחים באתר ↗</a></div>}>
-    <p className="panel-help">המגישים מופיעים בראש הדף „מגישים ואורחים” באתר, בסדר שכאן, וכל מגיש מקבל דף עם התוכניות מהעונות שהגיש. „מגיש כיום” מופיע בנפרד ממגישים לשעבר.</p>
+  return <Section title="המגישים" aside={<div className="row-actions"><strong className="prog-badge">{hosts.length}</strong><a className="prog-btn" href={`${PROGRAM_SITE}archive.html`} target="_blank" rel="noopener">הארכיון באתר ↗</a></div>}>
+    <p className="panel-help">המגישים נשמרים עם הקטלוג, בסדר שכאן. באתר אין דף מגיש: שמות המגישים בדפי התוכניות מובילים לארכיון המסונן לפי המגיש. „מגיש כיום” מסומן בנפרד ממגישים לשעבר.</p>
     <div className="host-list">
       {hosts.map((host, i) => <div key={i} className={`host-row${open === i ? " open" : ""}`}>
         <button type="button" className="host-row-head" aria-expanded={open === i} onClick={() => setOpen(open === i ? null : i)}>
@@ -93,7 +94,7 @@ function HostEditor({ host, seasons, onChange, onRemove, onMessage }: { host: Ho
         {host.links.length < HOST_LIMITS.links && <button type="button" className="prog-btn" onClick={() => onChange({ links: [...host.links, { label: "", url: "" }] })}>+ הוספת קישור</button>}
       </div>
     </div>
-    <div className="row-actions"><a className="prog-btn" href={hostPageUrl(host.name)} target="_blank" rel="noopener">הדף באתר ↗</a><button type="button" className="danger" onClick={onRemove}>הסרת המגיש</button></div>
+    <div className="row-actions"><a className="prog-btn" href={hostPageUrl(host.name)} target="_blank" rel="noopener">התוכניות באתר ↗</a><button type="button" className="danger" onClick={onRemove}>הסרת המגיש</button></div>
   </div>;
 }
 
