@@ -167,13 +167,15 @@ async function seedOnce(env: Env) {
  * התוכניות, ואז בדיקה שהיא מופיעה שם כמזהה שלם ולא כחלק ממזהה ארוך יותר.
  */
 /** הקלטות שכבר אומתו בקטלוג — נשמר בזיכרון כדי שכל בקשת טווח (דילוג, המשך הזרמה) לא תחכה לחיפוש במסד */
-const knownRecordings = new Set<string>();
+const knownRecordings = new WeakMap<object, Set<string>>();
 async function catalogHasRecording(env: Env, id: string) {
-  if (knownRecordings.has(id)) return true;
+  const known = knownRecordings.get(env.DB) ?? new Set<string>();
+  knownRecordings.set(env.DB, known);
+  if (known.has(id)) return true;
   const rows = (await env.DB.prepare("SELECT data_json FROM program_episodes WHERE instr(data_json,?)>0 LIMIT 20").bind(id).all<{ data_json: string }>()).results;
   const whole = new RegExp(`(?:^|[^\\w-])${id}(?:[^\\w-]|$)`);
   const found = rows.some((row) => whole.test(row.data_json));
-  if (found) knownRecordings.add(id);
+  if (found) known.add(id);
   return found;
 }
 
@@ -199,17 +201,16 @@ function episodeNumber(value: unknown): number | null {
 
 /** ההכנות החד־פעמיות (זריעה, סימון ההקלטות ב־R2, תיקוני כתיב, שיוך המגישים והאורחים). כשכל הסימונים
     כבר במסד — שאילתה אחת ודי, במקום בדיקה נפרדת לכל אחת בזו אחר זו בכל טעינה של האתר. */
-let setupDone = false;
 async function catalogSetup(env: Env) {
-  if (setupDone) return;
   const keys = [SEEDED_KEY, R2_BACKFILL_KEY, TEXT_FIXES_KEY, ...PEOPLE_MARKERS];
   const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM program_settings WHERE key IN (${keys.map(() => "?").join(",")})`).bind(...keys).first<{ n: number }>();
-  if (Number(done?.n) === keys.length) { setupDone = true; return; }
+  if (Number(done?.n) === keys.length) return false;
   await seedOnce(env);
   await backfillSeedR2Metadata(env);
   await runTextFixes(env);   // תיקוני כתיב חד־פעמיים בשמות ובתיאורים
   await backfillProgramPeople(env);
   await correctProgramPeople(env);
+  return true;
 }
 
 /** הקטלוג המלא אחרי פרסום חלקי, לגרסה שנשמרת: התוכניות שבאתר עם אלה שפורסמו עכשיו במקומן,
@@ -230,19 +231,21 @@ async function partialSnapshot(env: Env, current: Array<{ id: string; data_json:
 
 /** הקטלוג הציבורי נשמר בזיכרון לזמן קצר: דף הבית לא מחכה לשאילתות במסד בכל ביקור. פרסום מנקה אותו. */
 const PUBLIC_CATALOG_TTL = 20_000;
-let publicCatalogMemo: { at: number; origin: string; data: Promise<Awaited<ReturnType<typeof buildCatalog>>> } | null = null;
-function forgetPublicCatalog() { publicCatalogMemo = null; }
+type CatalogMemo = { at: number; origin: string; data: Promise<Awaited<ReturnType<typeof buildCatalog>>> };
+const publicCatalogMemo = new WeakMap<object, CatalogMemo>();
+function forgetPublicCatalog(env: Env) { publicCatalogMemo.delete(env.DB); }
 async function catalog(env: Env, includeHidden = false, origin = "") {
+  // ההכנות החד־פעמיות נבדקות תמיד (שאילתה קטנה אחת); אם רצו עכשיו — הקטלוג השמור כבר לא נכון
+  if (await catalogSetup(env)) forgetPublicCatalog(env);
   if (includeHidden) return buildCatalog(env, true, origin);
-  const memo = publicCatalogMemo;
+  const memo = publicCatalogMemo.get(env.DB);
   if (memo && memo.origin === origin && Date.now() - memo.at < PUBLIC_CATALOG_TTL) return memo.data;
   const data = buildCatalog(env, false, origin);
-  publicCatalogMemo = { at: Date.now(), origin, data };
-  data.catch(() => { if (publicCatalogMemo?.data === data) publicCatalogMemo = null; });
+  publicCatalogMemo.set(env.DB, { at: Date.now(), origin, data });
+  data.catch(() => { if (publicCatalogMemo.get(env.DB)?.data === data) publicCatalogMemo.delete(env.DB); });
   return data;
 }
 async function buildCatalog(env: Env, includeHidden: boolean, origin: string) {
-  await catalogSetup(env);
   // התוכניות וההגדרות הציבוריות במקביל
   const [[episodes, settings], publicSettingsValue] = await Promise.all([
     env.DB.batch([
@@ -275,7 +278,7 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
   if (!url.pathname.startsWith("/api/program/")) return null;
   if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }));
   // כל שינוי (פרסום, הגדרות, מחיקה) — הקטלוג השמור בזיכרון נבנה מחדש בבקשה הבאה
-  if (request.method !== "GET" && request.method !== "HEAD") forgetPublicCatalog();
+  if (request.method !== "GET" && request.method !== "HEAD") forgetPublicCatalog(env);
   if (url.pathname.startsWith("/api/program/profile-photo/") && (request.method === "GET" || request.method === "HEAD")) {
     const id = safeId(url.pathname.slice("/api/program/profile-photo/".length));
     const source = PROFILE_PHOTO_SOURCES[id];
