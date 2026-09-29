@@ -61,7 +61,30 @@ function AudioDock({ song, siblings, onClose, onChangeSong }: { song: PlayerSong
     setCurrent(start); setPlaying(false);
     const begin = () => { setDuration(el.duration || 0); el.currentTime = start; setCurrent(start); el.play().then(() => setPlaying(true)).catch(() => undefined); };
     el.addEventListener("loadedmetadata", begin, { once: true });
+    // הזרמה שנתקעה או נפלה באמצע: טוענים מחדש מאותה נקודה, פעם אחת לכל נפילה
+    let stall = 0;
+    let retried = false;
+    const resume = () => {
+      if (!song.audioUrl || el.paused && !el.error) return;
+      const at = el.currentTime;
+      el.src = song.audioUrl;
+      el.load();
+      el.addEventListener("loadedmetadata", () => { el.currentTime = at; el.play().catch(() => undefined); }, { once: true });
+    };
+    const watch = () => { window.clearTimeout(stall); stall = window.setTimeout(() => { if (!el.paused && el.readyState < 3) resume(); }, 8000); };
+    const clear = () => { window.clearTimeout(stall); retried = false; };
+    const failed = () => { if (!retried && el.currentTime > 0) { retried = true; resume(); } };
+    el.addEventListener("waiting", watch);
+    el.addEventListener("stalled", watch);
+    el.addEventListener("playing", clear);
+    el.addEventListener("pause", () => window.clearTimeout(stall));
+    el.addEventListener("error", failed);
     return () => {
+      window.clearTimeout(stall);
+      el.removeEventListener("waiting", watch);
+      el.removeEventListener("stalled", watch);
+      el.removeEventListener("playing", clear);
+      el.removeEventListener("error", failed);
       el.removeEventListener("loadedmetadata", begin);
       el.pause();
       el.removeAttribute("src");
@@ -75,7 +98,7 @@ function AudioDock({ song, siblings, onClose, onChangeSong }: { song: PlayerSong
   const fmt = (v: number) => { if (!Number.isFinite(v) || v < 0) return "0:00"; return `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, "0")}`; };
 
   return <div className="audio-dock">
-    <audio ref={audio} key={song.id} src={song.audioUrl ?? ""} preload="metadata"
+    <audio ref={audio} key={song.id} src={song.audioUrl ? (start > 0 ? `${song.audioUrl}#t=${start}` : song.audioUrl) : ""} preload="auto"
       onDurationChange={(e) => setDuration(e.currentTarget.duration || 0)}
       onTimeUpdate={(e) => { const v = e.currentTarget.currentTime; setCurrent(v); if (configuredEnd > start && v >= configuredEnd) { e.currentTarget.pause(); e.currentTarget.currentTime = start; setCurrent(start); setPlaying(false); } }}
       onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
