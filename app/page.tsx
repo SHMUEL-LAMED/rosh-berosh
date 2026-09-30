@@ -111,10 +111,8 @@ function SharedBanner() {
   return <div className="shared-banner" role="status"><span aria-hidden="true">✦</span><p>{banner.text}</p>{banner.link && <a href={banner.link} target={/^https?:/.test(banner.link) ? "_blank" : undefined} rel="noopener">{banner.linkLabel || "לפרטים"} ←</a>}</div>;
 }
 
-/** כשההצבעה סגורה כל מי שנכנס רואה את המסך הזה — גם בלי להתחבר וגם מי שכבר הצביע. שום דבר לא נמחק. */
-function SurveyEnded({ isAdmin }: { isAdmin: boolean }) {
-  return <main className="login-shell" dir="rtl"><section className="login-card"><img className="login-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">ראש בראש</p><h1>נתראה בסקר הבא</h1><p>תודה לכל מי שהשתתף והצביע.</p>{isAdmin && <a className="continue admin-home-link" href="/admin">כניסה לניהול</a>}</section></main>;
-}
+/** אתר התוכניות — לשם עובר מי שנכנס לאתר הסקר כשההצבעה סגורה (כמו PROGRAM_SITE ב־worker/program-tools.ts). */
+const PROGRAM_SITE = "https://shmuel-lamed.github.io/rosh-berosh-2/";
 
 export default function Home() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -224,6 +222,12 @@ export default function Home() {
     const timer = window.setTimeout(() => void checkVote(), 0);
     return () => window.clearTimeout(timer);
   }, [user, preview, checkVote]);
+
+  // כשההצבעה סגורה עוברים לאתר התוכניות בלי הודעה. בדרך כלל השרת כבר מעביר לפני שהדף נטען
+  // (closedSurveyRedirect ב־worker/index.ts); כאן זה למי שהגיע בניווט פנימי. לתצוגה המקדימה
+  // מחכים לבדיקת ההתחברות, כי רק מנהל רשאי לה.
+  const toPrograms = !!catalog && !catalog.rules.votingOpen && !preview && (!requestedPreview || user !== undefined);
+  useEffect(() => { if (toPrograms) window.location.replace(PROGRAM_SITE); }, [toPrograms]);
 
   // מי שכבר הצביע מקבל בכל כניסה מחדש הזמנה לשתף את המצעד — פעם אחת ללשונית,
   // כדי שרענון לא יחזור עליה. ההשהיה נותנת למסך להיטען לפני שהחלון קופץ.
@@ -373,8 +377,8 @@ export default function Home() {
     } catch (caught) { notify(caught instanceof Error ? caught.message : "שמירת ההצבעה נכשלה.", "error"); } finally { setBusy(false); }
   };
 
+  if (toPrograms) return <main className="login-shell" />;
   if (user === undefined) return <main className="login-shell"><div className="loading">בודקים התחברות…</div></main>;
-  if (!preview && catalog && !catalog.rules.votingOpen) return <SurveyEnded isAdmin={!!user?.isAdmin} />;
   // אורח מחכה לקטלוג לפני מסך הכניסה, כדי שבסקר סגור לא יתבקש להתחבר לחינם.
   if (!user) return catalog || loadFailed ? <LoginScreen /> : <main className="login-shell"><div className="loading">טוענים…</div></main>;
   if (!preview && voteCheckFailed) return <main className="login-shell"><section className="success-card"><h1>לא הצלחנו לבדוק את ההצבעה</h1><p>לא נציג את טופס ההצבעה לפני שנדע אם כבר הצבעתם.</p><button className="continue" onClick={checkVote}>ניסיון חוזר</button></section></main>;
