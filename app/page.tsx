@@ -111,6 +111,11 @@ function SharedBanner() {
   return <div className="shared-banner" role="status"><span aria-hidden="true">✦</span><p>{banner.text}</p>{banner.link && <a href={banner.link} target={/^https?:/.test(banner.link) ? "_blank" : undefined} rel="noopener">{banner.linkLabel || "לפרטים"} ←</a>}</div>;
 }
 
+/** כשההצבעה סגורה כל מי שנכנס רואה את המסך הזה — גם בלי להתחבר וגם מי שכבר הצביע. שום דבר לא נמחק. */
+function SurveyEnded({ isAdmin }: { isAdmin: boolean }) {
+  return <main className="login-shell" dir="rtl"><section className="login-card"><img className="login-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker">ראש בראש</p><h1>נתראה בסקר הבא</h1><p>תודה לכל מי שהשתתף והצביע.</p>{isAdmin && <a className="continue admin-home-link" href="/admin">כניסה לניהול</a>}</section></main>;
+}
+
 export default function Home() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [stageIndex, setStageIndex] = useState(0);
@@ -369,7 +374,9 @@ export default function Home() {
   };
 
   if (user === undefined) return <main className="login-shell"><div className="loading">בודקים התחברות…</div></main>;
-  if (!user) return <LoginScreen />;
+  if (!preview && catalog && !catalog.rules.votingOpen) return <SurveyEnded isAdmin={!!user?.isAdmin} />;
+  // אורח מחכה לקטלוג לפני מסך הכניסה, כדי שבסקר סגור לא יתבקש להתחבר לחינם.
+  if (!user) return catalog || loadFailed ? <LoginScreen /> : <main className="login-shell"><div className="loading">טוענים…</div></main>;
   if (!preview && voteCheckFailed) return <main className="login-shell"><section className="success-card"><h1>לא הצלחנו לבדוק את ההצבעה</h1><p>לא נציג את טופס ההצבעה לפני שנדע אם כבר הצבעתם.</p><button className="continue" onClick={checkVote}>ניסיון חוזר</button></section></main>;
   if (voted === null) return <main className="login-shell"><div className="loading">בודקים אם כבר הצבעתם…</div></main>;
   if (!preview && blocked) return <main className="login-shell"><section className="success-card"><h1>המחשב נחסם מהצבעה</h1><p>אי אפשר לשלוח הצבעה נוספת מהמחשב הזה בסקר הנוכחי.</p></section></main>;
@@ -382,7 +389,7 @@ export default function Home() {
     {preview && <div className={`preview-banner${ivrPreview ? " ivr" : ""}`}><b>{ivrPreview ? "תצוגה מקדימה של קו ההצבעה" : "תצוגה מקדימה של האתר"}</b><span>{ivrPreview ? "השלבים והכמויות זהים לקו; במקום מקשי הטלפון בוחרים כאן בלחיצה." : "אפשר לעבור עד הסוף. שום בחירה לא תישמר כהצבעה."}</span><a href="/admin">יציאה לניהול</a></div>}
     <header className="vote-header"><img className="logo-mark" src="/badge.jpg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מצעד המוזיקה הגדול</small></div><nav className="user-nav"><span>{user.picture && <img src={user.picture} alt="" />}{user.name}</span>{user.isAdmin && <a href="/admin">ניהול</a>}<button type="button" className="share-nav" onClick={() => setSharePrompt("manual")}><ShareIcon />שיתוף המצעד</button><button onClick={logout}>החלפת חשבון</button></nav></header>
     <section className="hero"><img className="hero-logo" src="/badge.jpg" alt="מצעד האלבומים · 25 שנות מוזיקה" /><p className="kicker"><span>הקול שלכם קובע</span></p><h1 className="parade-title"><span className="hero-line1">מצעד האלבומים</span><span className="hero-divider" aria-hidden="true"></span><span className="hero-line2"><b>25</b><small>שנות מוזיקה</small></span></h1><p>הצביעו לאלבומים, לשירים ולזמרים האהובים עליכם.</p></section>
-    {!preview && voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><p>הבחירה שלכם שמורה כאן ואפשר לשתף אותה בכל זמן.</p>{savedReceipt && <VoteReceipt albums={savedReceipt.albums} artists={savedReceipt.artists} />}<ShareParadeCard /><SubscribeCard /></div></section> : catalog && !catalog.rules.votingOpen && !preview ? <section className="vote-card"><div className="empty-catalog"><h2>ההצבעה סגורה כרגע</h2><p>מנהל המצעד יפתח אותה בקרוב.</p></div></section> : <>
+    {!preview && voted ? <section className="vote-card voted-card"><div className="voted-message"><span className="voted-check" aria-hidden="true">✓</span><p className="kicker">ההצבעה נקלטה</p><h2>כבר הצבעתם בסקר הזה</h2><p>הבחירה שלכם שמורה כאן ואפשר לשתף אותה בכל זמן.</p>{savedReceipt && <VoteReceipt albums={savedReceipt.albums} artists={savedReceipt.artists} />}<ShareParadeCard /><SubscribeCard /></div></section> : <>
       <ol className="stepper" aria-label="שלבי ההצבעה">{stages.map((item, index) => <li key={item.key} className={index === stageIndex ? "current" : index < stageIndex ? "complete" : ""}><b>{index < stageIndex ? "✓" : index + 1}</b><span>{item.label}</span></li>)}</ol>
       <section className="vote-card">
         {!catalog && !loadFailed && <div className="loading">טוענים את רשימת המצעד…</div>}
