@@ -28,6 +28,8 @@ type PollSnapshot = {
   artistVotes: Record<string, unknown>[];
   settings: Record<string, unknown> | null;
   media?: Array<{ sourceUrl: string; archiveKey: string }>;
+  /** ארכיון של ההצבעות והתוצאות בלבד (ריקון הסקר): הקבצים לא נשמרו בו */
+  mediaSkipped?: boolean;
   program?: ProgramSnapshot;
 };
 
@@ -212,7 +214,7 @@ function restoredUrl(value: unknown, urls: Map<string, string>): unknown {
   return typeof value === "string" ? urls.get(value) || value : value;
 }
 
-export async function createPollSnapshot(env: AdminEnv, requestedName = "", surveyId?: string) {
+export async function createPollSnapshot(env: AdminEnv, requestedName = "", surveyId?: string, { withMedia = true, withProgram = true } = {}) {
   const survey = surveyId ?? await activeSurveyId(env);
   const [albums, songs, artists, ballots, albumVotes, songVotes, artistVotes, settings] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM albums WHERE survey_id=? ORDER BY position,title").bind(survey),
@@ -226,13 +228,16 @@ export async function createPollSnapshot(env: AdminEnv, requestedName = "", surv
   ]);
   const createdAt = Date.now(), id = crypto.randomUUID();
   const name = requestedName.trim() || `סקר ${new Date(createdAt).toLocaleDateString("he-IL")}`;
-  let media: Array<{ sourceUrl: string; archiveKey: string }>;
-  try { media = await archiveMediaFiles(env, id, snapshotMediaUrls(albums.results, songs.results, artists.results)); }
-  catch (error) { await deleteR2Prefix(env.MEDIA, `${ARCHIVE_PREFIX}assets/${id}/`); throw error; }
-  // גיבוי אחד לשני האתרים: גם אתר התוכניות נשמר באותו קובץ
+  let media: Array<{ sourceUrl: string; archiveKey: string }> = [];
+  if (withMedia) {
+    try { media = await archiveMediaFiles(env, id, snapshotMediaUrls(albums.results, songs.results, artists.results)); }
+    catch (error) { await deleteR2Prefix(env.MEDIA, `${ARCHIVE_PREFIX}assets/${id}/`); throw error; }
+  }
+  // גיבוי אחד לשני האתרים: גם אתר התוכניות נשמר באותו קובץ (אלא אם זה ארכיון של תוצאות בלבד —
+  // אז שחזור שלו לא יחזיר את אתר התוכניות אחורה)
   let program: ProgramSnapshot | undefined;
-  try { program = await readProgramSnapshot(env); } catch (error) { console.error("program snapshot skipped", error); }
-  const snapshot: PollSnapshot = { version: 3, id, name, createdAt, albums: albums.results, songs: songs.results, artists: artists.results, ballots: ballots.results, albumVotes: albumVotes.results, songVotes: songVotes.results, artistVotes: artistVotes.results, settings: settings.results[0] || null, media, program };
+  if (withProgram) try { program = await readProgramSnapshot(env); } catch (error) { console.error("program snapshot skipped", error); }
+  const snapshot: PollSnapshot = { version: 3, id, name, createdAt, albums: albums.results, songs: songs.results, artists: artists.results, ballots: ballots.results, albumVotes: albumVotes.results, songVotes: songVotes.results, artistVotes: artistVotes.results, settings: settings.results[0] || null, media, ...(withMedia ? {} : { mediaSkipped: true }), program };
   const key = `${ARCHIVE_PREFIX}${createdAt}-${id}.json`;
   try {
     await env.MEDIA.put(key, JSON.stringify(snapshot), { httpMetadata: { contentType: "application/json" }, customMetadata: { name, createdAt: String(createdAt), votes: String(ballots.results.length) } });
@@ -272,7 +277,7 @@ export async function listPollArchives(env: AdminEnv) {
   const archives = await Promise.all(objects.map(async (object) => {
     try {
       const snapshot = await readPollSnapshot(env, object.key);
-      return snapshot ? { key: object.key, name: snapshot.name, createdAt: snapshot.createdAt, votes: snapshot.ballots.length, albums: snapshot.albums.length, songs: snapshot.songs.length, artists: snapshot.artists.length, programs: snapshot.program ? snapshot.program.episodes.length : null } : null;
+      return snapshot ? { key: object.key, name: snapshot.name, createdAt: snapshot.createdAt, votes: snapshot.ballots.length, albums: snapshot.albums.length, songs: snapshot.songs.length, artists: snapshot.artists.length, programs: snapshot.program ? snapshot.program.episodes.length : null, mediaSkipped: !!snapshot.mediaSkipped } : null;
     } catch (error) {
       console.error("invalid poll archive", object.key, error);
       return null;
@@ -338,6 +343,74 @@ async function clearCurrentPoll(env: AdminEnv, surveyId?: string) {
     env.DB.prepare("UPDATE poll_settings SET voting_open=0, albums_enabled=1, albums_min=5, albums_max=5, songs_enabled=1, songs_min=1, songs_max=1, artists_enabled=1, artists_min=1, artists_max=3 WHERE id=?").bind(survey),
   ]);
   await clearIvrProgress(env, survey);
+}
+
+/**
+ * ריקון הסקר, כולל פינוי האחסון: האלבומים, השירים והזמרים נמחקים, וכל הקבצים שלהם נמחקים מהאחסון —
+ * שמע, עטיפות, תמונות והקריינויות שלהם בקו. גם קבצים של הסקר שנשארו מאחור ממחיקות קודמות
+ * (בתיקיות albums/, artists/, restored/, ivr-prompts/) ושאף אחד כבר לא מפנה אליהם נמחקים.
+ * קובץ שעדיין בשימוש — סקר אחר, קריינות אחרת, אתר התוכניות — נשאר. ההצבעות והתוצאות נשמרות קודם
+ * בארכיון, בלי קבצים ובלי אתר התוכניות (שחזור שלו לא מחזיר את אתר התוכניות אחורה). רק כשההצבעה סגורה.
+ */
+const SURVEY_MEDIA_PREFIXES = ["albums/", "artists/", "restored/", "ivr-prompts/"];
+
+export async function emptySurvey(env: AdminEnv, surveyId: string) {
+  const settings = await env.DB.prepare("SELECT voting_open AS votingOpen FROM poll_settings WHERE id=?").bind(surveyId).first<{ votingOpen: number }>();
+  if (Number(settings?.votingOpen)) throw new Error("כדי לרוקן את הסקר יש לסגור קודם את ההצבעה.");
+  const [albums, songs, artists] = await env.DB.batch([
+    env.DB.prepare("SELECT id,cover_url AS url FROM albums WHERE survey_id=?").bind(surveyId),
+    env.DB.prepare("SELECT s.id,s.audio_url AS url,s.cover_url AS cover FROM songs s JOIN albums a ON a.id=s.album_id WHERE a.survey_id=?").bind(surveyId),
+    env.DB.prepare("SELECT id,image_url AS url FROM artists WHERE survey_id=?").bind(surveyId),
+  ]);
+  type Row = { id: string; url?: string | null; cover?: string | null };
+  const albumRows = albums.results as Row[], songRows = songs.results as Row[], artistRows = artists.results as Row[];
+  const archive = await createPollSnapshot(env, `ההצבעות והתוצאות — לפני ריקון הסקר ${new Date().toLocaleDateString("he-IL")}`, surveyId, { withMedia: false, withProgram: false });
+
+  // המועמדים למחיקה: מה שהשורות מפנות אליו, והכול בתיקיות של קובצי הסקר
+  const candidates = new Set<string>();
+  const addUrl = (url?: string | null) => { const key = keyFromMediaUrl(url); if (key) candidates.add(key); };
+  [...albumRows, ...artistRows].forEach((row) => addUrl(row.url));
+  songRows.forEach((row) => { addUrl(row.url); addUrl(row.cover); });
+  for (const prefix of SURVEY_MEDIA_PREFIXES) {
+    let cursor: string | undefined;
+    do {
+      const page = await env.MEDIA.list({ prefix, cursor, limit: 1000 });
+      page.objects.forEach((object) => candidates.add(object.key));
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
+
+  // הקריינויות של הפריטים בקו. הקריאה קודם מעבירה קריינויות ישנות לטבלה, כדי שאף קריינות קיימת לא תיראה יתומה.
+  const itemPromptKeys = new Set([...albumRows.map((row) => `album:${row.id}`), ...songRows.map((row) => `song:${row.id}`), ...artistRows.map((row) => `artist:${row.id}`)]);
+  const promptsBefore = await readIvrPrompts(env);
+  const itemPrompts = promptsBefore.filter((prompt) => itemPromptKeys.has(prompt.key)).map((prompt) => prompt.key);
+  for (let index = 0; index < itemPrompts.length; index += 90) {
+    const chunk = itemPrompts.slice(index, index + 90);
+    await env.DB.prepare(`DELETE FROM ivr_prompts WHERE key IN (${placeholders(chunk.length)})`).bind(...chunk).run();
+  }
+
+  await clearCurrentPoll(env, surveyId);
+
+  // מה שעדיין בשימוש לא נמחק: שורות של סקרים אחרים, הקריינויות שנשארו, וכל קישור /media/ בנתוני אתר התוכניות
+  const still = await env.DB.batch([
+    env.DB.prepare("SELECT cover_url AS url FROM albums"),
+    env.DB.prepare("SELECT audio_url AS url FROM songs"),
+    env.DB.prepare("SELECT cover_url AS url FROM songs"),
+    env.DB.prepare("SELECT image_url AS url FROM artists"),
+    env.DB.prepare("SELECT audio_url AS url FROM ivr_prompts"),
+  ]);
+  const referenced = new Set(still.flatMap((result) => result.results).map((row) => keyFromMediaUrl((row as { url?: string }).url)).filter((key): key is string => !!key));
+  let programReadable = true;
+  try {
+    const program = await env.DB.batch([env.DB.prepare("SELECT data_json AS json FROM program_episodes"), env.DB.prepare("SELECT value_json AS json FROM program_settings")]);
+    for (const row of program.flatMap((result) => result.results) as Array<{ json?: string }>) {
+      for (const match of String(row.json || "").matchAll(/\/media\/[^"'\s)\\]+/g)) { const key = keyFromMediaUrl(match[0]); if (key) referenced.add(key); }
+    }
+  } catch (error) { programReadable = false; console.error("empty survey: program references unreadable", error); }
+  // בלי נתוני אתר התוכניות אי אפשר לדעת מה הוא צריך: אז נמחק רק מה שבתיקיות של קובצי הסקר, שהוא לא משתמש בהן
+  const doomed = [...candidates].filter((key) => !referenced.has(key) && (programReadable || SURVEY_MEDIA_PREFIXES.some((prefix) => key.startsWith(prefix))));
+  for (let index = 0; index < doomed.length; index += 1000) await env.MEDIA.delete(doomed.slice(index, index + 1000));
+  return { archive: { key: archive.key, name: archive.name }, votes: archive.votes, albums: albumRows.length, songs: songRows.length, artists: artistRows.length, files: doomed.length, prompts: itemPrompts.length };
 }
 
 export async function resetPollVotes(env: AdminEnv, surveyId: string): Promise<number> {
@@ -898,6 +971,14 @@ export async function adminApi(request: Request, env: AdminEnv): Promise<Respons
       .bind(votingOpen ? 1 : 0, nextSettings.albums_enabled, nextSettings.albums_min, nextSettings.albums_max, nextSettings.songs_enabled, nextSettings.songs_min, nextSettings.songs_max, nextSettings.artists_enabled, nextSettings.artists_min, nextSettings.artists_max, surveyId).run();
     if (Number(previous?.votingOpen) && !votingOpen) await clearIvrProgress(env, surveyId);
     return json({ ok: true });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/empty-survey") {
+    try { return json({ ok: true, ...await emptySurvey(env, surveyId) }); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : "ריקון הסקר נכשל.";
+      return json({ error: message }, /לסגור קודם/.test(message) ? 409 : 500);
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/reset-votes") {
