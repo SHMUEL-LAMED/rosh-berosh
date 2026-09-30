@@ -16,6 +16,7 @@ import { blankPoll, filledOptions, newPollId, normPollDraft, POLL_LIMITS, pollFo
 import { israelWallClock } from "../../worker/program-schedule.js";
 import { api, errorText, fmtDate, label, n2, shrinkImage, uploadFile, when, type Catalog, type Episode, type Poll, type PollOption } from "./programs-core";
 import { FilePick, Section, Status, Switch } from "./programs-ui";
+import { useHoldUpdate } from "../update-hold";
 
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
 type Result = { total: number; counts: Record<string, number>; lastVoteAt: number | null; published: boolean; open: boolean; closed: boolean };
@@ -49,6 +50,8 @@ export function PollsSection({ data, mutate, onMessage }: { data: Catalog; mutat
   const polls = useMemo(() => (raw || []).flatMap((item, i) => { const poll = pollAt(item, i); return poll ? [poll] : []; }), [raw]);
   const episodeLabel = (id: string) => { const e = data.episodes.find((x) => x.id === id || x.slug === id); return e ? label(e) : "תוכנית שנמחקה"; };
   const [editing, setEditing] = useState<Editing | null>(null);
+  // פתוח לעריכה עם שינויים שלא נשמרו: עדכון אוטומטי של האתר מחכה
+  useHoldUpdate(!!editing?.dirty);
   const [results, setResults] = useState<Record<string, Result> | null>(null);
   const [resultsError, setResultsError] = useState("");
   const [loadedAt, setLoadedAt] = useState<number | null>(null);

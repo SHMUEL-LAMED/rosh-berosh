@@ -55,3 +55,24 @@ test("a closed survey sends home-page visitors straight to the program site", as
   assert.equal((await visit("/?preview=site", envWith(0))).status, 200);
   assert.notEqual((await visit("/", envWith(0), "text/x-component")).status, 302);
 });
+
+test("the server reports the build it runs, so open pages can reload themselves", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-version`);
+  const { default: worker } = await import(workerUrl.href);
+  const response = await worker.fetch(
+    new Request("http://localhost/api/version"),
+    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const { version } = await response.json();
+  assert.match(version, /^[0-9a-z]{6,12}$/);
+
+  // אותו מזהה נאפה בדף עצמו (app/auto-update.tsx)
+  const { readdir, readFile } = await import("node:fs/promises");
+  const assets = new URL("../dist/client/assets/", import.meta.url);
+  const pages = await Promise.all((await readdir(assets)).filter((name) => name.endsWith(".js")).map((name) => readFile(new URL(name, assets), "utf8")));
+  assert.ok(pages.some((code) => code.includes("/api/version") && code.includes(version)), "the client bundle carries the same build id");
+});

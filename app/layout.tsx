@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AutoUpdate } from "./auto-update";
 import { NoticeProvider } from "./notice";
 import { PlayerProvider } from "./player-context";
 
@@ -65,6 +66,7 @@ export default function RootLayout({
     <html lang="he" dir="rtl">
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }} />
+        <AutoUpdate />
         <NoticeProvider>
           <PlayerProvider>{children}</PlayerProvider>
         </NoticeProvider>

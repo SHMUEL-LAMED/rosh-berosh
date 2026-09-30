@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useHoldUpdate } from "../update-hold";
 
 type StoredUpload = { id: string; surveyId: string; albumId: string; title: string; position: number; name: string; type: string; file: Blob; createdAt: number };
 type Status = "queued" | "uploading" | "retrying" | "waiting" | "error";
@@ -44,6 +45,8 @@ const transient = (status: number) => status === 0 || status >= 500 || status ==
 
 export function useUploadQueue({ onCompleted, onMessage }: { onCompleted(): void | Promise<void>; onMessage(message: string): void }) {
   const [items, setItems] = useState<UploadItem[]>([]);
+  // עדכון אוטומטי של האתר מחכה עד שהתור מתרוקן
+  useHoldUpdate(items.length > 0);
   // A pump tick, bumped whenever an upload leaves the active set. The queue effect
   // depends on it, so the next file starts even when the item list itself did
   // not change in the same render (an upload that failed, say).
