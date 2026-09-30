@@ -34,6 +34,12 @@ if (
   );
 }
 
+// מזהה הבנייה, אפוי גם בדף וגם בשרת: דף פתוח שואל את /api/version, וכשהשרת כבר בגרסה אחרת
+// הוא נטען מחדש לבד (app/auto-update.tsx). אותו commit = אותו מזהה, גם בפריסה חוזרת.
+const BUILD_ID =
+  (process.env.GITHUB_SHA || process.env.WORKERS_CI_COMMIT_SHA || "").slice(0, 12) ||
+  Date.now().toString(36);
+
 const localBindingConfig = {
   main: "./worker/index.ts",
   limits: { cpu_ms: 300000 }, // bounded MP3 frame scan for long program recordings
@@ -72,6 +78,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
     server: {
       host: "0.0.0.0",
       allowedHosts: ["terminal.local"],

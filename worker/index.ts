@@ -399,8 +399,13 @@ async function closedSurveyRedirect(request: Request, env: Env, url: URL): Promi
   return new Response(null, { status: 302, headers: { location: PROGRAM_SITE, "cache-control": "no-store" } });
 }
 
+declare const __BUILD_ID__: string;
+/** מזהה הבנייה (vite.config.ts). דפים פתוחים משווים אותו לשלהם ונטענים מחדש כשעולה גרסה חדשה. */
+const BUILD_ID = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "";
+
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  if (url.pathname === "/api/version" && request.method === "GET") return Response.json({ version: BUILD_ID }, { headers: { "cache-control": "no-store" } });
   const toPrograms = await closedSurveyRedirect(request, env, url);
   if (toPrograms) return toPrograms;
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, ctx, url.pathname);

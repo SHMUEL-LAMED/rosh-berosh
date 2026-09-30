@@ -22,6 +22,7 @@ import { runJob, stopJob, useJob } from "./programs-jobs";
 import { GuestsSection } from "./programs-guests";
 import { HostsSection } from "./programs-hosts";
 import { PollsSection } from "./programs-polls";
+import { useHoldUpdate } from "../update-hold";
 import { withPolls } from "../../worker/program-polls-shared.js";
 import { withPublishedPhotos } from "../../worker/program-guests.js";
 
@@ -56,6 +57,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
   const [data, setData] = useState<Catalog | null>(null);
   const [loadError, setLoadError] = useState("");
   const [sync, setSync] = useState<"" | "saving" | "saved" | "error">("");
+  useHoldUpdate(sync === "saving");
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [reload, setReload] = useState(0);
   const [selected, setSelected] = useState<string | null>(() => { const id = pendingEpisode; pendingEpisode = null; return id; });
