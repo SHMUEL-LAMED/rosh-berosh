@@ -14,6 +14,7 @@ import { isValidEmail, normalizeEmail, normalizeName } from "./subscribers.js";
 import { readIvrCatalog } from "./ivr-catalog.js";
 import { cors, programApi, programSharePage } from "./program-api";
 import { runScheduledPush } from "./program-push";
+import { PROGRAM_SITE } from "./program-tools";
 import { runAutomaticTranscription, type AiBinding } from "./program-ai";
 import { placeholders } from "./sql.js";
 // זמני: גיבוי האלבומים לגוגל דרייב (למנהלים בלבד). למחוק אחרי שההעתקה מסתיימת.
@@ -380,8 +381,28 @@ async function serveMedia(request: Request, env: Env, ctx: ExecutionContext, pat
   return mediaResponse(object.body, status, headers, "MISS");
 }
 
+/**
+ * כשההצבעה סגורה, מי שנכנס לדף הבית של אתר הסקר עובר מיד לאתר התוכניות — בלי דף ובלי הודעה.
+ * רק ניווט של דף שלם ל־"/": הניהול, ה־API והתצוגה המקדימה (?preview=) לא נוגעים. בקשת RSC של
+ * ניווט פנימי עוברת כרגיל, והדף עצמו מעביר (app/page.tsx). תקלה במסד = הדף הרגיל, לא דף שגיאה.
+ */
+async function closedSurveyRedirect(request: Request, env: Env, url: URL): Promise<Response | null> {
+  if (url.pathname !== "/" || (request.method !== "GET" && request.method !== "HEAD")) return null;
+  if (url.searchParams.has("preview") || url.searchParams.has("_rsc") || request.headers.has("rsc")) return null;
+  if (!(request.headers.get("accept") || "").includes("text/html")) return null;
+  try {
+    const row = await env.DB.prepare(`SELECT voting_open AS votingOpen FROM poll_settings WHERE id=${ACTIVE_SURVEY_SQL}`).first<{ votingOpen: number }>();
+    if (row?.votingOpen) return null;
+  } catch {
+    return null;
+  }
+  return new Response(null, { status: 302, headers: { location: PROGRAM_SITE, "cache-control": "no-store" } });
+}
+
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  const toPrograms = await closedSurveyRedirect(request, env, url);
+  if (toPrograms) return toPrograms;
   if (url.pathname.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) return serveMedia(request, env, ctx, url.pathname);
   if (url.pathname === "/admin/drive-backup" && request.method === "GET") return driveBackupPage(request, env);
   // דף שיתוף לתוכנית (תגי Open Graph לוואטסאפ/פייסבוק, והפניה מיידית לאתר התוכניות)
