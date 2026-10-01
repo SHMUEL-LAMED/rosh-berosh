@@ -47,7 +47,7 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} 
 
 type Row = { key: string; count: number; title: string; detail?: string; onClick(): void; info?: boolean };
 
-export function InboxBoard({ inbox, failed, votes24h, missingPrompts, onNavigate, onOpenEpisode, onReload }: { inbox: Inbox | null; failed: boolean; votes24h: number; missingPrompts: number; onNavigate(tab: string): void; onOpenEpisode(id: string): void; onReload(): void }) {
+export function InboxBoard({ showSurvey = true, inbox, failed, votes24h, missingPrompts, onNavigate, onOpenEpisode, onReload }: { showSurvey?: boolean; inbox: Inbox | null; failed: boolean; votes24h: number; missingPrompts: number; onNavigate(tab: string): void; onOpenEpisode(id: string): void; onReload(): void }) {
   const rows: Row[] = [];
   if (inbox) {
     if (inbox.messagesUnread) rows.push({ key: "messages", count: inbox.messagesUnread, title: plural(inbox.messagesUnread, "הודעה אחת שלא נקראה", "הודעות שלא נקראו"), detail: "ממאזינים, מ„כתבו לנו” באתר התוכניות", onClick: () => onNavigate("prog-listeners") });
@@ -56,11 +56,11 @@ export function InboxBoard({ inbox, failed, votes24h, missingPrompts, onNavigate
     for (const item of inbox.scheduled) rows.push({ key: `scheduled-${item.id}`, count: 0, title: `תעלה לאתר ${dayTime(item.publishAt)}: ${item.title || "תוכנית בלי שם"}`, detail: "פרסום מתוזמן — בודקים שהכול מוכן", onClick: () => onOpenEpisode(item.id), info: true });
     if (inbox.scheduledCount > inbox.scheduled.length) rows.push({ key: "scheduled-more", count: inbox.scheduledCount - inbox.scheduled.length, title: `ועוד ${inbox.scheduledCount - inbox.scheduled.length} מתוזמנות בשבועיים הקרובים`, onClick: () => onNavigate("prog-programs"), info: true });
   }
-  if (missingPrompts) rows.push({ key: "prompts", count: missingPrompts, title: plural(missingPrompts, "קריינות אחת בקו עוד לא הוקלטה", "קריינויות בקו עוד לא הוקלטו"), detail: "בלי הקלטה הקו משמיע קול ממוחשב או מדלג", onClick: () => onNavigate("ivr") });
+  if (showSurvey && missingPrompts) rows.push({ key: "prompts", count: missingPrompts, title: plural(missingPrompts, "קריינות אחת בקו עוד לא הוקלטה", "קריינויות בקו עוד לא הוקלטו"), detail: "בלי הקלטה הקו משמיע קול ממוחשב או מדלג", onClick: () => onNavigate("ivr") });
   const todo = rows.filter((row) => !row.info).length;
   return <section className="admin-panel inbox" data-tour="inbox" aria-labelledby="inbox-title">
     <header><h2 id="inbox-title">מה מחכה לך</h2><button type="button" className="inbox-refresh" onClick={onReload} aria-label="רענון">↻</button></header>
-    <p className="inbox-votes"><b>{votes24h.toLocaleString("he-IL")}</b> הצבעות ב־24 השעות האחרונות · <button type="button" onClick={() => onNavigate("results")}>לתוצאות</button></p>
+    {showSurvey && <p className="inbox-votes"><b>{votes24h.toLocaleString("he-IL")}</b> הצבעות ב־24 השעות האחרונות · <button type="button" onClick={() => onNavigate("results")}>לתוצאות</button></p>}
     {failed && !inbox ? <p className="panel-help">לא הצלחנו לטעון את מה שמחכה לטיפול. <button type="button" className="inbox-link" onClick={onReload}>ניסיון חוזר</button></p>
       : !inbox ? <p className="panel-help">בודקים מה מחכה…</p>
       : rows.length ? <ul className="inbox-list">{rows.map((row) => <li key={row.key}><button type="button" className={row.info ? "info" : ""} onClick={row.onClick}>{row.count > 0 && !row.info ? <i>{row.count > 99 ? "99+" : row.count}</i> : <i className="dot" aria-hidden="true">◷</i>}<span><b>{row.title}</b>{row.detail && <small>{row.detail}</small>}</span><em aria-hidden="true">←</em></button></li>)}</ul>
