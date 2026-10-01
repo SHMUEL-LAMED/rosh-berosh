@@ -69,12 +69,37 @@ export function normalizeBanner(raw: unknown) {
 }
 
 /** דף העדכונים: הודעות קצרות עם תאריך. הפריטים נשמרים מהחדש לישן. */
+/** כתובת שמותר לקשר אליה מעדכון: http(s), mailto:, tel: או נתיב באתר. javascript: וכדומה נזרקים. */
+export const safeUpdateUrl = (value: unknown) => {
+  const url = text(value, 1000);
+  return /^(https?:\/\/|mailto:|tel:|\/|\.\/|#|[\w-]+\.html\b)/i.test(url) && !/^\/\//.test(url) ? url : "";
+};
+/** כפתורי הקישור של עדכון: עד 6, כל אחד עם כיתוב וכתובת */
+function updateLinks(raw: unknown) {
+  return (Array.isArray(raw) ? raw : []).slice(0, 6).map((item) => {
+    const l = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    return { label: text(l.label, 80), url: safeUpdateUrl(l.url) };
+  }).filter((l) => l.url);
+}
+/** הקבצים המצורפים לעדכון: עד 10, קבצים שהועלו לאחסון של האתר (/media/program/...) או קישור מלא */
+function updateFiles(raw: unknown) {
+  return (Array.isArray(raw) ? raw : []).slice(0, 10).map((item) => {
+    const f = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    const size = Number(f.size);
+    return { name: text(f.name, 160), url: /^https:\/\/|^\/media\//.test(String(f.url || "")) ? text(f.url, 1000) : "", size: Number.isFinite(size) && size > 0 ? Math.round(size) : 0, type: text(f.type, 120) };
+  }).filter((f) => f.url);
+}
+
 export function normalizeUpdates(raw: unknown) {
   const list = Array.isArray(raw) ? raw : [];
   return list.slice(0, 200).map((item) => {
     const u = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
-    return { id: text(u.id, 40) || crypto.randomUUID(), date: /^\d{4}-\d{2}-\d{2}/.test(String(u.date || "")) ? String(u.date).slice(0, 10) : day(), title: text(u.title, 160), text: text(u.text, MAX_TEXT), link: text(u.link, 500), pinned: !!u.pinned };
-  }).filter((u) => u.title || u.text).sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.date.localeCompare(a.date));
+    return {
+      id: text(u.id, 40) || crypto.randomUUID(), date: /^\d{4}-\d{2}-\d{2}/.test(String(u.date || "")) ? String(u.date).slice(0, 10) : day(),
+      title: text(u.title, 160), text: text(u.text, MAX_TEXT), link: text(u.link, 500), pinned: !!u.pinned,
+      links: updateLinks(u.links), files: updateFiles(u.files),
+    };
+  }).filter((u) => u.title || u.text || u.files.length).sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.date.localeCompare(a.date));
 }
 
 /** פרטי הקשר שבאתר (טלפונים, דוא״ל והערות) — ברירת המחדל עד שנשמרו לראשונה. */

@@ -84,6 +84,20 @@ test("the home banner and the updates page publish with the catalog and reach th
   assert.ok(pub.settings.updates[0].id, "every update gets an id");
   assert.ok(pub.episodes.some((e) => e.id === "ep-1"), "the seeded catalog gained the published program");
 
+  // עדכון עם קישורים בתוך הטקסט, כפתורי קישור וקבצים מצורפים
+  const rich = await publish(call, admin, { settings: { updates: [{
+    title: "קבצים", text: "ראו [כאן](https://example.com) ובאתר", date: "2026-09-21",
+    links: [{ label: "לתקנון", url: "https://example.com/rules" }, { label: "רע", url: "javascript:alert(1)" }, { label: "בלי כתובת" }],
+    files: [{ name: "לוח.pdf", url: "https://rosh-berosh.smwlyqswkwt232.workers.dev/media/program/u-1/a.pdf", size: 1200, type: "application/pdf" }, { name: "רע", url: "javascript:alert(1)" }],
+  }, { title: "", text: "", files: [{ name: "רק קובץ", url: "/media/program/u-2/b.pdf" }] }] } });
+  assert.equal(rich.status, 200, await rich.clone().text());
+  const withFiles = (await (await call("/api/program/catalog")).json()).settings.updates;
+  assert.equal(withFiles.length, 2, "an update with only a file is kept");
+  const first = withFiles.find((u) => u.title === "קבצים");
+  assert.equal(first.text, "ראו [כאן](https://example.com) ובאתר");
+  assert.deepEqual(first.links, [{ label: "לתקנון", url: "https://example.com/rules" }], "unsafe and empty links are dropped");
+  assert.deepEqual(first.files, [{ name: "לוח.pdf", url: "https://rosh-berosh.smwlyqswkwt232.workers.dev/media/program/u-1/a.pdf", size: 1200, type: "application/pdf" }]);
+
   // a publish without settings leaves them untouched
   await publish(call, admin);
   const again = await (await call("/api/program/catalog")).json();
