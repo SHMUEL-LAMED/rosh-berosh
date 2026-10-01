@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { LoginScreen, logout, useCurrentUser } from "../auth-ui";
 import { useNotice } from "../notice";
@@ -49,25 +49,33 @@ type Voter = { id: string; voterKey: string; voterName?: string; voterEmail?: st
 
 const SYSTEM_PROMPTS = systemPrompts;
 
+let surveyVisibilityFallback = false;
+function surveyVisibilitySnapshot() {
+  try { return localStorage.getItem("rosh:admin:survey-visible") === "1"; } catch { return surveyVisibilityFallback; }
+}
+const surveyVisibilityServerSnapshot = () => false;
+function subscribeSurveyVisibility(listener: () => void) {
+  window.addEventListener("storage", listener);
+  window.addEventListener("rosh:admin-survey-visibility", listener);
+  return () => {
+    window.removeEventListener("storage", listener);
+    window.removeEventListener("rosh:admin-survey-visibility", listener);
+  };
+}
+
 export default function AdminPage() {
   const [user] = useCurrentUser();
   const [data, setData] = useState<Overview | null>(null);
-  const [tab, setTab] = useState<Tab>(tabFromHash);
+  const surveyVisible = useSyncExternalStore(subscribeSurveyVisibility, surveyVisibilitySnapshot, surveyVisibilityServerSnapshot);
+  const [selectedTab, setTab] = useState<Tab>(tabFromHash);
+  const tab = !surveyVisible && isSurveyTab(selectedTab) ? "dashboard" : selectedTab;
   const [programsOpened, setProgramsOpened] = useState(() => isProgramTab(tabFromHash()));
-  const [surveyVisible, setSurveyVisible] = useState(false);
-  const [surveyPreferenceReady, setSurveyPreferenceReady] = useState(false);
-  useEffect(() => {
-    try { setSurveyVisible(localStorage.getItem("rosh:admin:survey-visible") === "1"); } catch { /* אחסון חסום: נשאר מוסתר */ }
-    setSurveyPreferenceReady(true);
-  }, []);
-  useEffect(() => {
-    if (surveyPreferenceReady && !surveyVisible && isSurveyTab(tab)) setTab("dashboard");
-  }, [surveyPreferenceReady, surveyVisible, tab]);
   const toggleSurveyVisibility = () => {
     const next = !surveyVisible;
-    setSurveyVisible(next);
+    surveyVisibilityFallback = next;
     try { localStorage.setItem("rosh:admin:survey-visible", next ? "1" : "0"); } catch { /* ההעדפה נשמרת לביקור הנוכחי */ }
-    if (!next && isSurveyTab(tab)) setTab("dashboard");
+    window.dispatchEvent(new Event("rosh:admin-survey-visibility"));
+    if (!next && isSurveyTab(selectedTab)) setTab("dashboard");
   };
   useEffect(() => { if (typeof window !== "undefined" && window.location.hash !== `#${tab}`) window.history.replaceState(null, "", `#${tab}`); }, [tab]);
   const go = useCallback((next: Tab) => { if (isProgramTab(next)) setProgramsOpened(true); setTab(next); }, []);
