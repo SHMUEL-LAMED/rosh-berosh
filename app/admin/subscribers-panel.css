@@ -18,3 +18,15 @@
 .subscriber-toolbar button.subscriber-primary{border:0;color:#fff;font-weight:800;background:linear-gradient(105deg,#2b3a7a,#b89530)}
 .subscriber-result{margin:0;padding:9px 12px;border-radius:10px;background:#e8f7f2;color:#137861;font-weight:700;font-size:13px}
 @media(max-width:580px){.subscriber-toolbar button,.subscriber-file{flex:1;justify-content:center}}
+/* חדשים / טופלו */
+.subscriber-new-count{color:#b0402a!important}
+.subscriber-handled-help{margin:0 0 12px;padding:10px 14px;border-radius:12px;background:rgba(184,149,48,.08);font-size:13px;line-height:1.7;color:var(--text)}
+.subscriber-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.subscriber-tabs button{display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:0 14px;border:1px solid rgba(184,149,48,.4);border-radius:999px;background:transparent;color:var(--text);font-weight:700;cursor:pointer}
+.subscriber-tabs button span{padding:1px 8px;border-radius:999px;background:rgba(0,0,0,.06);font-size:12px}
+.subscriber-tabs button.on{border-color:#b89530;background:#b89530;color:#fff}
+.subscriber-tabs button.on span{background:rgba(255,255,255,.25)}
+.subscriber-state{min-height:30px;padding:0 10px;border:1px solid rgba(176,64,42,.35);border-radius:999px;background:#fff4f1;color:#b0402a;font-size:12px;font-weight:800;white-space:nowrap;cursor:pointer}
+.subscriber-state.handled{border-color:rgba(19,120,97,.35);background:#e8f7f2;color:#137861}
+.subscriber-state:disabled{opacity:.6;cursor:default}
+.subscriber-table tr.handled td{color:var(--muted)}
