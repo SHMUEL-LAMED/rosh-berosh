@@ -45,6 +45,8 @@
 .prog-update-head{display:grid;grid-template-columns:160px 1fr auto auto;gap:8px;align-items:center}
 /* עורך העדכונים (programs-updates.tsx) */
 .prog-update textarea{min-height:110px}
+.prog-update-demo{margin:0;padding:10px;border:2px dashed #c9a64a;border-radius:15px;background:#fffdf6;min-width:0}
+.prog-update-demo>legend{padding:0 8px;font-size:12px;font-weight:800;color:#8a6a12}
 .prog-update-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .prog-update-tools>button,.prog-update-attach,.prog-linker-files button,.prog-linker-actions button:not(.prog-primary),.prog-update-files button:not(.danger),.prog-update-buttons>button,.prog-update-files a{display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:4px 12px;border:1px solid #e3dbe8;border-radius:999px;background:#fff;color:#3b3046;font:inherit;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none}
 .prog-update-tools>button:hover,.prog-update-attach:hover,.prog-linker-files button:hover{border-color:#c9a64a;background:#fcf8ec}
