@@ -15,7 +15,7 @@ import {
   type ApiError, type Banner, type Catalog, type Comment, type Contacts, type Episode, type Message, type Season, type Stats, type SurveyRow, type Version,
 } from "./programs-core";
 import { FilePick, Section, Status, Switch } from "./programs-ui";
-import { AiCard, aiRun, ProofreadCard, summaryPatch } from "./programs-ai";
+import { AiCard, aiRun, ProofreadCard, summaryPatch, TranscribeAllCard } from "./programs-ai";
 import { ProgramsAds } from "./programs-ads";
 import { CommentsCard, commentsError, CountSettings, DeepStats, EpisodeTable, minutesText, PushCard } from "./programs-listeners";
 import { runJob, stopJob, useJob } from "./programs-jobs";
@@ -667,6 +667,8 @@ function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin,
       {health.groups.length ? <><div className="prog-groups">{health.groups.map(({ group, items }) => <HealthGroup key={group.key} group={group} items={items} onFix={() => runFix(group.fix!, items)} />)}</div><p className="panel-help">אלה הצעות בלבד — הן לא חוסמות פרסום. לחיצה על שורה מציגה את התוכניות; הכפתור לצדה מתקן את כולן בבת אחת (ברקע, ואפשר לעצור).</p></> : <p className="panel-help">✓ לכל התוכניות יש שם, תאריך, תיאור, הקלטה, אורך ותמונה, ואין כפילויות.</p>}
       <div className="admin-list">{check("audio", "בדיקת ההקלטות", "עובר על כל ההקלטות ומוודא שהן נטענות בנגן.")}{check("media", "בדיקת תמונות וקישורים", "מוודא שהתמונות נטענות ושהקישורים עונים.")}</div>
     </Section>
+
+    <TranscribeAllCard data={data} onMessage={onMessage} />
 
     <ProofreadCard data={data} origin={origin} mutate={mutate} onMessage={onMessage} onOpen={onOpen} />
 
