@@ -14,7 +14,14 @@ type Helpers = {
 };
 
 export const TRANSCRIBE_CHUNK = 2 * 1024 * 1024;
-const DAILY_AUTO_PARTS = 60;
+/** כמה חלקים (2MB, כ־2 דקות הקלטה) מתומללים ביום ברקע. המנהל בוחר בין הקצבים (program-auto-transcription-daily). */
+export const DAILY_PACES = [60, 300, 1000] as const;
+const DAILY_AUTO_PARTS = DAILY_PACES[0];
+async function dailyLimit(env: Env): Promise<number> {
+  const row = await env.DB.prepare("SELECT value_json FROM program_settings WHERE key='program-auto-transcription-daily'").first<{ value_json: string }>();
+  const value = Number(row ? JSON.parse(row.value_json) : NaN);
+  return (DAILY_PACES as readonly number[]).includes(value) ? value : DAILY_AUTO_PARTS;
+}
 export const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
 export const LLAMA_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 export const CLAUDE_MODEL = "claude-sonnet-5";
@@ -78,7 +85,7 @@ export async function runAutomaticTranscription(env: Env, origin: string): Promi
   const usage = await env.DB.prepare("SELECT value_json FROM program_settings WHERE key='program-auto-transcription-usage'").first<{ value_json: string }>();
   let count = 0;
   try { const value = JSON.parse(usage?.value_json || "null"); if (value?.day === today) count = Number(value.count) || 0; } catch { /* reset malformed counter */ }
-  if (count >= DAILY_AUTO_PARTS) return;
+  if (count >= await dailyLimit(env)) return;
   const job = await env.DB.prepare("SELECT episode_id,audio_key,attempts FROM program_transcription_jobs WHERE next_at<=unixepoch() ORDER BY updated_at,episode_id LIMIT 1")
     .first<{ episode_id: string; audio_key: string; attempts: number }>();
   if (!job) return;
@@ -310,6 +317,56 @@ export async function programAiApi(request: Request, env: Env, h: Helpers): Prom
   if (!path.startsWith("/ai/")) return null;
   if (!await h.admin(request, env)) return h.reply(request, { error: "אין הרשאת ניהול." }, 403);
   const body = async <T>() => { try { return await request.json<T>(); } catch { return {} as T; } };
+
+  /* תמלול כל התוכניות: כל תוכנית שההקלטה שלה באחסון של האתר ועוד לא תומללה עד הסוף נכנסת לתור
+     של התמלול האוטומטי (חלק אחד בדקה ברקע, עד המגבלה היומית). אפשר לסגור את הדף. */
+  if (path === "/ai/transcribe-all" && request.method === "POST") {
+    const input = await body<{ daily?: number }>();
+    if (input.daily !== undefined) {
+      if (!(DAILY_PACES as readonly number[]).includes(Number(input.daily))) return h.reply(request, { error: "הקצב אינו תקין." }, 400);
+      await env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('program-auto-transcription-daily',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()").bind(JSON.stringify(Number(input.daily))).run();
+    }
+    const [episodes, transcripts, jobs] = await env.DB.batch([
+      env.DB.prepare("SELECT id,data_json FROM program_episodes ORDER BY date DESC,number DESC"),
+      env.DB.prepare("SELECT episode_id,parts_done,parts_total FROM program_transcripts"),
+      env.DB.prepare("SELECT episode_id FROM program_transcription_jobs"),
+    ]);
+    const finished = new Set((transcripts.results as Array<{ episode_id: string; parts_done: number; parts_total: number }>).filter((row) => row.parts_total > 0 && row.parts_done >= row.parts_total).map((row) => row.episode_id));
+    const waiting = new Set((jobs.results as Array<{ episode_id: string }>).map((row) => row.episode_id));
+    let queued = 0, already = 0, done = 0, noAudio = 0;
+    const inserts: D1PreparedStatement[] = [];
+    for (const row of episodes.results as Array<{ id: string; data_json: string }>) {
+      if (finished.has(row.id)) { done++; continue; }
+      if (waiting.has(row.id)) { already++; continue; }
+      let data: Record<string, unknown> = {};
+      try { data = JSON.parse(row.data_json); } catch { /* תוכנית פגומה — בלי הקלטה */ }
+      const audio = await locateAudio(env, data, url.origin);
+      if (!audio?.size) { noAudio++; continue; }
+      inserts.push(env.DB.prepare("INSERT OR IGNORE INTO program_transcription_jobs (episode_id,audio_key) VALUES (?,?)").bind(row.id, audio.key));
+      queued++;
+    }
+    for (let index = 0; index < inserts.length; index += 50) await env.DB.batch(inserts.slice(index, index + 50));
+    return h.reply(request, { ok: true, queued, already, done, noAudio });
+  }
+  if (path === "/ai/transcribe-status" && request.method === "GET") {
+    const [counts, queue, usage, daily] = await Promise.all([
+      env.DB.prepare(`SELECT (SELECT COUNT(*) FROM program_episodes) AS episodes,
+        (SELECT COUNT(*) FROM program_transcripts WHERE parts_total>0 AND parts_done>=parts_total) AS done`).first<{ episodes: number; done: number }>(),
+      env.DB.prepare(`SELECT j.episode_id AS id, j.attempts, j.last_error AS error, COALESCE(t.parts_done,0) AS partsDone, COALESCE(t.parts_total,0) AS partsTotal
+        FROM program_transcription_jobs j LEFT JOIN program_transcripts t ON t.episode_id=j.episode_id ORDER BY j.updated_at`).all<{ id: string; attempts: number; error: string | null; partsDone: number; partsTotal: number }>(),
+      env.DB.prepare("SELECT value_json FROM program_settings WHERE key='program-auto-transcription-usage'").first<{ value_json: string }>(),
+      dailyLimit(env),
+    ]);
+    let today = 0;
+    try { const value = JSON.parse(usage?.value_json || "null"); if (value?.day === new Date().toISOString().slice(0, 10)) today = Number(value.count) || 0; } catch { /* */ }
+    const rows = queue.results;
+    return h.reply(request, {
+      episodes: Number(counts?.episodes || 0), done: Number(counts?.done || 0), queued: rows.length,
+      partsLeft: rows.reduce((sum, row) => sum + Math.max(0, row.partsTotal - row.partsDone), 0), notStarted: rows.filter((row) => !row.partsTotal).length,
+      failing: rows.filter((row) => row.error).map((row) => ({ id: row.id, attempts: row.attempts, error: row.error })),
+      today, daily, paces: DAILY_PACES, enabled: !!env.AI,
+    });
+  }
 
   if (path === "/ai/transcribe" && request.method === "POST") {
     const input = await body<{ episodeId?: string; part?: number }>();

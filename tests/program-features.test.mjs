@@ -672,6 +672,45 @@ test("new recordings transcribe in the scheduled job without a manager click", a
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs WHERE episode_id='auto'").get().n, 0, "publishing the same recording does not restart transcription");
 });
 
+// תמלול כל התוכניות בלחיצה אחת: כל מה שלא תומלל ויש לו הקלטה באחסון נכנס לתור של התמלול ברקע
+test("one click queues every program that is not transcribed yet, and the pace can be raised", async () => {
+  const { worker, db, env, media, admin, voter, call, settle, ctx } = await setup();
+  env.AI = { async run() { return { text: "טקסט" }; } };
+  for (const id of ["t-new", "t-done"]) await media.put(`program-recordings/${id}.mp3`, new Uint8Array(100), { httpMetadata: { contentType: "audio/mpeg" } });
+  await media.put("program-recordings/t-half.mp3", new Uint8Array(2 * 2 * 1024 * 1024 + 10), { httpMetadata: { contentType: "audio/mpeg" } });   // שלושה חלקים, אחד כבר תומלל
+  await publish(call, admin, [episode("t-new", { r2Key: "program-recordings/t-new.mp3" }), episode("t-half", { r2Key: "program-recordings/t-half.mp3" }), episode("t-done", { r2Key: "program-recordings/t-done.mp3" }), episode("t-none")]);
+  db.prepare("DELETE FROM program_transcription_jobs").run();   // כאילו אלה תוכניות ישנות שלא נכנסו לתור
+  db.prepare("INSERT INTO program_transcripts (episode_id,text,parts_done,parts_total) VALUES ('t-done','x',1,1),('t-half','x',1,3)").run();
+  db.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES ('program-auto-transcription-initialized','true',unixepoch())").run();
+
+  assert.equal((await call("/api/program/ai/transcribe-all", { method: "POST", token: voter, body: {} })).status, 403);
+  const first = await (await call("/api/program/ai/transcribe-all", { method: "POST", token: admin, body: {} })).json();
+  const queued = db.prepare("SELECT episode_id AS id FROM program_transcription_jobs ORDER BY episode_id").all().map((row) => row.id);
+  assert.ok(queued.includes("t-new") && queued.includes("t-half"), "untranscribed and half-done programs are queued");
+  assert.ok(!queued.includes("t-done") && !queued.includes("t-none"), "finished programs and programs without a recording are not");
+  assert.ok(first.queued >= 2 && first.done >= 1 && first.noAudio >= 1);
+  const again = await (await call("/api/program/ai/transcribe-all", { method: "POST", token: admin, body: {} })).json();
+  assert.equal(again.queued, 0, "a second click adds nothing new");
+
+  let status = await (await call("/api/program/ai/transcribe-status", { token: admin })).json();
+  assert.equal(status.queued, queued.length);
+  assert.equal(status.daily, 60, "the normal pace by default");
+  assert.deepEqual(status.paces, [60, 300, 1000]);
+  assert.equal((await call("/api/program/ai/transcribe-all", { method: "POST", token: admin, body: { daily: 7 } })).status, 400);
+  await call("/api/program/ai/transcribe-all", { method: "POST", token: admin, body: { daily: 300 } });
+  status = await (await call("/api/program/ai/transcribe-status", { token: admin })).json();
+  assert.equal(status.daily, 300);
+
+  // התור מתקדם ברקע, חלק בכל הפעלה, עד שהכול תומלל
+  for (let i = 0; i < 20 && db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs").get().n; i += 1) { await worker.scheduled({}, env, ctx); await settle(); }
+  status = await (await call("/api/program/ai/transcribe-status", { token: admin })).json();
+  assert.equal(status.queued, 0);
+  for (const id of ["t-new", "t-half"]) {
+    const t = db.prepare("SELECT parts_done,parts_total FROM program_transcripts WHERE episode_id=?").get(id);
+    assert.ok(t && t.parts_done >= t.parts_total && t.parts_total > 0, `${id} finished`);
+  }
+});
+
 /** אישור Google חתום (RS256) עם מפתח שנוצר לבדיקה, ו־JWKS תואם להגשה במקום googleapis */
 async function googleCredential({ email = "listener@example.com", sub = "sub-google-1" } = {}) {
   const pair = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);

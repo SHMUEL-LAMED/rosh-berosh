@@ -261,3 +261,8 @@
 .prog-one{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;border:1px solid #d4b060;border-radius:16px;background:linear-gradient(90deg,#fbf3dc,#fffaf0)}.prog-one>span{flex:1;min-width:220px}.prog-one b,.prog-one small{display:block}.prog-one small{margin-top:3px;color:var(--muted);line-height:1.5}.prog-one .prog-check{margin:0}
 .prog-build{display:grid;gap:10px}.prog-build-state{display:flex;align-items:center;gap:9px;flex-wrap:wrap;color:var(--muted);font-size:14px}.prog-build-state i{width:10px;height:10px;border-radius:50%;background:#b8b0a0}.prog-build-state i.ok{background:#1f9d72}.prog-build-state i.run{background:#d4a32a;animation:prog-pulse 1.2s ease-in-out infinite}.prog-build-state i.bad{background:#c2453d}.prog-build-state a{color:#967b1f}
 @keyframes prog-pulse{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){.prog-build-state i.run{animation:none}}
+
+/* תמלול כל התוכניות */
+.prog-transcribe-bar{height:10px;margin:4px 0 8px;border-radius:999px;background:#f0ebf3;overflow:hidden}
+.prog-transcribe-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#2b3a7a,#b89530)}
+.prog-transcribe-failing ul{margin:6px 0 0;padding-inline-start:18px;font-size:13px;line-height:1.7}

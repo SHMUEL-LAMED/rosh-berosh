@@ -204,3 +204,57 @@ export function ProofreadCard({ data, origin, mutate, onMessage, onOpen }: { dat
     </li>)}</ul>}
   </section>;
 }
+
+/* ---------- תמלול כל התוכניות ----------
+   כל תוכנית שעוד לא תומללה נכנסת לתור של התמלול האוטומטי בשרת (/ai/transcribe-all): חלק אחד בדקה
+   ברקע, עד המגבלה היומית שבוחרים כאן — בלי לתמלל כל תוכנית לבד, ואפשר לסגור את הדף. */
+type TranscribeStatus = { episodes: number; done: number; queued: number; partsLeft: number; notStarted: number; failing: Array<{ id: string; attempts: number; error: string | null }>; today: number; daily: number; paces: number[]; enabled: boolean };
+const PACE_LABEL: Record<number, string> = { 60: "רגיל — כשעתיים הקלטה ביום", 300: "מהיר — כ־10 שעות הקלטה ביום", 1000: "הכי מהיר — כ־30 שעות הקלטה ביום" };
+const PARTS_PER_EPISODE = 30;   // הערכה לתוכנית שעוד לא התחילה: שעה של הקלטה ≈ 30 חלקים של 2MB
+
+export function TranscribeAllCard({ data, onMessage }: { data: Catalog; onMessage(message: string): void }) {
+  const [status, setStatus] = useState<TranscribeStatus | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false), [tick, setTick] = useState(0);
+  useEffect(() => {
+    let active = true;
+    api<TranscribeStatus>("/api/program/ai/transcribe-status").then((s) => { if (active) { setStatus(s); setError(""); } }, (e) => { if (active) setError(errorText(e, "טעינת מצב התמלול נכשלה.")); });
+    const timer = setInterval(() => setTick((n) => n + 1), 60_000);   // התור מתקדם חלק בדקה
+    return () => { active = false; clearInterval(timer); };
+  }, [tick]);
+  const run = async (daily?: number) => {
+    setBusy(true);
+    try {
+      const r = await api<{ queued: number; already: number; done: number; noAudio: number }>("/api/program/ai/transcribe-all", { method: "POST", body: JSON.stringify(daily ? { daily } : {}) });
+      onMessage(r.queued ? `${r.queued} תוכניות נכנסו לתור התמלול. התמלול רץ ברקע — אפשר לסגור את הדף.` : r.already ? "כל התוכניות שעוד לא תומללו כבר בתור." : "כל התוכניות כבר תומללו.");
+      setTick((n) => n + 1);
+    } catch (e) { onMessage(errorText(e, "ההוספה לתור נכשלה.")); }
+    setBusy(false);
+  };
+  const setPace = async (daily: number) => {
+    try { await api("/api/program/ai/transcribe-all", { method: "POST", body: JSON.stringify({ daily }) }); setTick((n) => n + 1); onMessage(`הקצב עודכן: ${PACE_LABEL[daily] || daily}.`); }
+    catch (e) { onMessage(errorText(e, "שינוי הקצב נכשל.")); }
+  };
+  const names = new Map(data.episodes.map((e) => [e.id, label(e)]));
+  const left = status ? status.partsLeft + status.notStarted * PARTS_PER_EPISODE : 0;
+  const days = status && status.daily ? Math.max(1, Math.ceil(left / status.daily)) : 0;
+  const pct = status && status.episodes ? Math.round((status.done / status.episodes) * 100) : 0;
+  return <section className="admin-panel prog-panel" id="tour-transcribe">
+    <header className="prog-panel-head"><h2>תמלול כל התוכניות</h2>{status && <strong className={`prog-badge${status.done >= status.episodes ? " ok" : ""}`}>{status.done} / {status.episodes}</strong>}</header>
+    <p className="panel-help">בלחיצה אחת כל תוכנית שעוד לא תומללה נכנסת לתור, והתמלול רץ בשרת ברקע — חלק אחר חלק, בלי לפתוח כל תוכנית לבד ובלי להשאיר את הדף פתוח. תוכנית חדשה שמתפרסמת נכנסת לתור לבד. התמלול גלוי למנהלים בלבד.</p>
+    {error && <p className="prog-error">{error}</p>}
+    {status && !status.enabled && <p className="prog-error">שירות הבינה המלאכותית (Workers AI) אינו מחובר לשרת, ולכן התמלול לא ירוץ.</p>}
+    {status && <>
+      <div className="prog-transcribe-bar" role="img" aria-label={`תומללו ${status.done} מתוך ${status.episodes} תוכניות`}><i style={{ width: `${pct}%` }} /></div>
+      <p className="panel-help">
+        <b>{status.done}</b> מתוך {status.episodes} תוכניות תומללו
+        {status.queued ? <> · <b>{status.queued}</b> בתור{status.notStarted ? ` (${status.notStarted} עוד לא התחילו)` : ""} · היום תומללו {status.today} מתוך {status.daily} חלקים · {days <= 1 ? "יסתיים בערך היום–מחר" : `יסתיים בעוד כ־${days} ימים`}</> : status.done < status.episodes ? " · אין תוכניות בתור" : " · הכול תומלל ✓"}
+      </p>
+      <div className="row-actions">
+        <button type="button" className="prog-primary" disabled={busy || !status.enabled} onClick={() => void run()}>{busy ? "מוסיפים לתור…" : "🎙 תמלול כל התוכניות שעוד לא תומללו"}</button>
+        <label className="prog-check">קצב: <select value={status.daily} onChange={(e) => void setPace(Number(e.target.value))}>{status.paces.map((p) => <option key={p} value={p}>{PACE_LABEL[p] || `${p} חלקים ביום`}</option>)}</select></label>
+      </div>
+      <p className="panel-help">קצב מהיר יותר מסיים מהר יותר, אבל משתמש ביותר מהמכסה של שירות הבינה המלאכותית בחשבון Cloudflare (התשלום לפי דקות הקלטה).</p>
+      {status.failing.length > 0 && <details className="prog-transcribe-failing"><summary>{status.failing.length} תוכניות נתקלו בשגיאה — המערכת מנסה שוב לבד</summary><ul>{status.failing.map((f) => <li key={f.id}><b>{names.get(f.id) || f.id}</b> — {f.error} (ניסיון {f.attempts})</li>)}</ul></details>}
+    </>}
+    {!status && !error && <p className="panel-help">טוענים…</p>}
+  </section>;
+}
