@@ -7,13 +7,27 @@
    נפתחת הבחירה בין הקצר למקיף (נשמר במכשיר); מהתפריט אפשר לפתוח אותה שוב.
    אין בו שום פעולה על הנתונים — לכל היותר בחירה של תוכנית או אורח כדי להראות את העורך. */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import "./admin-tour.css";
 
 /** צעד בסיור. `target` — הבורר של האזור שמאירים (בלי — הכרטיס במרכז המסך).
     `click` — לפני ההארה לוחצים על זה, אם האזור עוד לא על המסך (בחירת תוכנית או אורח מהרשימה — בחירה בלבד, בלי שינוי).
     `open` — פותחים את ה־<details> הזה (למשל "עוד פרטים"). אין צעד שמשנה נתונים. */
-export type TourStep = { tab?: string; target?: string; click?: string; open?: string; title: string; body: string };
+export type TourStep = { tab?: string; target?: string; click?: string; open?: string; demo?: TourDemo; title: string; body: string };
+
+/** דוגמה שהמסך מציג רק בזמן צעד בסיור — למשל עדכון עם קובץ מצורף, גם כשעוד אין אף עדכון כזה.
+    הדוגמה לא נכנסת לנתונים: הרכיב שמציג אותה קורא את המצב הזה (useTourDemo) ומצייר אותה בנפרד. */
+export type TourDemo = "update";
+let currentDemo: TourDemo | "" = "";
+const demoListeners = new Set<() => void>();
+function setTourDemo(demo: TourDemo | "") {
+  if (demo === currentDemo) return;
+  currentDemo = demo;
+  demoListeners.forEach((listener) => listener());
+}
+export function useTourDemo(): TourDemo | "" {
+  return useSyncExternalStore((listener) => { demoListeners.add(listener); return () => { demoListeners.delete(listener); }; }, () => currentDemo, () => "");
+}
 
 /** הסיור הקצר — דקה על החלקים הראשיים */
 export const SHORT_TOUR: TourStep[] = [
@@ -63,7 +77,11 @@ export const SECTION_TOURS: Record<string, TourStep[]> = {
   ],
   "prog-site": [
     { target: "#tour-banner", title: "הודעה בראש האתר", body: "פס הודעה בראש כל הדפים — „התוכנית הבאה ביום חמישי” או ברכה לחג. אפשר להוסיף קישור וכפתור, לבחור אם להציג גם באתר הסקר, ולקבוע תאריך שבו היא נעלמת לבד." },
-    { target: "#tour-updates", title: "דף העדכונים", body: "הודעות קצרות למאזינים בדף „עדכונים”. החדש למעלה, ואפשר לנעוץ עדכון חשוב. עדכון מהחודש האחרון מוסיף את „עדכונים” לתפריט האתר, עם סימון „חדש”." },
+    { target: "#tour-updates", title: "דף העדכונים", body: "הודעות למאזינים בדף „עדכונים”. החדש למעלה, ואפשר לנעוץ עדכון חשוב. עדכון מהחודש האחרון מוסיף את „עדכונים” לתפריט האתר, עם סימון „חדש”. בצעדים הבאים — עדכון לדוגמה, כדי לראות מה אפשר לשים בו." },
+    { demo: "update", target: '[data-tour-demo] [data-tour="update-tools"]', title: "קישור על מילה והדגשה", body: "זה עדכון לדוגמה בשביל הסיור — הוא לא נשמר ולא עולה לאתר. מסמנים מילה בטקסט ולוחצים „🔗 קישור על מילה”: בוחרים לאן היא מובילה — כתובת, קובץ שכבר מצורף או קובץ חדש. „מודגש” מדגיש את המילים המסומנות." },
+    { demo: "update", target: '[data-tour-demo] [data-tour="update-files"]', title: "קבצים מצורפים", body: "„📎 צירוף קובץ” מעלה PDF, Word, Excel, תמונה, שמע ועוד — עד 200MB לקובץ. באתר הקובץ מופיע ככרטיס עם סמל, סוג וגודל, ונפתח או יורד בשם שכתבתם כאן. „על המילה המסומנת” הופך מילה בטקסט לקישור לקובץ." },
+    { demo: "update", target: '[data-tour-demo] [data-tour="update-buttons"]', title: "כפתורי קישור", body: "כפתורים מתחת לעדכון — למשל „להרשמה” או „לפרטים”. כותבים כיתוב וכתובת; עד שישה כפתורים." },
+    { demo: "update", target: '[data-tour-demo] [data-tour="update-preview"]', title: "כך זה ייראה באתר", body: "התצוגה מתעדכנת בזמן שכותבים: המילה עם הקישור, הקובץ והכפתור — בדיוק כמו בדף העדכונים. כתובת לא תקינה מסומנת כאן באזהרה." },
     { target: "#tour-contacts", title: "פרטי קשר", body: "הטלפונים, המייל וההערות שמופיעים בדף הבית של האתר." },
     { target: "#tour-seasons", title: "עונות", body: "העונות מסדרות את הארכיון. משנים שם, מוסיפים עונה חדשה, ורואים כמה תוכניות יש בכל אחת." },
   ],
@@ -141,6 +159,10 @@ export function AdminTour({ steps, onNavigate, onClose }: { steps: TourStep[]; o
     setMeasured({ index: at, box: { top: r.top - PAD, left: r.left - PAD, width: r.width + PAD * 2, height: r.height + PAD * 2 } });
   }, []);
   let box = measured.index === index ? measured.box : null;
+
+  // הדוגמה של הצעד (אם יש) מוצגת רק בזמן הצעד, ויוצאת כשהסיור נסגר
+  useEffect(() => { setTourDemo(step.demo || ""); }, [step.demo]);
+  useEffect(() => () => setTourDemo(""), []);
 
   // מעבר צעד: הלשונית, ואז מחכים לאזור, גוללים אליו ומודדים
   useEffect(() => {

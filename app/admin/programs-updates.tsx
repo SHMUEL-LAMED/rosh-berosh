@@ -9,6 +9,7 @@ import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import { errorText, today, uploadFile, type Catalog, type Update, type UpdateFile, type UpdateLink } from "./programs-core";
 import { Switch } from "./programs-ui";
+import { useTourDemo } from "./admin-tour";
 import { badLinks, fileKindOf, fmtSize, parseUpdateText, updateUrl } from "./update-text";
 
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
@@ -21,14 +22,24 @@ export function UpdatesEditor({ updates, mutate, onMessage }: { updates: Update[
   const setList = (fn: (list: Update[]) => Update[]) => mutate((c) => ({ ...c, settings: { ...c.settings, updates: fn(c.settings.updates) } }));
   const patch = (id: string): Patch => (fields) => setList((list) => list.map((u) => (u.id === id ? { ...u, ...(typeof fields === "function" ? fields(u) : fields) } : u)));
   const add = () => setList((list) => [{ id: `u-${Date.now().toString(36)}`, date: today(), title: "", text: "", link: "", pinned: false, links: [], files: [] }, ...list]);
+  const demo = useTourDemo() === "update";
   return <>
     <button type="button" className="prog-primary" onClick={add}>+ עדכון חדש</button>
     <div className="prog-updates">
+      {demo && <fieldset className="prog-update-demo" data-tour-demo disabled><legend>עדכון לדוגמה בשביל הסיור — לא נשמר ולא עולה לאתר</legend><UpdateCard u={DEMO_UPDATE} patch={() => undefined} remove={() => undefined} onMessage={() => undefined} /></fieldset>}
       {updates.map((u) => <UpdateCard key={u.id} u={u} patch={patch(u.id)} remove={() => { if (confirm("למחוק את העדכון?")) setList((list) => list.filter((x) => x.id !== u.id)); }} onMessage={onMessage} />)}
       {!updates.length && <p className="panel-help">עדיין אין עדכונים.</p>}
     </div>
   </>;
 }
+
+/** העדכון שהסיור מציג (useTourDemo): עם קישור על מילה, קובץ מצורף וכפתור — גם כשבאתר עוד אין עדכון כזה */
+const DEMO_UPDATE: Update = {
+  id: "tour-demo", date: today(), title: "לוח השידורים לחגים", pinned: false, link: "",
+  text: "השבוע התוכנית משודרת ביום חמישי ב־20:00. את **לוח השידורים המלא** אפשר [להוריד כאן](https://example.com/schedule.pdf).",
+  links: [{ label: "להרשמה לתפוצה", url: "https://example.com/join" }],
+  files: [{ name: "לוח שידורים — חגי תשרי", url: "https://example.com/schedule.pdf", size: 420 * 1024, type: "application/pdf" }],
+};
 
 type Linker = { start: number; end: number; text: string; url: string; editing: boolean };
 
@@ -102,7 +113,7 @@ function UpdateCard({ u, patch, remove, onMessage }: { u: Update; patch: Patch; 
       <Switch on={u.pinned} onClick={() => patch((x) => ({ pinned: !x.pinned }))}>נעוץ למעלה</Switch>
       <button type="button" className="danger" onClick={remove}>מחיקה</button>
     </div>
-    <div className="prog-update-tools" role="toolbar" aria-label="עיצוב העדכון">
+    <div className="prog-update-tools" role="toolbar" aria-label="עיצוב העדכון" data-tour="update-tools">
       <button type="button" data-tool="link" onClick={() => openLinker()} title="סמנו מילה בטקסט ולחצו">🔗 קישור על מילה</button>
       <button type="button" data-tool="bold" onClick={bold} title="סמנו מילים ולחצו"><b>מודגש</b></button>
       <label className="prog-update-attach">📎 צירוף קובץ<input type="file" multiple onChange={onAttach} disabled={busy > 0} /></label>
@@ -128,7 +139,7 @@ function UpdateCard({ u, patch, remove, onMessage }: { u: Update; patch: Patch; 
     </div>}
     {status && <span className="prog-progress" role="status">{busy > 0 && <i aria-hidden="true" />}{status}</span>}
 
-    {u.files.length > 0 && <div className="prog-update-files"><span className="prog-update-sub">קבצים מצורפים</span>
+    {u.files.length > 0 && <div className="prog-update-files" data-tour="update-files"><span className="prog-update-sub">קבצים מצורפים</span>
       {u.files.map((f, j) => <div key={`${f.url}-${j}`}>
         <span aria-hidden="true">{fileKindOf(f).icon}</span>
         <input value={f.name} aria-label="שם הקובץ באתר" placeholder="שם הקובץ" data-file-name onChange={(e) => patch((x) => ({ files: x.files.map((y, k) => (k === j ? { ...y, name: e.target.value } : y)) }))} />
@@ -139,7 +150,7 @@ function UpdateCard({ u, patch, remove, onMessage }: { u: Update; patch: Patch; 
       </div>)}
     </div>}
 
-    <div className="prog-update-buttons"><span className="prog-update-sub">כפתורי קישור{links.length ? "" : " (לא חובה)"}</span>
+    <div className="prog-update-buttons" data-tour="update-buttons"><span className="prog-update-sub">כפתורי קישור{links.length ? "" : " (לא חובה)"}</span>
       {links.map((l, j) => <div key={j}>
         <input value={l.label} placeholder="כיתוב, למשל: להרשמה" aria-label="כיתוב הכפתור" maxLength={80} data-button-label onChange={(e) => setLinks(links.map((x, k) => (k === j ? { ...x, label: e.target.value } : x)))} />
         <input dir="ltr" value={l.url} placeholder="https://…" aria-label="כתובת הכפתור" data-button-url onChange={(e) => setLinks(links.map((x, k) => (k === j ? { ...x, url: e.target.value } : x)))} />
@@ -148,7 +159,7 @@ function UpdateCard({ u, patch, remove, onMessage }: { u: Update; patch: Patch; 
       <button type="button" data-tool="button" onClick={() => (links.length >= 6 ? onMessage("אפשר עד 6 כפתורים בעדכון.") : setLinks([...links, { label: "", url: "" }]))}>+ כפתור קישור</button>
     </div>
 
-    <details className="prog-update-preview" open={!!(u.text || u.files.length)}>
+    <details className="prog-update-preview" open={!!(u.text || u.files.length)} data-tour="update-preview">
       <summary>כך זה ייראה באתר</summary>
       {warnings.length > 0 && <p className="prog-error">⚠ הכתובת לא תקינה ולא תהיה קישור: {warnings.join(", ")}. כתובת מתחילה ב־https://</p>}
       <UpdatePreview u={u} links={links} />
