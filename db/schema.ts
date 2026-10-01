@@ -182,6 +182,7 @@ export const subscribers = sqliteTable("subscribers", {
   userSub: text("user_sub"),
   consentedAt: integer("consented_at").notNull().default(sql`(unixepoch())`),
   unsubscribedAt: integer("unsubscribed_at"),
+  handledAt: integer("handled_at"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 }, (table) => [
   uniqueIndex("subscribers_email_unique").on(table.email),

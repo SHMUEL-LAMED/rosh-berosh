@@ -149,6 +149,7 @@ const TABLES = [
     user_sub TEXT,
     consented_at INTEGER NOT NULL DEFAULT (unixepoch()),
     unsubscribed_at INTEGER,
+    handled_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
   `CREATE TABLE IF NOT EXISTS program_episodes (
@@ -275,6 +276,8 @@ const COLUMNS = [
   { table: "ballots", column: "fingerprint", definition: "TEXT" },
   { table: "ballots", column: "voter_email", definition: "TEXT" },
   { table: "ballots", column: "voter_name", definition: "TEXT" },
+  // רשימת התפוצה: מתי סומן הנמען כ„טופל” (הועבר לרשימה אחרת) — בלי ערך הוא „חדש”
+  { table: "subscribers", column: "handled_at", definition: "INTEGER" },
   { table: "ballots", column: "started_at", definition: "INTEGER" },
   { table: "ballots", column: "albums_done_at", definition: "INTEGER" },
   { table: "ballots", column: "songs_done_at", definition: "INTEGER" },
