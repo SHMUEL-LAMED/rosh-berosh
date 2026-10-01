@@ -12,7 +12,7 @@ import "./programs-admin.css";
 import {
   api, drainPush, drawCover, driveId, errorText, fileKind, fmtDate, fmtDuration, hasRealDescription, label, makeThumb, measureDuration, n2, normCatalog, normEpisode, pack,
   PROGRAM_SITE, scheduled, setCover, shrinkImage, slugify, splitList, streamUrl, today, uploadFile, when,
-  type ApiError, type Banner, type Catalog, type Comment, type Contacts, type Episode, type Message, type Season, type Stats, type SurveyRow, type Update, type Version,
+  type ApiError, type Banner, type Catalog, type Comment, type Contacts, type Episode, type Message, type Season, type Stats, type SurveyRow, type Version,
 } from "./programs-core";
 import { FilePick, Section, Status, Switch } from "./programs-ui";
 import { AiCard, aiRun, ProofreadCard, summaryPatch } from "./programs-ai";
@@ -22,6 +22,7 @@ import { runJob, stopJob, useJob } from "./programs-jobs";
 import { GuestsSection } from "./programs-guests";
 import { HostsSection } from "./programs-hosts";
 import { PollsSection } from "./programs-polls";
+import { UpdatesEditor } from "./programs-updates";
 import { useHoldUpdate } from "../update-hold";
 import { withPolls } from "../../worker/program-polls-shared.js";
 import { withPublishedPhotos } from "../../worker/program-guests.js";
@@ -390,10 +391,9 @@ function Editor({ episode, live, pending, onPublishOne, data, surveys, onPatch, 
 
 /* ======================= 2. הודעה ועדכונים ======================= */
 
-function SiteSection({ data, change, onMessage }: Common) {
+function SiteSection({ data, change, mutate, onMessage }: Common) {
   const banner = data.settings.banner, updates = data.settings.updates, contacts = data.settings.contacts;
   const setBanner = (fields: Partial<Banner>) => change({ ...data, settings: { ...data.settings, banner: { ...banner, ...fields } } });
-  const setUpdates = (next: Update[]) => change({ ...data, settings: { ...data.settings, updates: next } });
   const setContacts = (fields: Partial<Contacts>) => change({ ...data, settings: { ...data.settings, contacts: { ...contacts, ...fields } } });
   const counts = data.episodes.reduce<Record<string, number>>((acc, e) => { acc[e.season] = (acc[e.season] || 0) + 1; return acc; }, {});
   const setSeason = (i: number, fields: Partial<Season>) => change({ ...data, seasons: data.seasons.map((s, j) => (j === i ? { ...s, ...fields } : s)) });
@@ -412,13 +412,8 @@ function SiteSection({ data, change, onMessage }: Common) {
     </Section>
 
     <Section id="tour-updates" title="דף העדכונים" aside={<strong className="prog-badge">{updates.length}</strong>}>
-      <p className="panel-help">הודעות קצרות למאזינים בדף „עדכונים” באתר התוכניות. החדש למעלה; אפשר לנעוץ עדכון חשוב.</p>
-      <button type="button" className="prog-primary" onClick={() => setUpdates([{ id: `u-${Date.now().toString(36)}`, date: today(), title: "", text: "", link: "", pinned: false }, ...updates])}>+ עדכון חדש</button>
-      <div className="prog-updates">{updates.map((u, i) => <article key={u.id} className={u.pinned ? "pinned" : ""}>
-        <div className="prog-update-head"><input type="date" value={u.date} onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))} /><input value={u.title} placeholder="כותרת" onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} /><Switch on={u.pinned} onClick={() => setUpdates(updates.map((x, j) => (j === i ? { ...x, pinned: !x.pinned } : x)))}>נעוץ למעלה</Switch><button type="button" className="danger" onClick={() => { if (confirm("למחוק את העדכון?")) setUpdates(updates.filter((_, j) => j !== i)); }}>מחיקה</button></div>
-        <textarea value={u.text} placeholder="תוכן העדכון" onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} />
-        <input dir="ltr" value={u.link} placeholder="קישור (לא חובה)" onChange={(e) => setUpdates(updates.map((x, j) => (j === i ? { ...x, link: e.target.value } : x)))} />
-      </article>)}{!updates.length && <p className="panel-help">עדיין אין עדכונים.</p>}</div>
+      <p className="panel-help">הודעות למאזינים בדף „עדכונים” באתר התוכניות. החדש למעלה; אפשר לנעוץ עדכון חשוב. בכל עדכון אפשר להפוך מילה לקישור (לכתובת או לקובץ), להדגיש, לצרף קבצים (PDF, Word, תמונות ועוד — עד 200MB) ולהוסיף כפתורי קישור.</p>
+      <UpdatesEditor updates={updates} mutate={mutate} onMessage={onMessage} />
     </Section>
 
     <Section id="tour-contacts" title="פרטי קשר">

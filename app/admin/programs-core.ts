@@ -18,7 +18,10 @@ export type Episode = {
 };
 export type Season = { id: string; title: string; year: number | null; note: string };
 export type Banner = { enabled: boolean; text: string; link: string; linkLabel: string; until: string; sites: { program: boolean; survey: boolean } };
-export type Update = { id: string; date: string; title: string; text: string; link: string; pinned: boolean };
+export type UpdateLink = { label: string; url: string };
+export type UpdateFile = { name: string; url: string; size: number; type: string };
+/** עדכון בדף העדכונים. הטקסט בסימון פשוט: [מילה](כתובת) ו־**מודגש** (update-text.ts). link — הקישור הישן, מוצג ככפתור "לפרטים". */
+export type Update = { id: string; date: string; title: string; text: string; link: string; pinned: boolean; links: UpdateLink[]; files: UpdateFile[] };
 /** פרטי הקשר שבדף הבית של אתר התוכניות — אותם שישה שדות כמו בשרת (normalizeContacts) */
 export const DEFAULT_CONTACTS = {
   phone: "077-226-2271",
@@ -112,7 +115,12 @@ export function normCatalog(raw: Record<string, unknown> | null | undefined): Ca
   const b = (settings.banner && typeof settings.banner === "object" ? settings.banner : {}) as Record<string, unknown>;
   const sites = (b.sites && typeof b.sites === "object" ? b.sites : {}) as Record<string, unknown>;
   const banner: Banner = { enabled: !!b.enabled, text: str(b.text), link: str(b.link), linkLabel: str(b.linkLabel), until: str(b.until).slice(0, 10), sites: { program: sites.program !== false, survey: sites.survey === true } };
-  const updates = (Array.isArray(settings.updates) ? settings.updates as Array<Record<string, unknown>> : []).map((u, i) => ({ id: str(u.id || `u${i}`), date: str(u.date).slice(0, 10), title: str(u.title), text: str(u.text), link: str(u.link), pinned: !!u.pinned }));
+  const rows = (value: unknown) => (Array.isArray(value) ? value as Array<Record<string, unknown>> : []);
+  const updates = rows(settings.updates).map((u, i) => ({
+    id: str(u.id || `u${i}`), date: str(u.date).slice(0, 10), title: str(u.title), text: str(u.text), link: str(u.link), pinned: !!u.pinned,
+    links: rows(u.links).slice(0, 6).map((l) => ({ label: str(l.label), url: str(l.url) })),
+    files: rows(u.files).slice(0, 10).map((f) => ({ name: str(f.name), url: str(f.url), size: Number(f.size) || 0, type: str(f.type) })).filter((f) => f.url),
+  }));
   const polls = pollsIn(settings) as Poll[] | undefined;
   return { seasons, episodes, settings: { banner, updates, contacts: normContacts(settings.contacts), guests: normalizeGuests(settings.guests) as GuestProfile[], hosts: publicHosts(settings.hosts) as Host[], ...(polls ? { polls } : {}) } };
 }
@@ -149,8 +157,17 @@ export async function api<T = Record<string, unknown>>(path: string, init: Reque
 /* ---------- העלאת קבצים: קובץ קטן בבקשה אחת, גדול בחלקים של 20MB (R2 multipart) ---------- */
 
 const UPLOAD_SMALL = 40 * 1024 * 1024;
-const UPLOAD_MAX = { audio: 1024 * 1024 * 1024, cover: 15 * 1024 * 1024 };
-const uploadTypes = (kind: "audio" | "cover"): Record<string, string> => kind === "audio"
+const UPLOAD_MAX = { audio: 1024 * 1024 * 1024, cover: 15 * 1024 * 1024, file: 200 * 1024 * 1024 };
+/** קבצים מצורפים לעדכונים — אותה רשימה כמו ATTACHMENT_EXT ב־worker/program-api.ts */
+export const ATTACHMENT_TYPES: Record<string, string> = {
+  pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  zip: "application/zip", txt: "text/plain", csv: "text/csv", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
+  mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", mp4: "video/mp4",
+};
+type UploadKind = keyof typeof UPLOAD_MAX;
+const uploadTypes = (kind: UploadKind): Record<string, string> => kind === "file" ? ATTACHMENT_TYPES : kind === "audio"
   ? { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac", aac: "audio/aac" }
   : { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
 
@@ -171,13 +188,14 @@ function send<T>(method: string, url: string, body: Blob, contentType: string, o
   });
 }
 
-export async function uploadFile(file: File, episodeId: string, kind: "audio" | "cover", progress: (pct: number) => void = () => {}): Promise<string> {
+export async function uploadFile(file: File, episodeId: string, kind: UploadKind, progress: (pct: number) => void = () => {}): Promise<string> {
   const types = uploadTypes(kind);
   const contentType = types[file.name.split(".").pop()?.toLowerCase() || ""] || (file.type && Object.values(types).includes(file.type) ? file.type : "");
   if (!contentType) throw new Error("סוג הקובץ אינו נתמך.");
   if (!file.size) throw new Error("הקובץ ריק.");
-  if (file.size > UPLOAD_MAX[kind]) throw new Error(kind === "audio" ? "אפשר להעלות הקלטה של עד 1GB." : "אפשר להעלות תמונה של עד 15MB.");
-  const q = `episode=${encodeURIComponent(episodeId)}&kind=${kind}`;
+  if (file.size > UPLOAD_MAX[kind]) throw new Error({ audio: "אפשר להעלות הקלטה של עד 1GB.", cover: "אפשר להעלות תמונה של עד 15MB.", file: "אפשר לצרף קובץ של עד 200MB." }[kind]);
+  // קובץ מצורף נשמר בשמו המקורי — כך הוא נפתח או יורד בשמו
+  const q = `episode=${encodeURIComponent(episodeId)}&kind=${kind}${kind === "file" ? `&name=${encodeURIComponent(file.name)}` : ""}`;
   progress(0);
   if (file.size <= UPLOAD_SMALL) {
     const r = await send<{ url: string }>("POST", `/api/program/upload?${q}`, file, contentType, (n) => progress(Math.round((n / file.size) * 100)));
