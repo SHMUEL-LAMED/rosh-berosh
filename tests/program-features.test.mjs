@@ -44,7 +44,7 @@ function r2() {
     return {
       key, size: stored.bytes.length, httpEtag: `"etag-${key}"`, range,
       body: new Response(slice).body,
-      writeHttpMetadata(headers) { if (stored.contentType) headers.set("content-type", stored.contentType); },
+      writeHttpMetadata(headers) { if (stored.contentType) headers.set("content-type", stored.contentType); if (stored.contentDisposition) headers.set("content-disposition", stored.contentDisposition); },
       async arrayBuffer() { return slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength); },
       async json() { return JSON.parse(new TextDecoder().decode(slice)); },
     };
@@ -63,12 +63,12 @@ function r2() {
       return object(key, stored, range);
     },
     async head(key) { const stored = objects.get(key); return stored ? { key, size: stored.bytes.length } : null; },
-    async put(key, body, options = {}) { const bytes = await bytesOf(body); objects.set(key, { bytes, contentType: options.httpMetadata?.contentType }); return { key, size: bytes.length }; },
+    async put(key, body, options = {}) { const bytes = await bytesOf(body); objects.set(key, { bytes, contentType: options.httpMetadata?.contentType, contentDisposition: options.httpMetadata?.contentDisposition }); return { key, size: bytes.length }; },
     async delete(key) { objects.delete(key); },
     async list() { return { objects: [] }; },
     async createMultipartUpload(key, options = {}) {
       const uploadId = `up-${uploads.size + 1}`;
-      uploads.set(uploadId, { key, parts: new Map(), contentType: options.httpMetadata?.contentType, state: "open" });
+      uploads.set(uploadId, { key, parts: new Map(), contentType: options.httpMetadata?.contentType, contentDisposition: options.httpMetadata?.contentDisposition, state: "open" });
       return { key, uploadId };
     },
     resumeMultipartUpload(key, uploadId) {
@@ -80,7 +80,7 @@ function r2() {
           const bytes = new Uint8Array(parts.reduce((sum, part) => sum + upload.parts.get(part.partNumber).length, 0));
           let offset = 0;
           for (const part of parts) { const chunk = upload.parts.get(part.partNumber); bytes.set(chunk, offset); offset += chunk.length; }
-          objects.set(key, { bytes, contentType: upload.contentType });
+          objects.set(key, { bytes, contentType: upload.contentType, contentDisposition: upload.contentDisposition });
           upload.state = "complete";
           return { key, size: bytes.length };
         },
@@ -962,6 +962,38 @@ test("uploads say what is wrong, with the same limits in the single and the mult
   assert.deepEqual(await error(await single("episode=ep-1&kind=cover", "image/png", 16 * 1024 * 1024)), [400, "התמונה גדולה מ־15MB."]);
   assert.deepEqual(await error(await start("episode=ep-1&kind=cover", { contentType: "image/png", size: 16 * 1024 * 1024 })), [400, "התמונה גדולה מ־15MB."]);
   assert.deepEqual(await error(await single("episode=ep-1&kind=audio", "audio/mpeg", 2 * 1024 ** 3)), [400, "הקובץ גדול מ־1GB."]);
+});
+
+// קבצים מצורפים לעדכונים: PDF, מסמכים, תמונות ועוד — נשמרים בשם המקורי, PDF נפתח בדפדפן ומסמך יורד.
+test("files attached to updates upload in both ways and come back with their original name", async () => {
+  const { call, admin, voter, media } = await setup();
+  const single = (query, type, bytes = new Uint8Array(4)) => call(`/api/program/upload?${query}`, { method: "POST", token: admin, raw: bytes, headers: { "content-type": type, "content-length": String(bytes.length) } });
+  assert.equal((await call("/api/program/upload?episode=u-1&kind=file", { method: "POST", token: voter, raw: new Uint8Array(4), headers: { "content-type": "application/pdf", "content-length": "4" } })).status, 403);
+  assert.equal((await single("episode=u-1&kind=file", "text/html")).status, 400, "HTML would run on the site's domain");
+  assert.equal((await single("episode=u-1&kind=file", "image/svg+xml")).status, 400);
+  assert.equal((await single("episode=u-1&kind=audio", "application/pdf")).status, 400, "documents only as attachments");
+
+  const pdf = await single(`episode=u-1&kind=file&name=${encodeURIComponent("לוח שידורים.pdf")}`, "application/pdf");
+  assert.equal(pdf.status, 200, await pdf.clone().text());
+  const { url } = await pdf.json();
+  assert.match(url, /^http:\/\/localhost\/media\/program\/u-1\/[\w-]+\.pdf$/);
+  const served = await call(new URL(url).pathname);
+  assert.equal(served.headers.get("content-type"), "application/pdf");
+  const disposition = served.headers.get("content-disposition");
+  assert.match(disposition, /^inline; filename="[^"]*\.pdf"; filename\*=UTF-8''/, "a PDF opens in the browser");
+  assert.equal(decodeURIComponent(disposition.split("UTF-8''")[1]), "לוח שידורים.pdf");
+
+  const docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const start = await call("/api/program/upload/start?episode=u-1&kind=file", { method: "POST", token: admin, body: { contentType: docx, size: 20 * 1024 * 1024, name: "תקנון" } });
+  assert.equal(start.status, 200, await start.clone().text());
+  const { key, uploadId } = await start.json();
+  assert.match(key, /^program\/u-1\/[\w-]+\.docx$/);
+  const multi = media.uploads.get(uploadId).contentDisposition;
+  assert.match(multi, /^attachment; /, "a Word document downloads");
+  assert.equal(decodeURIComponent(multi.split("UTF-8''")[1]), "תקנון.docx", "the extension is added to a name without one");
+
+  const big = await call("/api/program/upload/start?episode=u-1&kind=file", { method: "POST", token: admin, body: { contentType: "application/pdf", size: 201 * 1024 * 1024 } });
+  assert.deepEqual([big.status, (await big.json()).error], [400, "הקובץ גדול מ־200MB."]);
 });
 
 test("publishing only one episode leaves the other episodes, the settings and the shared draft as they were", async () => {

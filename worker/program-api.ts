@@ -15,8 +15,8 @@ type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBind
 const ORIGIN = "https://shmuel-lamed.github.io";
 // גבולות ההעלאה — אותם גבולות בהעלאה הרגילה ובהעלאה בחלקים (R2 multipart):
 // הקלטה עד 1GB, עטיפה עד 15MB.
-const UPLOAD_LIMITS = { audio: 1024 * 1024 * 1024, cover: 15 * 1024 * 1024 } as const;
-const TOO_LARGE = { audio: "הקובץ גדול מ־1GB.", cover: "התמונה גדולה מ־15MB." } as const;
+const UPLOAD_LIMITS = { audio: 1024 * 1024 * 1024, cover: 15 * 1024 * 1024, file: 200 * 1024 * 1024 } as const;
+const TOO_LARGE = { audio: "הקובץ גדול מ־1GB.", cover: "התמונה גדולה מ־15MB.", file: "הקובץ גדול מ־200MB." } as const;
 // חלקים של 10MB: אתר התוכניות מעלה ארבעה במקביל, וחלק שנכשל או נתקע מנוסה שוב לבד — חלק קטן
 // יותר הוא פחות לשלוח מחדש. R2 דורש לפחות 5MB לכל חלק חוץ מהאחרון.
 const PART_SIZE = 10 * 1024 * 1024;
@@ -31,6 +31,43 @@ const SEEDED_KEY = "seeded";
 const STREAM_HEADERS = ["content-type", "content-length", "content-range", "etag", "last-modified"];
 const AUDIO = new Set(["audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg", "audio/flac", "audio/aac"]);
 const IMAGE = new Set(["image/jpeg", "image/png", "image/webp"]);
+/** קבצים מצורפים לעדכונים באתר התוכניות: סוג → סיומת. HTML/SVG לא מתקבלים (קוד שרץ בדומיין של האתר). */
+const ATTACHMENT_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/zip": "zip",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "audio/mpeg": "mp3",
+  "audio/mp4": "m4a",
+  "audio/wav": "wav",
+  "video/mp4": "mp4",
+};
+type UploadKind = keyof typeof UPLOAD_LIMITS;
+const uploadKind = (value: string | null): UploadKind => value === "cover" ? "cover" : value === "file" ? "file" : "audio";
+const uploadAllowed = (kind: UploadKind, contentType: string) => kind === "file" ? contentType in ATTACHMENT_EXT : (kind === "audio" ? AUDIO : IMAGE).has(contentType);
+const uploadExt = (kind: UploadKind, contentType: string) => kind === "file" ? ATTACHMENT_EXT[contentType] : contentType === "audio/mpeg" ? "mp3" : contentType.split("/")[1].replace("jpeg", "jpg").replace("mp4", "m4a");
+/** קובץ מצורף נפתח בדפדפן (PDF, תמונה, שמע, וידאו, טקסט) או יורד — ובשני המקרים בשם המקורי שלו */
+function attachmentDisposition(contentType: string, name: string, ext: string) {
+  const base = String(name || "").replace(/[/\\:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 150) || "קובץ";
+  const file = base.toLowerCase().endsWith(`.${ext}`) ? base : `${base}.${ext}`;
+  const inline = /^(application\/pdf|image\/|audio\/|video\/|text\/plain)/.test(contentType);
+  return `${inline ? "inline" : "attachment"}; filename="${file.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(file)}`;
+}
+const uploadMetadata = (kind: UploadKind, contentType: string, name: string, ext: string) => ({
+  contentType,
+  cacheControl: "public, max-age=31536000, immutable",
+  ...(kind === "file" ? { contentDisposition: attachmentDisposition(contentType, name, ext) } : {}),
+});
 const R2_BACKFILL_KEY = "program-recordings-r2-v1";
 const seedDriveId = driveIdOf;
 const PROFILE_PHOTO_SOURCES: Record<string, string> = {
@@ -596,16 +633,16 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
   if (url.pathname === "/api/program/upload" && request.method === "POST") {
     if (!await admin(request, env)) return reply(request, { error: "אין הרשאת ניהול." }, 403);
     const episodeId = safeId(url.searchParams.get("episode"));
-    const kind = url.searchParams.get("kind") === "cover" ? "cover" : "audio";
+    const kind = uploadKind(url.searchParams.get("kind"));
     const contentType = (request.headers.get("content-type") || "").split(";")[0].toLowerCase();
     const length = Number(request.headers.get("content-length") || 0);
     if (!episodeId) return reply(request, { error: "חסר מזהה תוכנית." }, 400);
-    if (!(kind === "audio" ? AUDIO : IMAGE).has(contentType)) return reply(request, { error: "סוג הקובץ אינו נתמך." }, 400);
+    if (!uploadAllowed(kind, contentType)) return reply(request, { error: "סוג הקובץ אינו נתמך." }, 400);
     if (!Number.isFinite(length) || length <= 0) return reply(request, { error: "הקובץ ריק." }, 400);
     if (length > UPLOAD_LIMITS[kind]) return reply(request, { error: TOO_LARGE[kind] }, 400);
-    const ext = contentType === "audio/mpeg" ? "mp3" : contentType.split("/")[1].replace("jpeg", "jpg").replace("mp4", "m4a");
+    const ext = uploadExt(kind, contentType);
     const key = `program/${episodeId}/${crypto.randomUUID()}.${ext}`;
-    await env.MEDIA.put(key, request.body, { httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" } });
+    await env.MEDIA.put(key, request.body, { httpMetadata: uploadMetadata(kind, contentType, url.searchParams.get("name") || "", ext) });
     return reply(request, { url: `${url.origin}/media/${key}` });
   }
   /* ---------- העלאה בחלקים (R2 multipart) לקבצים גדולים ----------
@@ -618,18 +655,18 @@ export async function programApi(request: Request, env: Env, ctx?: { waitUntil(p
     const readBody = async <T>() => { try { return await request.json<T>(); } catch { return null; } };
     if (step === "start" && request.method === "POST") {
       const episodeId = safeId(url.searchParams.get("episode"));
-      const kind = url.searchParams.get("kind") === "cover" ? "cover" : "audio";
+      const kind = uploadKind(url.searchParams.get("kind"));
       const input = await readBody<{ contentType?: string; size?: number; name?: string }>();
       const contentType = String(input?.contentType || "").split(";")[0].trim().toLowerCase();
       const size = Number(input?.size || 0);
       if (!episodeId) return reply(request, { error: "חסר מזהה תוכנית." }, 400);
-      if (!(kind === "audio" ? AUDIO : IMAGE).has(contentType)) return reply(request, { error: "סוג הקובץ אינו נתמך." }, 400);
+      if (!uploadAllowed(kind, contentType)) return reply(request, { error: "סוג הקובץ אינו נתמך." }, 400);
       if (!Number.isFinite(size) || size <= 0) return reply(request, { error: "הקובץ ריק." }, 400);
       if (size > UPLOAD_LIMITS[kind]) return reply(request, { error: TOO_LARGE[kind] }, 400);
-      const ext = contentType === "audio/mpeg" ? "mp3" : contentType.split("/")[1].replace("jpeg", "jpg").replace("mp4", "m4a");
+      const ext = uploadExt(kind, contentType);
       const key = `program/${episodeId}/${crypto.randomUUID()}.${ext}`;
       const upload = await env.MEDIA.createMultipartUpload(key, {
-        httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" },
+        httpMetadata: uploadMetadata(kind, contentType, String(input?.name || ""), ext),
         customMetadata: { episodeId, kind, name: String(input?.name || "").slice(0, 200) },
       });
       return reply(request, { key, uploadId: upload.uploadId, partSize: PART_SIZE });
