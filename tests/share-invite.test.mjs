@@ -7,10 +7,10 @@ const SITE = "https://rosh-berosh.example.com/";
 
 test("המייל המעוצב מוביל להצבעה באתר שממנו שיתפו", () => {
   const html = inviteEmailHtml(SITE);
-  assert.match(html, /<a href="https:\/\/rosh-berosh\.example\.com\/" target="_blank"[^>]*>להצבעה במצעד ←<\/a>/);
+  assert.match(html, /<a href="https:\/\/rosh-berosh\.example\.com\/" target="_blank"[^>]*><span[^>]*><b>להצבעה במצעד ←<\/b><\/span><\/a>/);
   assert.match(html, /<img src="https:\/\/rosh-berosh\.example\.com\/badge-small\.png"/, "הלוגו בכתובת מלאה, אחרת לא ייטען אצל הנמען");
   assert.match(html, /^<div dir="rtl" style="direction:rtl;text-align:right/);
-  assert.match(html, />rosh-berosh\.example\.com<\/a>/);
+  assert.match(html, /><b>rosh-berosh\.example\.com<\/b><\/span><\/a>/);
 });
 
 // תוכנות דואר מסירות <style>, מחלקות ומעברי צבע: כל העיצוב חייב להיות inline ובצבעים אחידים.
@@ -20,6 +20,23 @@ test("המייל המעוצב בנוי כך שתוכנות הדואר שומרו
   assert.doesNotMatch(html, /gradient/);
   assert.match(html, /<table role="presentation"/);
   assert.match(html, /bgcolor="#b89530"/, "כפתור ההצבעה צבוע גם בלי CSS");
+});
+
+// הדבקה באפליקציית הדואר בטלפון (Outlook, Gmail) מחליפה גופן, גודל וצבע של div/p בברירת המחדל
+// ומוחקת background של div/table — כך נשלח מייל שחור־לבן בלי הכותרת. מה שנשמר: span/a/b ותא עם bgcolor.
+test("המייל המעוצב שורד הדבקה באפליקציית הדואר בטלפון", () => {
+  const html = inviteEmailHtml(SITE);
+  for (const [, tag, style] of html.matchAll(/<(div|p|table)\b[^>]*style="([^"]*)"/g)) {
+    assert.doesNotMatch(style, /(^|;)\s*(font-size|color|background)\s*:/, `<${tag} style="${style}"> — העיצוב הזה נמחק בהדבקה`);
+  }
+  assert.doesNotMatch(html, /<p\b/);
+  for (const [, inner] of html.matchAll(/>([^<>]*[\u0590-\u05FF][^<>]*)</g)) {
+    const before = html.slice(0, html.indexOf(`>${inner}<`) + 1);
+    assert.match(before, /<span style="font-family:[^"]*font-size:\d+px;[^"]*color:#[0-9a-f]{6}[^"]*">(<b>)?$/, `"${inner.trim()}" בלי span שנושא גודל וצבע`);
+  }
+  for (const color of ["#f6f1e3", "#ffffff", "#241b42", "#b89530", "#f5edd4"]) {
+    assert.match(html, new RegExp(`<td[^>]*bgcolor="${color}"[^>]*background-color:${color}`), `הרקע ${color} על תא`);
+  }
 });
 
 test("כתובת עם תווים מיוחדים אינה שוברת את המייל", () => {
