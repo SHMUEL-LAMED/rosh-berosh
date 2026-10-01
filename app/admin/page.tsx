@@ -54,6 +54,21 @@ export default function AdminPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [tab, setTab] = useState<Tab>(tabFromHash);
   const [programsOpened, setProgramsOpened] = useState(() => isProgramTab(tabFromHash()));
+  const [surveyVisible, setSurveyVisible] = useState(false);
+  const [surveyPreferenceReady, setSurveyPreferenceReady] = useState(false);
+  useEffect(() => {
+    try { setSurveyVisible(localStorage.getItem("rosh:admin:survey-visible") === "1"); } catch { /* אחסון חסום: נשאר מוסתר */ }
+    setSurveyPreferenceReady(true);
+  }, []);
+  useEffect(() => {
+    if (surveyPreferenceReady && !surveyVisible && isSurveyTab(tab)) setTab("dashboard");
+  }, [surveyPreferenceReady, surveyVisible, tab]);
+  const toggleSurveyVisibility = () => {
+    const next = !surveyVisible;
+    setSurveyVisible(next);
+    try { localStorage.setItem("rosh:admin:survey-visible", next ? "1" : "0"); } catch { /* ההעדפה נשמרת לביקור הנוכחי */ }
+    if (!next && isSurveyTab(tab)) setTab("dashboard");
+  };
   useEffect(() => { if (typeof window !== "undefined" && window.location.hash !== `#${tab}`) window.history.replaceState(null, "", `#${tab}`); }, [tab]);
   const go = useCallback((next: Tab) => { if (isProgramTab(next)) setProgramsOpened(true); setTab(next); }, []);
   useEffect(() => { const onHash = () => go(tabFromHash()); window.addEventListener("hashchange", onHash); return () => window.removeEventListener("hashchange", onHash); }, [go]);
@@ -89,13 +104,13 @@ export default function AdminPage() {
     const group = (key: Tab) => isProgramTab(key) ? "אתר התוכניות" : isSurveyTab(key) && key !== "survey" ? "אתר הסקר" : key === "dashboard" || key === "survey" ? "" : "כללי";
     const albumTitle = new Map((data?.albums ?? []).map((album) => [album.id, album.title]));
     return [
-      ...TABS.map((key) => ({ kind: "tab" as const, id: key, title: TITLES[key], sub: group(key) })),
+      ...TABS.filter((key) => surveyVisible || !isSurveyTab(key)).map((key) => ({ kind: "tab" as const, id: key, title: TITLES[key], sub: group(key) })),
       ...(inbox?.episodes ?? []).map((episode) => ({ kind: "episode" as const, id: episode.id, title: episode.title, sub: [episode.number != null ? `תוכנית ${episode.number}` : "", episode.date ? new Date(`${episode.date.slice(0, 10)}T12:00:00`).toLocaleDateString("he-IL") : "", episode.visible ? "" : "מוסתרת"].filter(Boolean).join(" · ") })),
-      ...(data?.albums ?? []).map((album) => ({ kind: "album" as const, id: album.id, title: album.title, sub: album.artistName })),
-      ...(data?.songs ?? []).map((song) => ({ kind: "song" as const, id: song.albumId, title: song.title, sub: albumTitle.get(song.albumId) || "" })),
-      ...(data?.artists ?? []).map((artist) => ({ kind: "artist" as const, id: artist.id, title: artist.name })),
+      ...(surveyVisible ? data?.albums ?? [] : []).map((album) => ({ kind: "album" as const, id: album.id, title: album.title, sub: album.artistName })),
+      ...(surveyVisible ? data?.songs ?? [] : []).map((song) => ({ kind: "song" as const, id: song.albumId, title: song.title, sub: albumTitle.get(song.albumId) || "" })),
+      ...(surveyVisible ? data?.artists ?? [] : []).map((artist) => ({ kind: "artist" as const, id: artist.id, title: artist.name })),
     ];
-  }, [searching, data, inbox]);
+  }, [searching, data, inbox, surveyVisible]);
   const pickSearch = useCallback((item: SearchItem) => {
     // אלבום, שיר או זמר: פותחים את הרשימה, גוללים אליו ומהבהבים לרגע
     const flash = (id: string) => setTimeout(() => { const element = document.getElementById(id); if (!element) return; element.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); element.classList.add("search-flash"); setTimeout(() => element.classList.remove("search-flash"), 1700); }, 150);
@@ -212,13 +227,14 @@ export default function AdminPage() {
   return <main className="admin-shell" dir="rtl">
     <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
       <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav>
-      <div className={`nav-section${isSurveyTab(tab) ? " open" : ""}`} data-tour="nav-survey"><Nav className="nav-site" active={tab === "survey"} onClick={() => setTab("survey")}>אתר הסקר</Nav>{isSurveyTab(tab) && (Object.keys(SURVEY_TABS) as SurveyPage[]).map((key) => <Nav key={key} className="nav-sub" active={tab === key} onClick={() => setTab(key)}>{SURVEY_TABS[key]}</Nav>)}</div>
+      {surveyVisible && <div className={`nav-section${isSurveyTab(tab) ? " open" : ""}`} data-tour="nav-survey"><Nav className="nav-site" active={tab === "survey"} onClick={() => setTab("survey")}>אתר הסקר</Nav>{isSurveyTab(tab) && (Object.keys(SURVEY_TABS) as SurveyPage[]).map((key) => <Nav key={key} className="nav-sub" active={tab === key} onClick={() => setTab(key)}>{SURVEY_TABS[key]}</Nav>)}</div>}
+      <button type="button" className="nav-tour" aria-pressed={surveyVisible} onClick={toggleSurveyVisibility}>{surveyVisible ? "הסתרת ניהול הסקר" : "הצגת ניהול הסקר"}</button>
       <div className={`nav-section${isProgramTab(tab) ? " open" : ""}`} data-tour="nav-programs"><Nav className="nav-site" active={false} onClick={() => go("prog-programs")}>אתר התוכניות</Nav>{isProgramTab(tab) && <>{(Object.keys(PROGRAM_TABS) as ProgramTab[]).map((key) => <Nav key={key} className="nav-sub" active={tab === key} onClick={() => go(key)}>{PROGRAM_TABS[key]}</Nav>)}<button type="button" className="nav-tour" data-tour="tour-button" onClick={() => setTourMode("choose")}>🧭 סיור בניהול</button></>}</div>
       <p className="nav-group">כללי</p><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
     <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{isSurveyTab(tab) && data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{TITLES[tab]}{SECTION_TOURS[tab] && <button type="button" className="section-help" data-tour="section-help" onClick={() => setTourMode(`section:${tab}`)} title={`הסבר על ${SECTION_TITLES[tab]} — כל כפתור וכל שדה`}><i aria-hidden="true">?</i>הסבר</button>}</h1></div><button type="button" className="quick-search-open" onClick={() => setSearching(true)} title="חיפוש מהיר (Ctrl+K)"><span aria-hidden="true">🔍</span>חיפוש<kbd>Ctrl K</kbd></button><span>{user.picture && <img src={user.picture} alt="" />}<bdi dir="ltr">{user.email}</bdi></span></header>
       {isSurveyTab(tab) && <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>}
-      {tab === "dashboard" && <><InboxBoard inbox={inbox} failed={inboxFailed} votes24h={(data?.voteTimeline.hourly ?? []).reduce((sum, point) => sum + Number(point.votes || 0), 0)} missingPrompts={data ? SYSTEM_PROMPTS.filter((item) => !data.ivrPrompts?.find((prompt) => prompt.key === item.key)?.audioUrl).length : 0} onNavigate={(next) => go(next as Tab)} onOpenEpisode={openFromInbox} onReload={reloadInbox} /><Dashboard data={data} onNavigate={go} /></>}
+      {tab === "dashboard" && <><InboxBoard showSurvey={surveyVisible} inbox={inbox} failed={inboxFailed} votes24h={(data?.voteTimeline.hourly ?? []).reduce((sum, point) => sum + Number(point.votes || 0), 0)} missingPrompts={data ? SYSTEM_PROMPTS.filter((item) => !data.ivrPrompts?.find((prompt) => prompt.key === item.key)?.audioUrl).length : 0} onNavigate={(next) => go(next as Tab)} onOpenEpisode={openFromInbox} onReload={reloadInbox} /><Dashboard data={data} surveyVisible={surveyVisible} onNavigate={go} /></>}
       {searching && <QuickSearch items={searchItems} onPick={pickSearch} onClose={() => setSearching(false)} />}
       {tab === "survey" && <SurveyHome data={data} onNavigate={go} onChanged={load} onMessage={notify} />}
       {tab === "preview" && data && <PreviewPanel data={data} />}
@@ -252,14 +268,14 @@ function PreviewPanel({ data }: { data: Overview }) {
 }
 
 /** מרכז הניהול: שני האתרים כשני חלקים שווים, ומתחתם מה שמשותף לשניהם. בלי מספרי הצבעות — אלה בדף של הסקר. */
-function Dashboard({ data, onNavigate }: { data: Overview | null; onNavigate(tab: Tab): void }) {
+function Dashboard({ data, surveyVisible, onNavigate }: { data: Overview | null; surveyVisible: boolean; onNavigate(tab: Tab): void }) {
   const survey = !data ? "טוענים…" : !data.activeSurvey ? "אין סקר פעיל — בוחרים או יוצרים אחד בחלק „סקרים”" : `${data.activeSurvey.name} · ${data.settings.votingOpen ? "פתוח להצבעה" : "טיוטה, עדיין לא פורסם"} · ${data.votes.total ?? 0} הצבעות`;
   return <div className="hub">
     <div className="hub-sites">
-      <button type="button" className="hub-card" data-tour="hub-survey" onClick={() => onNavigate("survey")}><i aria-hidden="true">🗳</i><span><b>אתר הסקר</b><small>{survey}</small><em>סקרים, אלבומים ושירים, זמרים, קריינות לקו, תוצאות, מצביעים ונתונים</em></span></button>
+      {surveyVisible && <button type="button" className="hub-card" data-tour="hub-survey" onClick={() => onNavigate("survey")}><i aria-hidden="true">🗳</i><span><b>אתר הסקר</b><small>{survey}</small><em>סקרים, אלבומים ושירים, זמרים, קריינות לקו, תוצאות, מצביעים ונתונים</em></span></button>}
       <button type="button" className="hub-card" data-tour="hub-programs" onClick={() => onNavigate("prog-programs")}><i aria-hidden="true">♫</i><span><b>אתר התוכניות</b><small>הארכיון של התוכניות והאזור האישי של המאזינים</small><em>תוכניות, אורחים, ניקוי פרסומות, הודעה ועדכונים, מאזינים ופרסום</em></span></button>
     </div>
-    <div className="dashboard-grid three"><button type="button" onClick={() => onNavigate("subscribers")}><b>✉</b><span>רשימת תפוצה</span><small>משותפת לשני האתרים</small></button><button type="button" onClick={() => onNavigate("archives")}><b>🗄</b><span>ארכיון וגיבויים</span><small>הסקר ואתר התוכניות יחד</small></button><button type="button" onClick={() => onNavigate("access")}><b>🔑</b><span>הרשאות</span><small>מנהלים וקו ההקלטות</small></button></div>
+    <div className="dashboard-grid three"><button type="button" onClick={() => onNavigate("subscribers")}><b>✉</b><span>רשימת תפוצה</span><small>ניהול הנרשמים</small></button><button type="button" onClick={() => onNavigate("archives")}><b>🗄</b><span>ארכיון וגיבויים</span><small>נתונים שמורים וגיבויים</small></button><button type="button" onClick={() => onNavigate("access")}><b>🔑</b><span>הרשאות</span><small>מנהלים וקו ההקלטות</small></button></div>
   </div>;
 }
 
