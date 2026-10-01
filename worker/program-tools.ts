@@ -353,7 +353,11 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
       if (!user) return redirect(back ? back.toString() : "/admin?handoff=expired");
       const token = await createSession(env, user);
       // אחרי כניסה באתר התוכניות: העוגייה של אתר הסקר נקבעת כאן, והדפדפן חוזר לאן שהיה
-      return redirect(back ? back.toString() : url.searchParams.get("to") === "/" ? "/" : "/admin", sessionCookie(token));
+      // טיוטת מייל (קישור ישן ל־mail.html באתר התוכניות): הניהול נפתח בחלק „מייל למאזינים” על התוכנית הזו
+      const mail = url.searchParams.get("mail") || "", kind = url.searchParams.get("kind") || "";
+      const mailQuery = /^[\w.-]{1,120}$/.test(mail) || kind === "digest" || kind === "note"
+        ? `?${new URLSearchParams({ ...(/^[\w.-]{1,120}$/.test(mail) ? { mail } : {}), ...(kind === "digest" || kind === "note" ? { kind } : {}) })}` : "";
+      return redirect(back ? back.toString() : url.searchParams.get("to") === "/" ? "/" : `/admin${mailQuery}`, sessionCookie(token));
     } catch (error) {
       // גם כאן זה ניווט של דף שלם: הכניסה באתר התוכניות כבר הצליחה, ורק העוגייה של אתר
       // הסקר לא נקבעה — חוזרים לאן שהיו במקום להשאיר את הדפדפן על JSON של שגיאה

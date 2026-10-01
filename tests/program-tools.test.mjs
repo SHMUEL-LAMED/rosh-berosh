@@ -330,6 +330,20 @@ test("signing in on the program site signs in the voting site too", async () => 
   assert.equal((await me.json()).user.email, "voter@example.com", "the voting site now knows the same account");
 });
 
+// קישור ישן לטיוטת מייל (mail.html?ep=… באתר התוכניות) עובר לניהול, לחלק „מייל למאזינים” על אותה תוכנית
+test("an old email-draft link signs in and opens the admin on that program's email", async () => {
+  const { worker, env, call, admin } = await setup();
+  const handoff = async (query) => {
+    const { code } = await (await call("/api/program/handoff", { method: "POST", token: admin, body: {} })).json();
+    return (await worker.fetch(new Request(`http://localhost/api/program/handoff/${code}${query}`), env, ctx)).headers.get("location");
+  };
+  assert.equal(await handoff("?mail=ep-12"), "/admin?mail=ep-12");
+  assert.equal(await handoff("?mail=ep-3&kind=digest"), "/admin?mail=ep-3&kind=digest");
+  assert.equal(await handoff("?kind=note"), "/admin?kind=note");
+  assert.equal(await handoff("?mail=../evil&kind=spam"), "/admin", "anything else is ignored");
+  assert.equal(await handoff(""), "/admin");
+});
+
 test("a draft save can require the draft it was based on, and a stale save gets the stored draft back", async () => {
   const { call, admin } = await setup();
   const put = (title, extra = {}) => call("/api/program/draft", { method: "PUT", token: admin, body: { data: { seasons: [], episodes: [{ id: "ep-1", title }] }, ...extra } });

@@ -23,26 +23,16 @@ import { GuestsSection } from "./programs-guests";
 import { HostsSection } from "./programs-hosts";
 import { PollsSection } from "./programs-polls";
 import { UpdatesEditor } from "./programs-updates";
+import { MailSection, openMailFor } from "./programs-mail";
 import { useHoldUpdate } from "../update-hold";
 import { withPolls } from "../../worker/program-polls-shared.js";
 import { withPublishedPhotos } from "../../worker/program-guests.js";
 
-export type ProgramSection = "programs" | "guests" | "ads" | "site" | "polls" | "listeners" | "publish";
+export type ProgramSection = "programs" | "guests" | "ads" | "site" | "polls" | "mail" | "listeners" | "publish";
 type Mutate = (fn: (current: Catalog) => Catalog) => void;
 type PatchEpisode = (id: string, fields: Partial<Episode> | ((episode: Episode) => Partial<Episode>)) => void;
 type Common = { data: Catalog; change(next: Catalog): void; mutate: Mutate; patchEpisode: PatchEpisode; onMessage(message: string): void };
 
-/** עורך טיוטת המייל באתר התוכניות (mail.html): נפתח בלשונית חדשה כבר מחוברים — קוד מעבר חד־פעמי,
-    כמו המעבר לניהול. הלשונית נפתחת מיד בלחיצה (אחרת הדפדפן חוסם אותה), והכתובת נקבעת אחרי שהקוד מגיע. */
-function openMailDraft(id: string, onMessage: (message: string) => void) {
-  const target = `${PROGRAM_SITE}mail.html?ep=${encodeURIComponent(id)}`;
-  const tab = window.open("", "_blank");
-  if (!tab) { onMessage("הדפדפן חסם את הלשונית החדשה. אפשרו חלונות קופצים ונסו שוב."); return; }
-  tab.opener = null;
-  api<{ code: string }>("/api/program/handoff", { method: "POST", body: "{}" })
-    .then(({ code }) => { tab.location.href = `${target}&handoff=${encodeURIComponent(code)}`; })
-    .catch(() => { tab.location.href = target; });
-}
 
 /* ---------- הרכיב ---------- */
 
@@ -166,6 +156,7 @@ export function ProgramsAdmin({ section, onMessage }: { section: ProgramSection 
     {section === "ads" && <ProgramsAds episodes={data.episodes} patchEpisode={patchEpisode} onMessage={onMessage} />}
     {section === "site" && <SiteSection {...common} />}
     {section === "polls" && <PollsSection data={data} mutate={mutate} onMessage={onMessage} />}
+    {section === "mail" && <MailSection data={data} origin={origin} onMessage={onMessage} />}
     {section === "listeners" && <ListenersSection data={data} onMessage={onMessage} />}
     {section === "publish" && <PublishSection {...common} origin={origin} changes={changes} base={base} onOpen={open} onPublished={(published, versionId) => { base.current = versionId; dataRef.current = published; setOrigin(published); setData(published); setSync(""); }} onDiscard={() => setReload((v) => v + 1)} />}
   </div>;
@@ -327,7 +318,7 @@ function Editor({ episode, live, pending, onPublishOne, data, surveys, onPatch, 
     </div>}
     <Section title={label(episode)} aside={<div className="row-actions" data-tour="ed-actions">
       {live ? <a href={`${PROGRAM_SITE}episode.html?ep=${encodeURIComponent(episode.slug)}`} target="_blank" rel="noopener">צפייה באתר ↗</a> : <button type="button" onClick={() => onMessage("התוכנית עוד לא באתר. היא תופיע אחרי „פרסום התוכניות”.")}>צפייה באתר ↗</button>}
-      <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={() => openMailDraft(episode.id, onMessage)}>✉ מייל למאזינים</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={() => (history ? setHistory(null) : loadHistory())}>{history ? "הסתרת הגרסאות" : "גרסאות קודמות"}</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
+      <button type="button" onClick={share}>טקסט לוואטסאפ</button><button type="button" onClick={() => openMailFor(episode.id)}>✉ מייל למאזינים</button><button type="button" onClick={onDuplicate}>שכפול</button><button type="button" onClick={() => (history ? setHistory(null) : loadHistory())}>{history ? "הסתרת הגרסאות" : "גרסאות קודמות"}</button><button type="button" className="danger" onClick={onDelete}>מחיקה</button>
     </div>}>
       <div className="prog-form" data-tour="ed-details">
         <label className="wide"><span>שם התוכנית</span><input value={episode.title} placeholder="למשל: שירי הסתיו" onChange={(e) => onPatch({ title: e.target.value })} /></label>
@@ -659,7 +650,7 @@ function PublishSection({ data, change, mutate, patchEpisode, onMessage, origin,
       {!!changes?.added && <label className="prog-check"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> לשלוח התראה לטלפון של המאזינים על התוכניות החדשות</label>}
       {fresh.length > 0 && <div className="prog-mail-offer" role="status">
         <p><b>✉ {fresh.length === 1 ? "התוכנית עלתה!" : `${fresh.length} תוכניות עלו!`}</b> מייל מעוצב לרשימת התפוצה — עם כפתור האזנה באתר וקישור הורדה ישיר — נוצר כטיוטה בג׳ימייל שלכם. עורכים, ושולחים משם.</p>
-        <div className="row-actions">{fresh.slice(0, 3).map((e) => <button key={e.id} type="button" className="prog-primary" onClick={() => openMailDraft(e.id, onMessage)}>טיוטת מייל{fresh.length > 1 ? `: ${label(e)}` : ""} ←</button>)}<button type="button" onClick={() => setFresh([])}>לא עכשיו</button></div>
+        <div className="row-actions">{fresh.slice(0, 3).map((e) => <button key={e.id} type="button" className="prog-primary" onClick={() => openMailFor(e.id)}>טיוטת מייל{fresh.length > 1 ? `: ${label(e)}` : ""} ←</button>)}<button type="button" onClick={() => setFresh([])}>לא עכשיו</button></div>
       </div>}
       {conflict && <div className="prog-conflict" role="alertdialog" aria-labelledby="prog-conflict-title">
         <h3 id="prog-conflict-title">מנהל אחר פרסם בינתיים</h3>
