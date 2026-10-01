@@ -695,11 +695,21 @@ test("one click queues every program that is not transcribed yet, and the pace c
   let status = await (await call("/api/program/ai/transcribe-status", { token: admin })).json();
   assert.equal(status.queued, queued.length);
   assert.equal(status.daily, 60, "the normal pace by default");
-  assert.deepEqual(status.paces, [60, 300, 1000]);
+  assert.deepEqual(status.paces, [60, 300, 1000, 5000]);
   assert.equal((await call("/api/program/ai/transcribe-all", { method: "POST", token: admin, body: { daily: 7 } })).status, 400);
   await call("/api/program/ai/transcribe-all", { method: "POST", token: admin, body: { daily: 300 } });
   status = await (await call("/api/program/ai/transcribe-status", { token: admin })).json();
   assert.equal(status.daily, 300);
+
+  // טורבו: הפעלה אחת מתמללת כמה תוכניות במקביל, חלק אחר חלק, ומרוקנת את התור
+  await call("/api/program/ai/transcribe-all", { method: "POST", token: admin, body: { daily: 5000 } });
+  status = await (await call("/api/program/ai/transcribe-status", { token: admin })).json();
+  assert.equal(status.daily, 5000);
+  const before = status.today;
+  await worker.scheduled({}, env, ctx); await settle();
+  status = await (await call("/api/program/ai/transcribe-status", { token: admin })).json();
+  assert.equal(status.queued, 0, "one turbo run empties the queue");
+  assert.ok(status.today - before >= 3, `several parts in one run (counted ${status.today - before})`);
 
   // התור מתקדם ברקע, חלק בכל הפעלה, עד שהכול תומלל
   for (let i = 0; i < 20 && db.prepare("SELECT COUNT(*) AS n FROM program_transcription_jobs").get().n; i += 1) { await worker.scheduled({}, env, ctx); await settle(); }

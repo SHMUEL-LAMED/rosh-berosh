@@ -15,7 +15,11 @@ type Helpers = {
 
 export const TRANSCRIBE_CHUNK = 2 * 1024 * 1024;
 /** כמה חלקים (2MB, כ־2 דקות הקלטה) מתומללים ביום ברקע. המנהל בוחר בין הקצבים (program-auto-transcription-daily). */
-export const DAILY_PACES = [60, 300, 1000] as const;
+export const DAILY_PACES = [60, 300, 1000, 5000] as const;
+/** בקצב הטורבו כל הפעלה (כל דקה) מתמללת כמה תוכניות במקביל, חלק אחר חלק, עד TURBO_BUDGET_MS — ולא חלק אחד בלבד */
+export const TURBO_PACE = 5000;
+const TURBO_WORKERS = 4;
+const TURBO_BUDGET_MS = 40_000;
 const DAILY_AUTO_PARTS = DAILY_PACES[0];
 async function dailyLimit(env: Env): Promise<number> {
   const row = await env.DB.prepare("SELECT value_json FROM program_settings WHERE key='program-auto-transcription-daily'").first<{ value_json: string }>();
@@ -81,35 +85,54 @@ export async function runAutomaticTranscription(env: Env, origin: string): Promi
     }
     await env.DB.prepare("INSERT OR IGNORE INTO program_settings (key,value_json,updated_at) VALUES ('program-auto-transcription-initialized','true',unixepoch())").run();
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10), limit = await dailyLimit(env);
+  if (limit < TURBO_PACE) { await transcribeNextPart(env, origin, today, limit); return; }
+  // טורבו: כמה תוכניות במקביל (כל אחת תופסת תוכנית אחרת בתור), עד שנגמר הזמן של ההפעלה או התור
+  const started = Date.now();
+  await Promise.all(Array.from({ length: TURBO_WORKERS }, async () => {
+    while (Date.now() - started < TURBO_BUDGET_MS && await transcribeNextPart(env, origin, today, limit)) { /* החלק הבא */ }
+  }));
+}
+
+/** חלק אחד מהתור. מחזיר true כשתומלל חלק (או שתוכנית גמורה יצאה מהתור) ואפשר להמשיך מיד */
+async function transcribeNextPart(env: Env, origin: string, today: string, limit: number): Promise<boolean> {
   const usage = await env.DB.prepare("SELECT value_json FROM program_settings WHERE key='program-auto-transcription-usage'").first<{ value_json: string }>();
   let count = 0;
   try { const value = JSON.parse(usage?.value_json || "null"); if (value?.day === today) count = Number(value.count) || 0; } catch { /* reset malformed counter */ }
-  if (count >= await dailyLimit(env)) return;
-  const job = await env.DB.prepare("SELECT episode_id,audio_key,attempts FROM program_transcription_jobs WHERE next_at<=unixepoch() ORDER BY updated_at,episode_id LIMIT 1")
-    .first<{ episode_id: string; audio_key: string; attempts: number }>();
-  if (!job) return;
-  const claim = await env.DB.prepare("UPDATE program_transcription_jobs SET next_at=unixepoch()+300,updated_at=unixepoch() WHERE episode_id=? AND next_at<=unixepoch() RETURNING episode_id")
-    .bind(job.episode_id).first();
-  if (!claim) return;
+  if (count >= limit) return false;
+  const jobs = await env.DB.prepare("SELECT episode_id,audio_key,attempts FROM program_transcription_jobs WHERE next_at<=unixepoch() ORDER BY updated_at,episode_id LIMIT 8")
+    .all<{ episode_id: string; audio_key: string; attempts: number }>();
+  let job: { episode_id: string; audio_key: string; attempts: number } | undefined;
+  for (const candidate of jobs.results) {
+    // תופסים תוכנית אחת — אם מישהו אחר (הפעלה מקבילה) כבר תפס אותה, עוברים לבאה
+    const claim = await env.DB.prepare("UPDATE program_transcription_jobs SET next_at=unixepoch()+300,updated_at=unixepoch() WHERE episode_id=? AND next_at<=unixepoch() RETURNING episode_id")
+      .bind(candidate.episode_id).first();
+    if (claim) { job = candidate; break; }
+  }
+  if (!job) return false;
   try {
     const progress = await env.DB.prepare("SELECT parts_done,parts_total FROM program_transcripts WHERE episode_id=?").bind(job.episode_id).first<{ parts_done: number; parts_total: number }>();
     if (progress?.parts_total && progress.parts_done >= progress.parts_total) {
       await env.DB.prepare("DELETE FROM program_transcription_jobs WHERE episode_id=? AND audio_key=?").bind(job.episode_id, job.audio_key).run();
-      return;
+      return true;
     }
     const part = Number(progress?.parts_done) || 0;
     const result = await transcribeProgramPart(env, job.episode_id, part, origin, job.audio_key);
-    await env.DB.prepare("INSERT INTO program_settings (key,value_json,updated_at) VALUES ('program-auto-transcription-usage',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()")
-      .bind(JSON.stringify({ day: today, count: count + 1 })).run();
+    // ספירה אטומית — כמה תוכניות מתומללות במקביל
+    await env.DB.prepare(`INSERT INTO program_settings (key,value_json,updated_at) VALUES ('program-auto-transcription-usage',json_object('day',?1,'count',1),unixepoch())
+      ON CONFLICT(key) DO UPDATE SET value_json=CASE WHEN json_valid(value_json) AND json_extract(value_json,'$.day')=?1
+        THEN json_object('day',?1,'count',COALESCE(json_extract(value_json,'$.count'),0)+1) ELSE json_object('day',?1,'count',1) END,updated_at=unixepoch()`)
+      .bind(today).run();
     if (result.done) await env.DB.prepare("DELETE FROM program_transcription_jobs WHERE episode_id=? AND audio_key=?").bind(job.episode_id, job.audio_key).run();
     else await env.DB.prepare("UPDATE program_transcription_jobs SET attempts=0,last_error=NULL,next_at=0,updated_at=unixepoch() WHERE episode_id=? AND audio_key=?")
       .bind(job.episode_id, job.audio_key).run();
+    return true;
   } catch (error) {
     const attempts = job.attempts + 1;
     console.error("automatic program transcription failed", job.episode_id, error);
     await env.DB.prepare("UPDATE program_transcription_jobs SET attempts=?,last_error=?,next_at=unixepoch()+?,updated_at=unixepoch() WHERE episode_id=? AND audio_key=?")
       .bind(attempts, String(error instanceof Error ? error.message : error).slice(0, 300), attempts >= 5 ? 86400 : Math.min(3600, 300 * 2 ** attempts), job.episode_id, job.audio_key).run();
+    return true;
   }
 }
 

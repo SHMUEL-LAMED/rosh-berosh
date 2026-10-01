@@ -207,9 +207,10 @@ export function ProofreadCard({ data, origin, mutate, onMessage, onOpen }: { dat
 
 /* ---------- תמלול כל התוכניות ----------
    כל תוכנית שעוד לא תומללה נכנסת לתור של התמלול האוטומטי בשרת (/ai/transcribe-all): חלק אחד בדקה
-   ברקע, עד המגבלה היומית שבוחרים כאן — בלי לתמלל כל תוכנית לבד, ואפשר לסגור את הדף. */
+   ברקע (בטורבו — כמה תוכניות במקביל), עד המגבלה היומית שבוחרים כאן — בלי לתמלל כל תוכנית לבד, ואפשר לסגור את הדף. */
 type TranscribeStatus = { episodes: number; done: number; queued: number; partsLeft: number; notStarted: number; failing: Array<{ id: string; attempts: number; error: string | null }>; today: number; daily: number; paces: number[]; enabled: boolean };
-const PACE_LABEL: Record<number, string> = { 60: "רגיל — כשעתיים הקלטה ביום", 300: "מהיר — כ־10 שעות הקלטה ביום", 1000: "הכי מהיר — כ־30 שעות הקלטה ביום" };
+const PACE_LABEL: Record<number, string> = { 60: "רגיל — כשעתיים הקלטה ביום", 300: "מהיר — כ־10 שעות הקלטה ביום", 1000: "הכי מהיר — כ־30 שעות הקלטה ביום", 5000: "טורבו — כמה תוכניות במקביל, הכול תוך כמה שעות" };
+const TURBO_PER_MINUTE = 15;    // הערכה זהירה: בטורבו כמה תוכניות במקביל, כ־15 חלקים בדקה
 const PARTS_PER_EPISODE = 30;   // הערכה לתוכנית שעוד לא התחילה: שעה של הקלטה ≈ 30 חלקים של 2MB
 
 export function TranscribeAllCard({ data, onMessage }: { data: Catalog; onMessage(message: string): void }) {
@@ -217,7 +218,7 @@ export function TranscribeAllCard({ data, onMessage }: { data: Catalog; onMessag
   useEffect(() => {
     let active = true;
     api<TranscribeStatus>("/api/program/ai/transcribe-status").then((s) => { if (active) { setStatus(s); setError(""); } }, (e) => { if (active) setError(errorText(e, "טעינת מצב התמלול נכשלה.")); });
-    const timer = setInterval(() => setTick((n) => n + 1), 60_000);   // התור מתקדם חלק בדקה
+    const timer = setInterval(() => setTick((n) => n + 1), 60_000);   // התור מתקדם כל דקה
     return () => { active = false; clearInterval(timer); };
   }, [tick]);
   const run = async (daily?: number) => {
@@ -236,6 +237,8 @@ export function TranscribeAllCard({ data, onMessage }: { data: Catalog; onMessag
   const names = new Map(data.episodes.map((e) => [e.id, label(e)]));
   const left = status ? status.partsLeft + status.notStarted * PARTS_PER_EPISODE : 0;
   const days = status && status.daily ? Math.max(1, Math.ceil(left / status.daily)) : 0;
+  const turboHours = status && status.daily >= 5000 ? Math.max(1, Math.ceil(left / TURBO_PER_MINUTE / 60)) : 0;
+  const eta = turboHours ? (turboHours <= 1 ? "יסתיים בערך בתוך שעה" : `יסתיים בעוד כ־${turboHours} שעות`) : days <= 1 ? "יסתיים בערך היום–מחר" : `יסתיים בעוד כ־${days} ימים`;
   const pct = status && status.episodes ? Math.round((status.done / status.episodes) * 100) : 0;
   return <section className="admin-panel prog-panel" id="tour-transcribe">
     <header className="prog-panel-head"><h2>תמלול כל התוכניות</h2>{status && <strong className={`prog-badge${status.done >= status.episodes ? " ok" : ""}`}>{status.done} / {status.episodes}</strong>}</header>
@@ -246,7 +249,7 @@ export function TranscribeAllCard({ data, onMessage }: { data: Catalog; onMessag
       <div className="prog-transcribe-bar" role="img" aria-label={`תומללו ${status.done} מתוך ${status.episodes} תוכניות`}><i style={{ width: `${pct}%` }} /></div>
       <p className="panel-help">
         <b>{status.done}</b> מתוך {status.episodes} תוכניות תומללו
-        {status.queued ? <> · <b>{status.queued}</b> בתור{status.notStarted ? ` (${status.notStarted} עוד לא התחילו)` : ""} · היום תומללו {status.today} מתוך {status.daily} חלקים · {days <= 1 ? "יסתיים בערך היום–מחר" : `יסתיים בעוד כ־${days} ימים`}</> : status.done < status.episodes ? " · אין תוכניות בתור" : " · הכול תומלל ✓"}
+        {status.queued ? <> · <b>{status.queued}</b> בתור{status.notStarted ? ` (${status.notStarted} עוד לא התחילו)` : ""} · היום תומללו {status.today} מתוך {status.daily} חלקים · {eta}</> : status.done < status.episodes ? " · אין תוכניות בתור" : " · הכול תומלל ✓"}
       </p>
       <div className="row-actions">
         <button type="button" className="prog-primary" disabled={busy || !status.enabled} onClick={() => void run()}>{busy ? "מוסיפים לתור…" : "🎙 תמלול כל התוכניות שעוד לא תומללו"}</button>
