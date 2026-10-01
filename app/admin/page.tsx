@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { LoginScreen, logout, useCurrentUser } from "../auth-ui";
 import { useNotice } from "../notice";
@@ -49,34 +49,16 @@ type Voter = { id: string; voterKey: string; voterName?: string; voterEmail?: st
 
 const SYSTEM_PROMPTS = systemPrompts;
 
-let surveyVisibilityFallback = false;
-function surveyVisibilitySnapshot() {
-  try { return localStorage.getItem("rosh:admin:survey-visible") === "1"; } catch { return surveyVisibilityFallback; }
-}
-const surveyVisibilityServerSnapshot = () => false;
-function subscribeSurveyVisibility(listener: () => void) {
-  window.addEventListener("storage", listener);
-  window.addEventListener("rosh:admin-survey-visibility", listener);
-  return () => {
-    window.removeEventListener("storage", listener);
-    window.removeEventListener("rosh:admin-survey-visibility", listener);
-  };
-}
+// הסקר שמור במערכת; החזרתו לתפריט הניהול נעשית רק בשינוי הדגל בקוד.
+const SURVEY_ADMIN_VISIBLE = false;
 
 export default function AdminPage() {
   const [user] = useCurrentUser();
   const [data, setData] = useState<Overview | null>(null);
-  const surveyVisible = useSyncExternalStore(subscribeSurveyVisibility, surveyVisibilitySnapshot, surveyVisibilityServerSnapshot);
+  const surveyVisible = SURVEY_ADMIN_VISIBLE;
   const [selectedTab, setTab] = useState<Tab>(tabFromHash);
   const tab = !surveyVisible && isSurveyTab(selectedTab) ? "dashboard" : selectedTab;
   const [programsOpened, setProgramsOpened] = useState(() => isProgramTab(tabFromHash()));
-  const toggleSurveyVisibility = () => {
-    const next = !surveyVisible;
-    surveyVisibilityFallback = next;
-    try { localStorage.setItem("rosh:admin:survey-visible", next ? "1" : "0"); } catch { /* ההעדפה נשמרת לביקור הנוכחי */ }
-    window.dispatchEvent(new Event("rosh:admin-survey-visibility"));
-    if (!next && isSurveyTab(selectedTab)) setTab("dashboard");
-  };
   useEffect(() => { if (typeof window !== "undefined" && window.location.hash !== `#${tab}`) window.history.replaceState(null, "", `#${tab}`); }, [tab]);
   const go = useCallback((next: Tab) => { if (isProgramTab(next)) setProgramsOpened(true); setTab(next); }, []);
   useEffect(() => { const onHash = () => go(tabFromHash()); window.addEventListener("hashchange", onHash); return () => window.removeEventListener("hashchange", onHash); }, [go]);
@@ -236,7 +218,6 @@ export default function AdminPage() {
     <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
       <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav>
       {surveyVisible && <div className={`nav-section${isSurveyTab(tab) ? " open" : ""}`} data-tour="nav-survey"><Nav className="nav-site" active={tab === "survey"} onClick={() => setTab("survey")}>אתר הסקר</Nav>{isSurveyTab(tab) && (Object.keys(SURVEY_TABS) as SurveyPage[]).map((key) => <Nav key={key} className="nav-sub" active={tab === key} onClick={() => setTab(key)}>{SURVEY_TABS[key]}</Nav>)}</div>}
-      <button type="button" className="nav-tour" aria-pressed={surveyVisible} onClick={toggleSurveyVisibility}>{surveyVisible ? "הסתרת ניהול הסקר" : "הצגת ניהול הסקר"}</button>
       <div className={`nav-section${isProgramTab(tab) ? " open" : ""}`} data-tour="nav-programs"><Nav className="nav-site" active={false} onClick={() => go("prog-programs")}>אתר התוכניות</Nav>{isProgramTab(tab) && <>{(Object.keys(PROGRAM_TABS) as ProgramTab[]).map((key) => <Nav key={key} className="nav-sub" active={tab === key} onClick={() => go(key)}>{PROGRAM_TABS[key]}</Nav>)}<button type="button" className="nav-tour" data-tour="tour-button" onClick={() => setTourMode("choose")}>🧭 סיור בניהול</button></>}</div>
       <p className="nav-group">כללי</p><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
