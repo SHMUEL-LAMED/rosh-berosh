@@ -136,14 +136,14 @@ test("posting a comment needs a session, a public episode and 2–1000 character
   assert.equal((await post({ episodeId: "nope", text: "יפה מאוד" })).status, 404);
 });
 
-test("comments are pending until approved; the public sees first names only, pinned first", async () => {
+test("comments are pending until approved; the public sees full names, pinned first", async () => {
   const { call, admin, voter, other } = await setup();
   await publish(call, admin, {});
   const post = async (body, token) => { const r = await call("/api/program/comments", { method: "POST", token, body }); assert.equal(r.status, 200, await r.clone().text()); return (await r.json()).comment; };
   const first = await post({ episodeId: "ep-1", text: "  השיר בדקה הזאת מדהים  ", at: 125 }, voter);
   assert.deepEqual(Object.keys(first).sort(), ["at", "createdAt", "id", "name", "pinned", "reply", "status", "text"]);
   assert.equal(first.status, "pending");
-  assert.equal(first.name, "ישראל");
+  assert.equal(first.name, "ישראל ישראלי");
   assert.equal(first.text, "השיר בדקה הזאת מדהים");
   assert.equal(first.at, 125);
   const second = await post({ episodeId: "ep-1", text: "תוכנית נהדרת" }, other);
@@ -182,7 +182,7 @@ test("comments are pending until approved; the public sees first names only, pin
   const pub = await (await call("/api/program/comments?episode=ep-1")).json();
   assert.deepEqual(pub.comments.map((c) => c.id), [second.id, first.id], "pinned first, then oldest first");
   assert.equal(pub.comments[0].pinned, true);
-  assert.equal(pub.comments[0].name, "שרה");
+  assert.equal(pub.comments[0].name, "שרה כהן");
   assert.equal(pub.comments[1].reply, "תודה רבה!");
   assert.doesNotMatch(JSON.stringify(pub), /@example\.com|sub-|replyBy|status/, "no emails, account ids or moderation details");
   assert.deepEqual((await (await call("/api/program/comments?episode=ep-1", { token: voter })).json()).mine, [], "approved ones leave `mine`");
