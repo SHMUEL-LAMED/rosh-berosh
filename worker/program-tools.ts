@@ -271,10 +271,10 @@ const COMMENT_COLUMNS = "id,episode_id,user_sub,name,text,at_seconds,status,pinn
 // למנהלים: הדוא״ל של כותב התגובה, מהסשן האחרון שלו או מהנתונים האישיים שלו
 const COMMENT_ADMIN_SELECT = `SELECT ${COMMENT_COLUMNS.split(",").map((column) => `c.${column}`).join(",")}, COALESCE((SELECT s.email FROM auth_sessions s WHERE s.user_sub=c.user_sub ORDER BY s.created_at DESC LIMIT 1),(SELECT u.email FROM program_user_data u WHERE u.user_sub=c.user_sub),'') AS email FROM program_comments c`;
 
-/** תגובה כפי שהציבור רואה אותה: שם פרטי בלבד, בלי דוא״ל ובלי מזהה חשבון. */
+/** תגובה כפי שהציבור רואה אותה: השם המלא, בלי דוא״ל ובלי מזהה חשבון. */
 export function publicComment(row: CommentRow) {
   return {
-    id: row.id, name: String(row.name || "").trim().split(/\s+/)[0] || "", text: row.text,
+    id: row.id, name: String(row.name || "").trim(), text: row.text,
     at: row.at_seconds === null || row.at_seconds === undefined ? null : Number(row.at_seconds),
     pinned: !!Number(row.pinned), reply: row.reply || null, createdAt: Number(row.created_at),
   };
