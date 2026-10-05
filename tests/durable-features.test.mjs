@@ -152,7 +152,8 @@ test("admin overview exposes hourly and daily vote channels", () => {
 
 test("admin navigation groups permissions and omits the timeline chart", () => {
   const page = source("app/admin/page.tsx");
-  assert.match(page, /setTab\("access"\).*?>הרשאות</s);
+  assert.match(page, /\{ title: "מערכת", tabs: \[[^\]]*"access"[^\]]*\] \}/);
+  assert.match(page, /access: "הרשאות"/);
   assert.match(page, /tab === "access".*?<ManagersPanel.*?<RecorderAccessPanel/s);
   assert.doesNotMatch(page, /function VoteCharts/);
   assert.doesNotMatch(page, /title="הצבעות לאורך זמן"/);

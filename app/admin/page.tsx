@@ -40,7 +40,13 @@ const SURVEY_TABS: Record<SurveyPage, string> = { preview: "תצוגה מקדי�
 // אתר התוכניות (GitHub Pages): הניהול שלו מוטמע כאן, עם כניסה משותפת.
 const PROGRAM_TABS: Record<ProgramTab, string> = { "prog-programs": "תוכניות", "prog-guests": "מגישים ואורחים", "prog-ads": "ניקוי פרסומות", "prog-site": "הודעה ועדכונים", "prog-polls": "סקרים", "prog-mail": "מייל למאזינים", "prog-listeners": "מאזינים", "prog-publish": "פרסום התוכניות" };
 const TITLES: Record<Tab, string> = { dashboard: "מרכז הניהול", survey: "אתר הסקר", ...SURVEY_TABS, ...PROGRAM_TABS, subscribers: "רשימת תפוצה", archives: "ארכיון וגיבויים", access: "הרשאות" };
-const TABS: Tab[] = ["dashboard", "survey", "preview", "surveys", "settings", "albums", "artists", "ivr", "results", "voters", "analytics", "prog-programs", "prog-guests", "prog-ads", "prog-site", "prog-polls", "prog-mail", "prog-listeners", "prog-publish", "subscribers", "archives", "access"];
+// התפריט מסודר לפי סוג העבודה, וכל החלקים גלויים תמיד: התוכן ופרסומו, הקשר עם המאזינים, ומה ששייך למערכת עצמה
+const NAV_GROUPS: { title: string; tabs: (ProgramTab | GeneralTab)[] }[] = [
+  { title: "תוכניות ופרסום", tabs: ["prog-programs", "prog-guests", "prog-ads", "prog-publish"] },
+  { title: "מאזינים וקהל", tabs: ["prog-listeners", "prog-site", "prog-polls", "prog-mail", "subscribers"] },
+  { title: "מערכת", tabs: ["archives", "access"] },
+];
+const TABS: Tab[] = ["dashboard", "survey", "preview", "surveys", "settings", "albums", "artists", "ivr", "results", "voters", "analytics", "prog-programs", "prog-guests", "prog-ads", "prog-publish", "prog-listeners", "prog-site", "prog-polls", "prog-mail", "subscribers", "archives", "access"];
 const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");
 const isSurveyTab = (tab: Tab): tab is SurveyTab => tab === "survey" || tab in SURVEY_TABS;
 // הלשונית הפתוחה נשמרת בכתובת (#prog-programs), כדי שקישור מאתר התוכניות ייפתח ישר בחלק הנכון
@@ -215,11 +221,11 @@ export default function AdminPage() {
   };
 
   return <main className="admin-shell" dir="rtl">
-    <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav>
+    <aside className="admin-side"><div className="vote-header"><img className="logo-mark" src="/favicon.svg" alt="ראש בראש" /><div><strong>ראש בראש</strong><small>מערכת ניהול</small></div></div><nav data-tour="nav-programs">
       <Nav active={tab === "dashboard"} onClick={() => setTab("dashboard")}>סקירה כללית</Nav>
       {surveyVisible && <div className={`nav-section${isSurveyTab(tab) ? " open" : ""}`} data-tour="nav-survey"><Nav className="nav-site" active={tab === "survey"} onClick={() => setTab("survey")}>אתר הסקר</Nav>{isSurveyTab(tab) && (Object.keys(SURVEY_TABS) as SurveyPage[]).map((key) => <Nav key={key} className="nav-sub" active={tab === key} onClick={() => setTab(key)}>{SURVEY_TABS[key]}</Nav>)}</div>}
-      <div className={`nav-section${isProgramTab(tab) ? " open" : ""}`} data-tour="nav-programs"><Nav className="nav-site" active={false} onClick={() => go("prog-programs")}>אתר התוכניות</Nav>{isProgramTab(tab) && <>{(Object.keys(PROGRAM_TABS) as ProgramTab[]).map((key) => <Nav key={key} className="nav-sub" active={tab === key} onClick={() => go(key)}>{PROGRAM_TABS[key]}</Nav>)}<button type="button" className="nav-tour" data-tour="tour-button" onClick={() => setTourMode("choose")}>🧭 סיור בניהול</button></>}</div>
-      <p className="nav-group">כללי</p><Nav active={tab === "subscribers"} onClick={() => setTab("subscribers")}>רשימת תפוצה</Nav><Nav active={tab === "archives"} onClick={() => setTab("archives")}>ארכיון וגיבויים</Nav><Nav active={tab === "access"} onClick={() => setTab("access")}>הרשאות</Nav><Link href="/">מעבר לאתר</Link>
+      {NAV_GROUPS.map((group) => <div key={group.title} className="nav-section"><p className="nav-group">{group.title}</p>{group.tabs.map((key) => <Nav key={key} active={tab === key} onClick={() => go(key)}>{TITLES[key]}</Nav>)}</div>)}
+      <button type="button" className="nav-tour" data-tour="tour-button" onClick={() => setTourMode("choose")}>🧭 סיור בניהול</button><Link href="/">מעבר לאתר</Link>
     </nav><button className="admin-logout" onClick={logout}>יציאה מהחשבון</button></aside>
     <section className="admin-main"><header><div><p className="kicker">שלום, {user.name}{isSurveyTab(tab) && data?.activeSurvey && <> · עורכים כעת: <b className="active-survey-tag">{data.activeSurvey.name}</b></>}</p><h1>{TITLES[tab]}{SECTION_TOURS[tab] && <button type="button" className="section-help" data-tour="section-help" onClick={() => setTourMode(`section:${tab}`)} title={`הסבר על ${SECTION_TITLES[tab]} — כל כפתור וכל שדה`}><i aria-hidden="true">?</i>הסבר</button>}</h1></div><button type="button" className="quick-search-open" onClick={() => setSearching(true)} title="חיפוש מהיר (Ctrl+K)"><span aria-hidden="true">🔍</span>חיפוש<kbd>Ctrl K</kbd></button><span>{user.picture && <img src={user.picture} alt="" />}<bdi dir="ltr">{user.email}</bdi></span></header>
       {isSurveyTab(tab) && <div className="stat-grid"><article><small>סה״כ הצבעות</small><b>{data?.votes.total ?? 0}</b></article><article><small>הצבעות באתר</small><b>{data?.votes.site ?? 0}</b></article><article><small>הצבעות בטלפון</small><b>{data?.votes.phone ?? 0}</b></article><article><small>מצב הסקר</small><b className="status-text">{data?.settings.votingOpen ? "פתוח" : "סגור"}</b></article></div>}
