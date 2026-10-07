@@ -19,7 +19,7 @@ import { AiCard, aiRun, ProofreadCard, summaryPatch, TranscribeAllCard } from ".
 import { ProgramsAds } from "./programs-ads";
 import { CommentsCard, commentsError, CountSettings, DeepStats, EpisodeTable, minutesText, PushCard } from "./programs-listeners";
 import { runJob, stopJob, useJob } from "./programs-jobs";
-import { GuestsSection } from "./programs-guests";
+import { GuestPicker, GuestsSection } from "./programs-guests";
 import { HostsSection } from "./programs-hosts";
 import { PollsSection } from "./programs-polls";
 import { UpdatesEditor } from "./programs-updates";
@@ -325,7 +325,7 @@ function Editor({ episode, live, pending, onPublishOne, data, surveys, onPatch, 
         <label><span>תאריך השידור</span><input type="date" value={episode.date} onChange={(e) => onPatch({ date: e.target.value })} /></label>
         <label><span>מספר התוכנית</span><input type="number" value={episode.number ?? ""} onChange={(e) => onPatch({ number: e.target.value === "" ? null : Number(e.target.value) })} /></label>
         <label><span>עונה</span><select value={episode.season} onChange={(e) => (e.target.value === "__new" ? newSeason() : onPatch({ season: e.target.value }))}><option value="">בלי עונה</option>{data.seasons.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}<option value="__new">+ עונה חדשה…</option></select></label>
-        <label data-tour="ed-guests"><span>אורחים</span><input value={episode.guests.join(", ")} placeholder="שמות, מופרדים בפסיק" onChange={(e) => onPatch({ guests: splitList(e.target.value) })} /></label>
+        <div className="prog-field" data-tour="ed-guests"><span>אורחים</span><GuestPicker value={episode.guests} data={data} ariaLabel="אורחים" onChange={(guests) => onPatch({ guests })} /><small>שם אחרי שם: בוחרים מכל האורחים שכבר בתוכניות, או מקלידים שם חדש ו־Enter. × מסיר.</small></div>
         <label className="wide" data-tour="ed-desc"><span>על התוכנית</span><textarea value={episode.description} placeholder="כמה משפטים על מה שהיה בתוכנית." onChange={(e) => onPatch({ description: e.target.value })} /></label>
         <label data-tour="ed-survey"><span>מקושרת למצעד (לא חובה)</span><select value={episode.surveyId} onChange={(e) => onPatch({ surveyId: e.target.value })}><option value="">בלי מצעד</option>{surveys.map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? " · הפעיל" : ""}{s.open ? " · ההצבעה פתוחה" : ""}</option>)}{episode.surveyId && !surveys.some((s) => s.id === episode.surveyId) && <option value={episode.surveyId}>מצעד שנמחק</option>}</select><small>דף התוכנית יציג קישור להצבעה כשהמצעד פתוח.</small></label>
         <label data-tour="ed-schedule"><span>פרסום מתוזמן (לא חובה)</span><input type="datetime-local" value={episode.publishAt} onChange={(e) => onPatch({ publishAt: e.target.value })} /><small>{episode.publishAt ? (scheduled(episode) ? `תופיע באתר ב־${when(episode.publishAt)}.` : "המועד עבר — מוצגת כרגיל.") : "ריק = מופיעה מיד אחרי הפרסום."}</small></label>

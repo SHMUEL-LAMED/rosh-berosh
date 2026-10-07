@@ -106,6 +106,40 @@ export function collectGuests(episodes, profiles = []) {
   return list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "he"));
 }
 
+/** ההשלמה בשדה "אורחים" של תוכנית: כל האורחים בקטלוג שעוד לא ברשימה של התוכנית (`chosen`),
+    מסוננים לפי מה שהוקלד — קודם מי שהשם שלו מתחיל בזה, אחר כך מי שמכיל אותו — ובלי הקלדה כולם,
+    הנפוצים קודם (הסדר של `collectGuests`). כל פריט: השם בכתיב הנפוץ, ובכמה תוכניות הוא מופיע. */
+export function guestOptions(episodes, profiles = [], chosen = [], query = "", limit = 50) {
+  const have = new Set((Array.isArray(chosen) ? chosen : []).map(guestKey).filter(Boolean));
+  const q = guestKey(query);
+  const starts = [], contains = [];
+  for (const guest of collectGuests(episodes, profiles)) {
+    if (have.has(guest.key)) continue;
+    const keys = [guest.key, ...guest.spellings.map(guestKey)];
+    if (!q) starts.push(guest);
+    else if (keys.some((key) => key.startsWith(q))) starts.push(guest);
+    else if (keys.some((key) => key.includes(q))) contains.push(guest);
+  }
+  return [...starts, ...contains].slice(0, Math.max(0, limit)).map((guest) => ({ name: guest.name, count: guest.count }));
+}
+
+/** הוספת שמות לרשימת האורחים של תוכנית — מהקלדה או מהדבקה (פסיק או שורה חדשה מפרידים בין שמות).
+    רווחים כפולים מתאחדים, שם ארוך נחתך, שם ריק או שכבר ברשימה (לפי `guestKey`) מדולג, ושם שכבר
+    מוכר בקטלוג (`known`: שמות) נכנס בכתיב המוכר — כך שאותו אורח לא נכתב בכל תוכנית אחרת.
+    מחזירה את אותו מערך כשאין מה להוסיף. */
+export function addGuests(list, text, known = []) {
+  const current = Array.isArray(list) ? list : [];
+  const spelling = new Map();
+  for (const name of Array.isArray(known) ? known : []) { const key = guestKey(name); if (key && !spelling.has(key)) spelling.set(key, String(name).replace(/\s+/g, " ").trim()); }
+  const next = [...current];
+  for (const raw of String(text ?? "").split(/[,،\n]/)) {
+    const name = raw.replace(/\s+/g, " ").trim().slice(0, GUEST_LIMITS.name), key = guestKey(name);
+    if (!key || next.some((g) => guestKey(g) === key)) continue;
+    next.push(spelling.get(key) || name);
+  }
+  return next.length === current.length ? current : next;
+}
+
 /** שינוי שם של אורח בכל התוכניות (או איחוד שני אורחים: `to` הוא שם של אורח קיים).
     אם בתוכנית כבר מופיע היעד, המקור פשוט יורד ממנה — בלי כפילות. */
 export function renameGuest(episodes, from, to) {
