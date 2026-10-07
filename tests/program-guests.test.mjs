@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { applyGuestSuggestions, collectGuests, guestKey, guestSuggestions, normalizeGuests, removeGuest, renameGuest, withPublishedPhotos } from "../worker/program-guests.js";
+import { addGuests, applyGuestSuggestions, collectGuests, guestKey, guestOptions, guestSuggestions, normalizeGuests, removeGuest, renameGuest, withPublishedPhotos } from "../worker/program-guests.js";
 
 /**
  * האורחים של אתר התוכניות: הכללים המשותפים (worker/program-guests.js), הפרופילים
@@ -100,6 +100,44 @@ test("renaming merges spellings and never duplicates a guest inside an episode",
   assert.equal(guests[0].name, "יואלי  קליין".replace(/\s+/g, " "));
   assert.equal(guests[0].count, 2);
   assert.ok(guests.find((g) => g.name === "בלי תוכניות" && g.count === 0), "a profile without episodes stays listed");
+});
+
+test("the episode's guest field offers every guest in the catalog, most frequent first, minus the ones already picked", () => {
+  const episodes = [
+    { id: "a", guests: ["יואלי קליין", "משה כהן"], panelists: [] },
+    { id: "b", guests: ["יואלי  קליין"], panelists: ["דוד לוי"] },
+    { id: "c", guests: ["יוֹאֵלִי קליין"], panelists: [] },
+  ];
+  // בלי הקלדה: כולם, הנפוצים קודם, כולל חברי פאנל
+  assert.deepEqual(guestOptions(episodes, [], [], ""), [{ name: "יואלי קליין", count: 3 }, { name: "דוד לוי", count: 1 }, { name: "משה כהן", count: 1 }]);
+  // מי שכבר בתוכנית לא מוצע שוב — גם בכתיב אחר
+  assert.deepEqual(guestOptions(episodes, [], ["יואלי  קליין"], ""), [{ name: "דוד לוי", count: 1 }, { name: "משה כהן", count: 1 }]);
+  // הקלדה מסננת: תחילת השם קודם, אחר כך מי שמכיל; ניקוד ורווחים לא מפריעים
+  assert.deepEqual(guestOptions(episodes, [], [], "יו").map((o) => o.name), ["יואלי קליין"]);
+  assert.deepEqual(guestOptions(episodes, [], [], "לוי").map((o) => o.name), ["דוד לוי"]);
+  assert.deepEqual(guestOptions(episodes, [], [], "כהן").map((o) => o.name), ["משה כהן"]);
+  assert.deepEqual(guestOptions(episodes, [], [], "אין כזה"), []);
+  // הכתיב שבפרופיל (אותו אורח) גובר על הכתיב הנפוץ בתוכניות, והמגבלה נשמרת
+  assert.deepEqual(guestOptions(episodes, [{ name: "יוֹאֵלִי קליין", role: "זמר" }], [], "").slice(0, 1), [{ name: "יוֹאֵלִי קליין", count: 3 }]);
+  assert.equal(guestOptions(episodes, [], [], "", 2).length, 2);
+});
+
+test("adding guests to an episode: one at a time or a pasted list, no duplicates, in the spelling the catalog already knows", () => {
+  const known = ["יואלי קליין", "דוד לוי"];
+  // שם אחד שהוקלד — נכנס בסוף, רווחים כפולים מתאחדים
+  assert.deepEqual(addGuests(["משה כהן"], "  אברהם   פריד ", known), ["משה כהן", "אברהם פריד"]);
+  // הדבקה של רשימה: פסיק (גם ערבי) ושורה חדשה מפרידים; ריקים נזרקים
+  assert.deepEqual(addGuests([], "א, ב،ג\n ד ,, ", known), ["א", "ב", "ג", "ד"]);
+  // כפילות לפי המפתח: גם מול הרשימה הקיימת וגם בתוך ההדבקה עצמה
+  assert.deepEqual(addGuests(["משה כהן"], "משה  כהן, מֹשֶׁה כהן, חדש, חדש", known), ["משה כהן", "חדש"]);
+  // אורח שכבר מוכר בקטלוג נכנס בכתיב המוכר
+  assert.deepEqual(addGuests([], "יואלי  קליין, דוד לוי", known), ["יואלי קליין", "דוד לוי"]);
+  // שם ארוך מדי נחתך למגבלה
+  assert.equal(addGuests([], "א".repeat(200), known)[0].length, 80);
+  // אין מה להוסיף — אותו מערך בדיוק (העורך לא מסמן שינוי)
+  const same = ["משה כהן"];
+  assert.equal(addGuests(same, " , ", known), same);
+  assert.equal(addGuests(same, "משה כהן", known), same);
 });
 
 test("suggestions skip names already present, reuse known spellings and doubt hosts", () => {

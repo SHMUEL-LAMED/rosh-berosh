@@ -5,10 +5,12 @@
    נוסף), הוספה לתוכנית, והשלמת אורחים מהסיכומים של התמלולים. באתר אין דף אורח: השמות בדפי
    התוכניות מובילים לארכיון המסונן לפי האדם (archive.html?guest=…). תמונה, כמה מילים וקישורים
    שנשמרו בעבר בפרופיל נשארים בנתונים (settings.guests) אבל אינם נערכים כאן ואינם מוצגים.
-   הכול נכנס לטיוטה, ולאתר רק בפרסום — כמו שאר ניהול התוכניות. הכללים ב־worker/program-guests.js. */
+   הכול נכנס לטיוטה, ולאתר רק בפרסום — כמו שאר ניהול התוכניות. הכללים ב־worker/program-guests.js.
+   כאן גם `GuestPicker` — שדה האורחים שבעורך התוכנית: שם־שם, עם הצעות מכל האורחים בקטלוג. */
 
-import { useMemo, useState } from "react";
-import { applyGuestSuggestions, collectGuests, guestKey, guestSuggestions, removeGuest, renameGuest } from "../../worker/program-guests.js";
+import { useId, useMemo, useRef, useState } from "react";
+import type { ClipboardEvent, KeyboardEvent } from "react";
+import { addGuests, applyGuestSuggestions, collectGuests, guestKey, guestOptions, guestSuggestions, removeGuest, renameGuest } from "../../worker/program-guests.js";
 import { api, errorText, label, PROGRAM_SITE, type Catalog, type Episode, type GuestProfile } from "./programs-core";
 import { runJob, stopJob, useJob } from "./programs-jobs";
 import { Section, Status } from "./programs-ui";
@@ -49,6 +51,73 @@ export function GuestsSection({ data, mutate, onMessage }: { data: Catalog; muta
       </div>
     </div>
   </>;
+}
+
+/* ---------- שדה האורחים בעורך התוכנית ---------- */
+
+type GuestOption = { name: string; count: number };
+type Row = { kind: "known" | "new"; name: string; count: number };
+
+/** האורחים של תוכנית, שם אחרי שם: כל שם הוא תגית עם × להסרה, ובכניסה לשדה נפתחת רשימה של כל
+    האורחים שכבר בקטלוג (הנפוצים קודם; הקלדה מסננת). Enter או פסיק מוסיפים את מה שהוקלד — גם שם
+    שעוד לא מוכר — ובכתיב המוכר אם האורח כבר קיים בכתיב אחר. חיצים בוחרים מהרשימה, הדבקה של
+    "א, ב, ג" מוסיפה את כולם, ו־Backspace בשדה ריק מסיר את האחרון. יציאה מהשדה שומרת שם שהוקלד
+    ולא אושר, כדי שלא יאבד. */
+export function GuestPicker({ value, data, onChange, ariaLabel, limit = 20 }: { value: string[]; data: Catalog; onChange(next: string[]): void; ariaLabel: string; limit?: number }) {
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1); // -1: אף שורה לא מסומנת (Enter אז מוסיף רק את מה שהוקלד)
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const known = useMemo(() => (collectGuests(data.episodes, data.settings.guests) as Guest[]).map((g) => g.name), [data.episodes, data.settings.guests]);
+  const options = useMemo(() => guestOptions(data.episodes, data.settings.guests, value, text) as GuestOption[], [data.episodes, data.settings.guests, value, text]);
+  const typed = text.replace(/\s+/g, " ").trim();
+  const typedKey = guestKey(typed);
+  const already = !!typedKey && value.some((g) => guestKey(g) === typedKey);
+  // "+ הוספת „X”" — רק לשם שעוד אינו ברשימה ואינו אחד מהמוצעים (בכל כתיב)
+  const canAddNew = !!typedKey && !already && !options.some((o) => guestKey(o.name) === typedKey);
+  const rows: Row[] = [...options.map((o): Row => ({ kind: "known", ...o })), ...(canAddNew ? [{ kind: "new", name: typed, count: 0 } as Row] : [])];
+  const activeIndex = active < 0 ? -1 : Math.min(active, rows.length - 1);
+  const full = value.length >= limit;
+
+  const add = (raw: string) => {
+    if (!full) { const next = addGuests(value, raw, known) as string[]; if (next !== value) onChange(next.slice(0, limit)); }
+    setText(""); setActive(-1);
+  };
+  const removeAt = (index: number) => { onChange(value.filter((_, i) => i !== index)); inputRef.current?.focus(); };
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rows.length) {
+      e.preventDefault(); setOpen(true);
+      setActive(e.key === "ArrowDown" ? (activeIndex + 1) % rows.length : activeIndex <= 0 ? rows.length - 1 : activeIndex - 1);
+    } else if (e.key === "Enter") {
+      e.preventDefault(); // לא שולחים טופס
+      if (open && activeIndex >= 0 && rows[activeIndex]) add(rows[activeIndex].name); else if (typed) add(typed);
+    } else if (e.key === "," || e.key === "،") { e.preventDefault(); if (typed) add(typed); }
+    else if (e.key === "Escape") setOpen(false);
+    else if (e.key === "Backspace" && !text && value.length) onChange(value.slice(0, -1));
+  };
+  const onPaste = (e: ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData("text");
+    if (!/[,،\n]/.test(pasted)) return; // שם אחד — נכנס לשדה כרגיל
+    e.preventDefault(); add(text + pasted);
+  };
+
+  return <div className="prog-tags" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setOpen(false); if (typed) add(typed); } }}>
+    <div className="prog-tags-box" onClick={() => inputRef.current?.focus()}>
+      {value.map((name, i) => <span key={`${name}-${i}`} className="prog-tag"><span>{name}</span><button type="button" className="prog-tag-x" aria-label={`הסרת ${name}`} title="הסרה מהתוכנית" onClick={(e) => { e.stopPropagation(); removeAt(i); }}>×</button></span>)}
+      <input ref={inputRef} value={text} disabled={full} placeholder={full ? `עד ${limit} אורחים בתוכנית` : value.length ? "+ עוד אורח…" : "הקלידו שם, או בחרו מהרשימה"} aria-label={ariaLabel} role="combobox" aria-expanded={open && rows.length > 0} aria-controls={listId} aria-autocomplete="list" aria-activedescendant={open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined} autoComplete="off"
+        onFocus={() => setOpen(true)} onChange={(e) => { setText(e.target.value); setOpen(true); setActive(e.target.value.trim() ? 0 : -1); }} onKeyDown={onKeyDown} onPaste={onPaste} />
+    </div>
+    {open && !full && (rows.length > 0 || already) && <ul id={listId} className="prog-tags-menu" role="listbox" aria-label="הצעות לאורחים">
+      {!typed && <li className="hint" role="presentation">כל האורחים שכבר בתוכניות, הנפוצים קודם. הקלדה מסננת; שם חדש — Enter.</li>}
+      {rows.map((row, i) => <li key={`${row.kind}-${row.name}`} id={`${listId}-${i}`} role="option" aria-selected={i === activeIndex} className={[i === activeIndex ? "active" : "", row.kind === "new" ? "new" : ""].filter(Boolean).join(" ") || undefined}
+        onMouseDown={(e) => e.preventDefault()} onMouseMove={() => setActive(i)} onClick={() => add(row.name)}>
+        <span>{row.kind === "new" ? `+ הוספת „${row.name}” — אורח חדש` : row.name}</span>
+        {row.kind === "known" && <small>{row.count === 1 ? "תוכנית אחת" : `${row.count} תוכניות`}</small>}
+      </li>)}
+      {already && !rows.length && <li className="hint" role="presentation">„{typed}” כבר ברשימה.</li>}
+    </ul>}
+  </div>;
 }
 
 /* ---------- עורך אורח ---------- */
