@@ -14,6 +14,9 @@ import systemPrompts from "../../ivr-service/src/ivr-system-prompts.json";
 import { PhonePreview } from "./phone-preview";
 import { IvrLineSettings } from "./ivr-line-settings";
 import { openEpisode, ProgramsAdmin, type ProgramSection } from "./programs-admin";
+import { streamUrl, type Episode } from "./programs-core";
+import { usePlayer } from "../player-context";
+import { savedListenPosition } from "../listen-position";
 import { InboxBoard, QuickSearch, useInbox, type SearchItem } from "./admin-home";
 import { AdminTour, FULL_TOUR, markTourSeen, SECTION_TITLES, SECTION_TOURS, SHORT_TOUR, sectionTour, TourChooser, tourSeen } from "./admin-tour";
 
@@ -50,7 +53,19 @@ const TABS: Tab[] = ["dashboard", "survey", "preview", "surveys", "settings", "a
 const isProgramTab = (tab: Tab): tab is ProgramTab => tab.startsWith("prog-");
 const isSurveyTab = (tab: Tab): tab is SurveyTab => tab === "survey" || tab in SURVEY_TABS;
 // הלשונית הפתוחה נשמרת בכתובת (#prog-programs), כדי שקישור מאתר התוכניות ייפתח ישר בחלק הנכון
-const tabFromHash = (): Tab => { if (typeof window === "undefined") return "dashboard"; const value = window.location.hash.slice(1) as Tab; return TABS.includes(value) ? value : "dashboard"; };
+// אחרי הלשונית יכולים לבוא פרטים נוספים (#prog-programs&resume=<תוכנית>&t=<שנייה>): האזנה שממשיכה מאתר התוכניות
+const tabFromHash = (): Tab => { if (typeof window === "undefined") return "dashboard"; const value = window.location.hash.slice(1).split("&")[0] as Tab; return TABS.includes(value) ? value : "dashboard"; };
+/** מה הקישור מאתר התוכניות ביקש להמשיך לנגן — נקרא פעם אחת, ואז מוסר מהכתובת */
+function resumeFromHash(): { id: string; t: number } | null {
+  if (typeof window === "undefined") return null;
+  const parts = window.location.hash.slice(1).split("&").slice(1);
+  if (!parts.length) return null;
+  const params = new URLSearchParams(parts.join("&"));
+  const id = (params.get("resume") || "").trim();
+  if (!/^[\w-]{1,80}$/.test(id)) return null;
+  const t = Math.max(0, Math.floor(Number(params.get("t")) || 0));
+  return { id, t };
+}
 type Voter = { id: string; voterKey: string; voterName?: string; voterEmail?: string; channel: string; fingerprint?: string; createdAt: number; albums: string[]; songs: { title: string; albumTitle: string }[]; artists: string[] };
 
 const SYSTEM_PROMPTS = systemPrompts;
@@ -69,6 +84,28 @@ export default function AdminPage() {
   const go = useCallback((next: Tab) => { if (isProgramTab(next)) setProgramsOpened(true); setTab(next); }, []);
   useEffect(() => { const onHash = () => go(tabFromHash()); window.addEventListener("hashchange", onHash); return () => window.removeEventListener("hashchange", onHash); }, [go]);
   const { notify } = useNotice();
+  const { play: playEpisode } = usePlayer();
+  // הגיעו מאתר התוכניות באמצע האזנה: הנגן של הדף הזה ממשיך את אותה הקלטה מאותה נקודה, בכל חלקי הניהול
+  useEffect(() => {
+    const wanted = resumeFromHash();
+    if (!wanted) return;
+    window.history.replaceState(null, "", `#${tabFromHash()}`);
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/program/catalog", { cache: "no-store", credentials: "same-origin" });
+        const body = await response.json().catch(() => ({}));
+        const episode = (Array.isArray(body?.episodes) ? (body.episodes as Episode[]) : []).find((e) => e.id === wanted.id);
+        const audio = episode ? streamUrl(episode) : "";
+        if (cancelled || !episode || !audio) return;
+        // הקישור נושא את השנייה שבה עצרו; בלעדיה — המיקום השמור בחשבון
+        const t = wanted.t || (await savedListenPosition(episode.id))?.t || 0;
+        if (cancelled) return;
+        playEpisode({ id: `episode:${episode.id}`, albumId: "program", title: episode.title, audioUrl: audio, coverUrl: episode.thumb || episode.cover || null, previewStart: t, episodeId: episode.id, duration: Number(episode.duration) || 0 });
+      } catch { /* בלי קטלוג — אין מה להמשיך; הניהול עובד כרגיל */ }
+    })();
+    return () => { cancelled = true; };
+  }, [playEpisode]);
   const [uploading, setUploading] = useState(false);
   const [albumOrderOverride, setAlbumOrder] = useState<Album[] | null>(null);
   const [artistOrderOverride, setArtistOrder] = useState<Artist[] | null>(null);
