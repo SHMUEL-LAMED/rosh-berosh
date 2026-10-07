@@ -14,6 +14,7 @@ declare global {
         cancel_on_tap_outside?: boolean;
         context?: "signin" | "signup" | "use";
         use_fedcm_for_prompt?: boolean;
+        use_fedcm_for_button?: boolean;
       }): void;
       renderButton(element: HTMLElement, options: Record<string, unknown>): void;
       prompt(): void;
@@ -44,6 +45,10 @@ export function LoginScreen() {
           cancel_on_tap_outside: false,
           context: "signin",
           use_fedcm_for_prompt: true,
+          // הלחיצה על כפתור Google פותחת את חלון בחירת החשבון של הדפדפן עצמו (FedCM):
+          // "כניסה אל האתר באמצעות google.com — בחירת חשבון להמשך", עם "שימוש בחשבון אחר"
+          // ו"ביטול" — במקום חלון קופץ נפרד. דפדפן בלי FedCM חוזר לבד לחלון הקופץ.
+          use_fedcm_for_button: true,
           callback: async ({ credential }) => {
             setError("");
             const response = await fetch("/api/auth/google", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ credential }) });
