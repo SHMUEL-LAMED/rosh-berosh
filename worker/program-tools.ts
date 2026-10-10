@@ -12,6 +12,7 @@ import { loadEpisode } from "./program-audio";
 import { draftWithPolls, normalizePolls, publicPolls } from "./program-polls";
 import { normalizeGuests, withPublishedPhotos } from "./program-guests.js";
 import { normalizeHosts, publicHosts } from "./program-hosts.js";
+import { normalizePopups, publicPopups } from "./program-popups.js";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string };
 type Helpers = {
@@ -143,11 +144,11 @@ export async function activeSurveyStatus(env: Env, origin: string) {
 /** מה מתפרסם לציבור יחד עם הקטלוג. הסקרים: לציבור רק הפעילים שכבר התחילו; מנהלים (includeHidden) — כולם. */
 export async function publicSettings(env: Env, origin = "", includeHidden = false) {
   const [rows, survey] = await Promise.all([
-    env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates','contacts','polls','guests','hosts')").all<{ key: string; value_json: string }>(),
+    env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('banner','updates','contacts','polls','guests','hosts','popups')").all<{ key: string; value_json: string }>(),
     activeSurveyStatus(env, origin),
   ]);
   const values = new Map(rows.results.map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
-  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), contacts: normalizeContacts(values.get("contacts")), polls: publicPolls(normalizePolls(values.get("polls")), includeHidden), guests: normalizeGuests(values.get("guests")), hosts: publicHosts(values.get("hosts")), survey };
+  return { banner: normalizeBanner(values.get("banner")), updates: normalizeUpdates(values.get("updates")), contacts: normalizeContacts(values.get("contacts")), polls: publicPolls(normalizePolls(values.get("polls")), includeHidden), guests: normalizeGuests(values.get("guests")), hosts: publicHosts(values.get("hosts")), popups: publicPopups(normalizePopups(values.get("popups")), includeHidden, israelWallClock(Date.now())), survey };
 }
 
 /** טיוטה שאינה מכירה תמונות פרופיל שכבר באתר — נשמרה לפני שנוספו, או מלשונית שנפתחה לפני כן — מוחזרת
@@ -166,6 +167,7 @@ export function settingsStatements(env: Env, raw: unknown) {
   if ("polls" in settings) statements.push(settingStatement(env, "polls", normalizePolls(settings.polls)));
   if ("guests" in settings) statements.push(settingStatement(env, "guests", normalizeGuests(settings.guests)));
   // רשימת מגישים שנשלחה (גם ריקה — "בלי מגישים באתר") נשמרת; שדה שאינו מערך לא משנה כלום
+  if ("popups" in settings && Array.isArray(settings.popups)) statements.push(settingStatement(env, "popups", normalizePopups(settings.popups)));
   if ("hosts" in settings && Array.isArray(settings.hosts)) statements.push(settingStatement(env, "hosts", normalizeHosts(settings.hosts)));
   return statements;
 }

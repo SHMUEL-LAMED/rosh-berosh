@@ -260,9 +260,9 @@ async function partialSnapshot(env: Env, current: Array<{ id: string; data_json:
   });
   episodes.push(...upserts);
   episodes.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (Number(b.number) || 0) - (Number(a.number) || 0));
-  const rows = (await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('seasons','banner','updates','contacts','polls','guests','hosts')").all<{ key: string; value_json: string }>()).results;
+  const rows = (await env.DB.prepare("SELECT key,value_json FROM program_settings WHERE key IN ('seasons','banner','updates','contacts','polls','guests','hosts','popups')").all<{ key: string; value_json: string }>()).results;
   const saved = new Map(rows.map((row) => { try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; } }));
-  const settings = Object.fromEntries(["banner", "updates", "contacts", "polls", "guests", "hosts"].filter((key) => saved.has(key)).map((key) => [key, saved.get(key)]));
+  const settings = Object.fromEntries(["banner", "updates", "contacts", "polls", "guests", "hosts", "popups"].filter((key) => saved.has(key)).map((key) => [key, saved.get(key)]));
   return { seasons: Array.isArray(seasons) ? seasons : (saved.get("seasons") || []), episodes, settings };
 }
 
