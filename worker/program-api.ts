@@ -12,7 +12,8 @@ import { backfillProgramPeople, correctProgramPeople, PEOPLE_MARKERS } from "./p
 import { siteBuildState, triggerSiteBuild, type SiteBuildEnv } from "./program-site-build";
 
 type Env = { DB: D1Database; MEDIA: R2Bucket; ADMIN_EMAILS?: string; AI?: AiBinding; ANTHROPIC_API_KEY?: string } & SiteBuildEnv;
-const ORIGIN = "https://shmuel-lamed.github.io";
+// אתר התוכניות: הדומיין שלו, והכתובת הישנה ב־GitHub Pages (עדיין עובדת ומפנה לדומיין)
+export const PROGRAM_ORIGINS = ["https://xn--4dbjbascrao3i.com", "https://www.xn--4dbjbascrao3i.com", "https://shmuel-lamed.github.io"];
 // גבולות ההעלאה — אותם גבולות בהעלאה הרגילה ובהעלאה בחלקים (R2 multipart):
 // הקלטה עד 1GB, עטיפה עד 15MB.
 const UPLOAD_LIMITS = { audio: 1024 * 1024 * 1024, cover: 15 * 1024 * 1024, file: 200 * 1024 * 1024 } as const;
@@ -131,9 +132,9 @@ async function r2AudioResponse(request: Request, env: Env, key: string, disposit
 
 export function cors(request: Request, response: Response): Response {
   const origin = request.headers.get("origin");
-  if (origin === ORIGIN) {
+  if (origin && PROGRAM_ORIGINS.includes(origin)) {
     const headers = new Headers(response.headers);
-    headers.set("access-control-allow-origin", ORIGIN);
+    headers.set("access-control-allow-origin", origin);
     headers.set("access-control-allow-headers", "authorization,content-type,range");
     headers.set("access-control-allow-methods", "GET,HEAD,POST,PUT,DELETE,OPTIONS");
     headers.set("access-control-expose-headers", "content-length,content-range,accept-ranges,content-disposition");
@@ -153,9 +154,9 @@ const LOGIN_STYLE = "body{margin:0;min-height:100vh;display:grid;place-items:cen
 
 // Runs inside the login window. `known` (the voting-site session seen by the
 // server, or null) is defined by the page before this script.
-const LOGIN_SCRIPT = `const target=${JSON.stringify(ORIGIN)};const out=document.getElementById('status');
+const LOGIN_SCRIPT = `const targets=${JSON.stringify(PROGRAM_ORIGINS)};const out=document.getElementById('status');
 const fail=(message)=>{out.className='error';out.textContent=message};
-const deliver=(data)=>{if(!window.opener){fail('החלון הזה לא נפתח מאתר התוכניות. סגרו אותו ולחצו שם על "התחברות".');return}window.opener.postMessage({type:'rosh-program-auth',...data},target);out.className='';out.textContent='התחברתם. אפשר לסגור את החלון.';setTimeout(()=>window.close(),500)};
+const deliver=(data)=>{if(!window.opener){fail('החלון הזה לא נפתח מאתר התוכניות. סגרו אותו ולחצו שם על "התחברות".');return}for(const target of targets)window.opener.postMessage({type:'rosh-program-auth',...data},target);out.className='';out.textContent='התחברתם. אפשר לסגור את החלון.';setTimeout(()=>window.close(),500)};
 const exchange=async(url,body)=>{const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'הכניסה נכשלה.');return data};
 const showGoogle=()=>{if(!window.google){fail('כפתור Google לא נטען. רעננו את החלון ונסו שוב.');return}google.accounts.id.initialize({client_id:${JSON.stringify(GOOGLE_CLIENT_ID)},callback:async({credential})=>{out.className='';out.textContent='בודקים הרשאה…';try{deliver(await exchange('/api/program/auth/google',{credential}))}catch(e){fail(e.message)}}});google.accounts.id.renderButton(document.getElementById('google'),{theme:'filled_blue',size:'large',shape:'pill',text:'continue_with',locale:'he',width:280})};
 window.onload=async()=>{if(known){out.textContent=known.isAdmin?'מעבירים אתכם לניהול התוכניות…':'מעבירים אתכם לאזור האישי…';try{return deliver(await exchange('/api/program/auth/session'))}catch(e){fail(e.message)}}showGoogle()};`;
@@ -229,7 +230,7 @@ function duplicateSlug(current: Array<{ id: string; slug: string }>, removed: Se
   return "";
 }
 
-/** מספר התוכנית: ריק, null או ערך שאינו מספר נשמרים כ־null — לא כ־0. */
+/** מספר התוכנית: ריק, null או ערך שאינו מספר נשמרים כ־en null — לא כ־0. */
 function episodeNumber(value: unknown): number | null {
   if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return null;
   const number = Number(value);
