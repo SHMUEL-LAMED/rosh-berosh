@@ -24,6 +24,9 @@ type Helpers = {
 export const PUBLIC_SETTING_KEYS = ["banner", "updates", "contacts"] as const;
 /** כתובת אתר התוכניות (GitHub Pages) — יעד המעבר מניהול הסקר. */
 export const PROGRAM_SITE = "https://shmuel-lamed.github.io/rosh-berosh-2/";
+/** כל הכתובות של אתר התוכניות: הדומיין, ו־GitHub Pages הישן (מפנה לדומיין) */
+export const PROGRAM_SITES = ["https://xn--4dbjbascrao3i.com/", "https://www.xn--4dbjbascrao3i.com/", "https://shmuel-lamed.github.io/rosh-berosh-2/"];
+const PROGRAM_HOSTS = PROGRAM_SITES.map((site) => new URL(site).hostname);
 const HANDOFF_TTL = 180;
 export const VERSIONS_KEPT = 40;
 const MAX_TEXT = 4000;
@@ -231,7 +234,7 @@ export function downloadRef(param: string | null, referer: string | null) {
   let host = "";
   try { host = referer ? new URL(referer).hostname : ""; } catch { /* בלי מקור */ }
   if (!host) return "direct";
-  if (host === new URL(PROGRAM_SITE).hostname) return "internal";
+  if (PROGRAM_HOSTS.includes(host)) return "internal";
   if (/(^|\.)mail\.|outlook\.|(^|\.)live\.com$/.test(host)) return "email";
   if (/whatsapp|wa\.me/.test(host)) return "whatsapp";
   if (/facebook|fb\.com/.test(host)) return "facebook";
@@ -335,7 +338,7 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
      רגיל, שבו עוגיית אתר הסקר נשלחת): מי שמחובר כאן חוזר עם קוד מעבר, ומי
      שלא — חוזר עם sso=none. רק כתובות של אתר התוכניות מותרות כיעד חזרה. */
   const programReturn = (value: string | null) => {
-    try { const target = new URL(String(value || "")); const home = new URL(PROGRAM_SITE); return target.origin === home.origin && target.pathname.startsWith(home.pathname) ? target : null; }
+    try { const target = new URL(String(value || "")); return PROGRAM_SITES.some((site) => { const home = new URL(site); return target.origin === home.origin && target.pathname.startsWith(home.pathname); }) ? target : null; }
     catch { return null; }
   };
   if (path === "/sso" && method === "GET") {
@@ -646,7 +649,7 @@ export async function programToolsApi(request: Request, env: Env, h: Helpers): P
     } else {
       await env.DB.prepare("DELETE FROM program_likes WHERE user_sub=? AND episode_id=?").bind(user.sub, episodeId).run();
     }
-    // כמה אהבו — רק למנהלים, כמו ב־GET; מאזין מקבל רק את הסימון שלו
+    // כמה אהבו — רק למנהלים, כמו ב־ GET; מאזין מקבל רק את הסימון שלו
     if (!user.isAdmin) return h.reply(request, { ok: true, liked });
     const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM program_likes WHERE episode_id=?").bind(episodeId).first<{ total: number }>();
     return h.reply(request, { ok: true, liked, count: Number(count?.total || 0) });
