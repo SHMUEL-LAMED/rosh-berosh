@@ -16,10 +16,18 @@ type AuthEnv = { DB?: D1Database; MEDIA?: R2Bucket; ADMIN_EMAILS?: string; AI_AD
     רק בנתיבים של אתר התוכניות (`/api/program/…`), ולא בניהול של אתר הסקר, שבו גם
     רשימת המנהלים. בלי הסוד מוגדר, הכניסה הזו סגורה. מחליפים או מוחקים את הסוד כדי לנתק את הכלי. */
 export const AI_ADMIN_USER = { sub: "ai-admin-key", email: "ai-tool@rosh-berosh.invalid", name: "כלי בינה מלאכותית" } as const;
+/** נתיבים של אתר התוכניות שהמפתח לא פותח: רשימת המנהלים (המשותפת לאתר הסקר), וקודי
+    המעבר שמהם נוצר סשן באתר הסקר (`handoff…` ו־`sso`). מי שמציג שם את המפתח אינו מחובר. */
+const AI_ADMIN_DENIED = ["/api/program/admins", "/api/program/handoff", "/api/program/sso"];
+function aiAdminDenied(pathname: string): boolean {
+  if (pathname.startsWith("/api/program/handoff")) return true;
+  return AI_ADMIN_DENIED.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
 async function aiAdminUser(request: Request, env: AuthEnv | undefined, bearer: string | undefined): Promise<SessionUser | null> {
   const key = String(env?.AI_ADMIN_KEY || "");
   if (!bearer || key.length < 32) return null;
-  if (!new URL(request.url).pathname.startsWith("/api/program/")) return null;
+  const { pathname } = new URL(request.url);
+  if (!pathname.startsWith("/api/program/") || aiAdminDenied(pathname)) return null;
   // ההשוואה על הגיבוב ולא על המפתח עצמו, כדי שזמן התשובה לא יסגיר כמה ממנו נכון
   if ((await hashToken(bearer)) !== (await hashToken(key))) return null;
   return { ...AI_ADMIN_USER, isAdmin: true, exp: Math.floor(Date.now() / 1000) + 3600 };

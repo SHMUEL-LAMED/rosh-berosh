@@ -84,3 +84,33 @@ test("the AI key does not open the voting site's administration", async () => {
   const response = await get(worker, env, "/api/admin/overview", KEY);
   assert.ok([401, 403].includes(response.status), `status ${response.status}`);
 });
+
+test("the AI key opens neither the administrators list nor a way into the voting site", async () => {
+  const { worker, env } = await setup({ AI_ADMIN_KEY: KEY });
+  const send = (path, method, body) => worker.fetch(new Request(`http://localhost${path}`, {
+    method,
+    redirect: "manual",
+    headers: { authorization: `Bearer ${KEY}`, ...(body ? { "content-type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  }), env, ctx);
+  const denied = async (path, method, body) => {
+    const response = await send(path, method, body);
+    assert.ok([401, 403].includes(response.status), `${method} ${path}: status ${response.status}`);
+  };
+  await denied("/api/program/admins", "GET");
+  await denied("/api/program/admins", "POST", { email: "intruder@example.com" });
+  await denied("/api/program/admins", "DELETE", { email: "admin@example.com" });
+  await denied("/api/program/handoff", "POST");
+
+  // ניווטים של דף שלם: בלי חיבור הם מפנים הלאה בלי קוד מעבר
+  const toPrograms = await send("/api/program/handoff/to-programs", "GET");
+  assert.equal(toPrograms.status, 302);
+  assert.ok(!String(toPrograms.headers.get("location")).includes("handoff="), toPrograms.headers.get("location"));
+  const sso = await send(`/api/program/sso?return=${encodeURIComponent("https://shmuel-lamed.github.io/rosh-berosh-2/")}`, "GET");
+  assert.equal(sso.status, 302);
+  assert.equal(new URL(sso.headers.get("location")).searchParams.get("sso"), "none");
+
+  const me = await get(worker, env, "/api/program/me", KEY);
+  assert.equal(me.status, 200);
+  assert.equal((await me.json()).user.isAdmin, true);
+});
