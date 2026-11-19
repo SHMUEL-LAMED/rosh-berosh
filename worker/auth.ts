@@ -9,7 +9,29 @@ export type SessionUser = {
   exp: number;
 };
 
-type AuthEnv = { DB?: D1Database; MEDIA?: R2Bucket; ADMIN_EMAILS?: string };
+type AuthEnv = { DB?: D1Database; MEDIA?: R2Bucket; ADMIN_EMAILS?: string; AI_ADMIN_KEY?: string };
+
+/** כלי בינה מלאכותית שמנהל את אתר התוכניות: מי שמציג את המפתח הסודי `AI_ADMIN_KEY`
+    (סוד של ה־Worker, לפחות 32 תווים) בכותרת `Authorization: Bearer` מקבל הרשאת מנהל —
+    רק בנתיבים של אתר התוכניות (`/api/program/…`), ולא בניהול של אתר הסקר, שבו גם
+    רשימת המנהלים. בלי הסוד מוגדר, הכניסה הזו סגורה. מחליפים או מוחקים את הסוד כדי לנתק את הכלי. */
+export const AI_ADMIN_USER = { sub: "ai-admin-key", email: "ai-tool@rosh-berosh.invalid", name: "כלי בינה מלאכותית" } as const;
+/** נתיבים של אתר התוכניות שהמפתח לא פותח: רשימת המנהלים (המשותפת לאתר הסקר), וקודי
+    המעבר שמהם נוצר סשן באתר הסקר (`handoff…` ו־`sso`). מי שמציג שם את המפתח אינו מחובר. */
+const AI_ADMIN_DENIED = ["/api/program/admins", "/api/program/handoff", "/api/program/sso"];
+function aiAdminDenied(pathname: string): boolean {
+  if (pathname.startsWith("/api/program/handoff")) return true;
+  return AI_ADMIN_DENIED.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+async function aiAdminUser(request: Request, env: AuthEnv | undefined, bearer: string | undefined): Promise<SessionUser | null> {
+  const key = String(env?.AI_ADMIN_KEY || "");
+  if (!bearer || key.length < 32) return null;
+  const { pathname } = new URL(request.url);
+  if (!pathname.startsWith("/api/program/") || aiAdminDenied(pathname)) return null;
+  // ההשוואה על הגיבוב ולא על המפתח עצמו, כדי שזמן התשובה לא יסגיר כמה ממנו נכון
+  if ((await hashToken(bearer)) !== (await hashToken(key))) return null;
+  return { ...AI_ADMIN_USER, isAdmin: true, exp: Math.floor(Date.now() / 1000) + 3600 };
+}
 const ADMIN_LIST_KEY = "settings/admin-emails.json";
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 
@@ -94,6 +116,8 @@ export async function readSession(request: Request, env?: AuthEnv): Promise<Sess
   const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
   const token = bearer || cookie?.slice("rosh_session=".length);
   if (!token) return null;
+  const aiTool = await aiAdminUser(request, env, bearer);
+  if (aiTool) return aiTool;
   if (env?.DB && !token.includes(".")) {
     try {
       const tokenHash = await hashToken(token);
